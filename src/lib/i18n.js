@@ -87,7 +87,27 @@ export function fmtSar(n, lang = 'en', { short = false } = {}) {
   return `${Math.round(v).toLocaleString('en-US')} ${unit}`
 }
 
-export { arDays, arHours } from './arabic'
+import { arDays, arHours } from './arabic'
+
+export { arDays, arHours }
+
+/** "5m ago" / "منذ 5 دقائق": lib/utils timeAgo in either language. */
+export function ago(iso, lang = 'en') {
+  const mins = Math.max(0, Math.floor((Date.now() - Date.parse(iso || '')) / 60_000))
+  if (!Number.isFinite(mins)) return ''
+  if (lang !== 'ar') {
+    if (mins < 1) return 'just now'
+    if (mins < 60) return `${mins}m ago`
+    const h = Math.floor(mins / 60)
+    return h < 24 ? `${h}h ago` : `${Math.floor(h / 24)}d ago`
+  }
+  if (mins < 1) return 'الآن'
+  if (mins < 60) return mins === 1 ? 'منذ دقيقة' : mins === 2 ? 'منذ دقيقتين' : mins <= 10 ? `منذ ${mins} دقائق` : `منذ ${mins} دقيقة`
+  const h = Math.floor(mins / 60)
+  if (h < 24) return `منذ ${arHours(h)}`
+  const d = Math.floor(h / 24)
+  return d === 1 ? 'أمس' : `منذ ${arDays(d)}`
+}
 
 /** Words the shell and many pages share. */
 export const COMMON = {

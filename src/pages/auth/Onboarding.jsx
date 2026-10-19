@@ -4,6 +4,8 @@ import { useAuth } from '../../store/auth'
 import { createCompany } from '../../lib/access'
 import { AuthLayout, AuthInput, AuthButton, PALETTE } from './AuthLayout'
 import { PendingApproval } from './PendingApproval'
+import { useT } from '../../lib/i18n'
+import { AW } from './words'
 
 // Where an approved person with no company lands. Two different people reach
 // it, and they need opposite things:
@@ -17,6 +19,7 @@ import { PendingApproval } from './PendingApproval'
 //     company, so an empty list really does mean there are none to join.
 export function Onboarding() {
   const { user, isApproved, isAccessAdmin, workspaces, refreshWorkspaces, signOut } = useAuth()
+  const { t } = useT(AW)
   const [name, setName] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -32,27 +35,25 @@ export function Onboarding() {
 
   if (!isAccessAdmin) {
     return (
-      <AuthLayout eyebrow="Almost there" title="No companies yet" subtitle="">
+      <AuthLayout eyebrow={t.almostThere} title={t.noCompanies} subtitle="">
         <div className="space-y-5">
           <p className="text-sm leading-relaxed" style={{ color: PALETTE.slate }}>
-            The account{' '}
-            <span className="font-semibold" style={{ color: PALETTE.carbon }}>{user?.email}</span>{' '}
-            is approved, but no company has been given to it yet. Ask your
-            administrator which ones you should see.
+            {t.theAccount}{' '}
+            <span className="font-semibold" style={{ color: PALETTE.carbon }} dir="ltr">{user?.email}</span>{' '}
+            {t.noCompanyB}
           </p>
           <div className="border px-4 py-3" style={{ borderColor: PALETTE.powder, background: '#fff' }}>
             <p className="text-xs leading-relaxed" style={{ color: PALETTE.slate }}>
-              Already been given one? Check again — this page doesn't poll, so a
-              change made a minute ago won't appear on its own.
+              {t.alreadyGiven}
             </p>
           </div>
-          <AuthButton onClick={() => refreshWorkspaces()}>Check again</AuthButton>
+          <AuthButton onClick={() => refreshWorkspaces()}>{t.checkAgain}</AuthButton>
           <button
             onClick={() => signOut()}
             className="w-full py-2.5 text-sm font-semibold border transition-colors hover:bg-white"
             style={{ borderColor: PALETTE.powder, color: PALETTE.slate }}
           >
-            Sign out
+            {t.signOut}
           </button>
         </div>
       </AuthLayout>
@@ -72,20 +73,20 @@ export function Onboarding() {
 
   return (
     <AuthLayout
-      eyebrow="One more step"
-      title="Create the first company"
-      subtitle="There are no companies yet. Only administrators will see this one until you give it to someone under Team & Access."
+      eyebrow={t.oneMore}
+      title={t.createFirst}
+      subtitle={t.createFirstSub}
     >
       <form onSubmit={handleSubmit}>
         <AuthInput
-          label="Company name" type="text" required autoFocus
+          label={t.companyName} type="text" required autoFocus dir="auto"
           value={name} onChange={e => setName(e.target.value)}
-          placeholder="e.g. Arak Lighting"
+          placeholder={t.companyPh}
         />
         {error && (
           <p className="text-xs mb-4 px-3 py-2.5 rounded-xl bg-red-50 text-red-600 border border-red-100">{error}</p>
         )}
-        <AuthButton type="submit" loading={loading}>Continue</AuthButton>
+        <AuthButton type="submit" loading={loading}>{t.continue}</AuthButton>
       </form>
     </AuthLayout>
   )

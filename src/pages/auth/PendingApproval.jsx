@@ -1,5 +1,7 @@
 import { useAuth } from '../../store/auth'
 import { AuthLayout, AuthButton, PALETTE } from './AuthLayout'
+import { useT } from '../../lib/i18n'
+import { AW } from './words'
 
 // Where a signed-in but not-yet-approved person lands. Two states share this
 // screen because they need the same thing from the reader — wait, or ask a
@@ -12,28 +14,27 @@ import { AuthLayout, AuthButton, PALETTE } from './AuthLayout'
 export function PendingApproval() {
   const { user, accessStatus, signOut, refreshWorkspaces } = useAuth()
   const revoked = accessStatus === 'revoked'
+  const { t } = useT(AW)
 
   return (
     <AuthLayout
-      eyebrow={revoked ? 'No access' : 'Waiting on approval'}
-      title={revoked ? 'Your access was removed' : 'Access requested'}
+      eyebrow={revoked ? t.noAccess : t.waiting}
+      title={revoked ? t.removed : t.requested}
       subtitle=""
     >
       <div className="space-y-5">
         <p className="text-sm leading-relaxed" style={{ color: PALETTE.slate }}>
           {revoked ? (
             <>
-              The account{' '}
-              <span className="font-semibold" style={{ color: PALETTE.carbon }}>{user?.email}</span>{' '}
-              no longer has access to the workspaces. If this is a mistake, ask
-              your administrator to restore it.
+              {t.theAccount}{' '}
+              <span className="font-semibold" style={{ color: PALETTE.carbon }} dir="ltr">{user?.email}</span>{' '}
+              {t.revokedB}
             </>
           ) : (
             <>
-              Your request for{' '}
-              <span className="font-semibold" style={{ color: PALETTE.carbon }}>{user?.email}</span>{' '}
-              has been sent to the administrator. Once it's approved you'll
-              see the companies they give you — nothing else to set up.
+              {t.yourRequest}{' '}
+              <span className="font-semibold" style={{ color: PALETTE.carbon }} dir="ltr">{user?.email}</span>{' '}
+              {t.pendingB}
             </>
           )}
         </p>
@@ -41,14 +42,13 @@ export function PendingApproval() {
         {!revoked && (
           <div className="border px-4 py-3" style={{ borderColor: PALETTE.powder, background: '#fff' }}>
             <p className="text-xs leading-relaxed" style={{ color: PALETTE.slate }}>
-              Already been approved? Check again — this page doesn't poll, so a
-              decision made a minute ago won't appear on its own.
+              {t.alreadyApproved}
             </p>
           </div>
         )}
 
         {!revoked && (
-          <AuthButton onClick={() => refreshWorkspaces()}>Check again</AuthButton>
+          <AuthButton onClick={() => refreshWorkspaces()}>{t.checkAgain}</AuthButton>
         )}
 
         <button
@@ -56,7 +56,7 @@ export function PendingApproval() {
           className="w-full py-2.5 text-sm font-semibold border transition-colors hover:bg-white"
           style={{ borderColor: PALETTE.powder, color: PALETTE.slate }}
         >
-          Sign out
+          {t.signOut}
         </button>
       </div>
     </AuthLayout>

@@ -1,3 +1,6 @@
+import { useT, setLang } from '../../lib/i18n'
+import { AW } from './words'
+
 const PALETTE = {
   carbon:   '#1C2321',
   steel:    '#7D98A1',
@@ -7,8 +10,9 @@ const PALETTE = {
 }
 
 export function AuthLayout({ eyebrow, title, subtitle, children }) {
+  const { t, lang, dir } = useT(AW)
   return (
-    <div className="min-h-screen flex" style={{ background: PALETTE.platinum }}>
+    <div className="min-h-screen flex" style={{ background: PALETTE.platinum }} dir={dir} lang={lang}>
       {/* Dark brand panel — hidden on small screens, the form is what matters there */}
       <div
         className="hidden lg:flex lg:w-[42%] flex-col justify-between p-12 relative overflow-hidden"
@@ -35,14 +39,13 @@ export function AuthLayout({ eyebrow, title, subtitle, children }) {
 
         <div className="relative z-10 max-w-sm">
           <p className="text-xs font-semibold tracking-[0.16em] uppercase mb-3" style={{ color: PALETTE.steel }}>
-            Arak Content Studio
+            {t.brandPanelEyebrow}
           </p>
           <h1 className="text-3xl font-bold leading-tight mb-4" style={{ color: PALETTE.platinum }}>
-            One brand voice.<br />Every platform. Every workspace.
+            {t.brandPanelTitle}
           </h1>
           <p className="text-sm leading-relaxed" style={{ color: PALETTE.powder }}>
-            Brand Brain, Campaign Automation, and AI-generated content — now isolated
-            per workspace so every team gets their own private brand profile and schedule.
+            {t.brandPanelBody}
           </p>
         </div>
 
@@ -52,7 +55,13 @@ export function AuthLayout({ eyebrow, title, subtitle, children }) {
       </div>
 
       {/* Form panel */}
-      <div className="flex-1 flex items-center justify-center p-6 sm:p-10">
+      <div className="flex-1 flex items-center justify-center p-6 sm:p-10 relative">
+        {/* The language switch: the top bar's is not here before sign-in. */}
+        <button type="button" onClick={() => setLang(lang === 'ar' ? 'en' : 'ar')} lang={lang === 'ar' ? 'en' : 'ar'}
+          className="absolute top-4 end-4 text-xs font-semibold px-2.5 py-1 border hover:bg-white"
+          style={{ borderColor: PALETTE.powder, color: PALETTE.slate }}>
+          {t.language}
+        </button>
         <div className="w-full max-w-sm">
           <div className="mb-8">
             {eyebrow && (

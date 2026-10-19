@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabaseClient'
 import { AuthLayout, AuthInput, AuthButton, PALETTE } from './AuthLayout'
+import { useT } from '../../lib/i18n'
+import { AW } from './words'
 
 // ─── Forgotten password ────────────────────────────────────────────────────
 // Two halves on one page, because Supabase's emailed link comes back here:
@@ -25,6 +27,7 @@ const ARRIVED_FROM_LINK = typeof window !== 'undefined' &&
 
 export function ResetPassword() {
   const navigate = useNavigate()
+  const { t } = useT(AW)
   const [recovering, setRecovering] = useState(ARRIVED_FROM_LINK)
   const [email, setEmail] = useState('')
   const [sent, setSent] = useState(false)
@@ -58,8 +61,8 @@ export function ResetPassword() {
   async function savePassword(e) {
     e.preventDefault()
     setError('')
-    if (password.length < 8) { setError('Use at least 8 characters.'); return }
-    if (password !== confirm) { setError('The two passwords do not match.'); return }
+    if (password.length < 8) { setError(t.tooShort); return }
+    if (password !== confirm) { setError(t.noMatch); return }
     setLoading(true)
     const { error: err } = await supabase.auth.updateUser({ password })
     setLoading(false)
@@ -69,36 +72,35 @@ export function ResetPassword() {
 
   if (recovering) {
     return (
-      <AuthLayout eyebrow="Reset password" title="Choose a new password" subtitle="You will stay signed in after saving it.">
+      <AuthLayout eyebrow={t.resetEyebrow} title={t.chooseNew} subtitle={t.staySignedIn}>
         <form onSubmit={savePassword}>
-          <AuthInput label="New password" type="password" autoComplete="new-password" required
-            value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters" />
-          <AuthInput label="Type it again" type="password" autoComplete="new-password" required
+          <AuthInput label={t.newPassword} type="password" autoComplete="new-password" required dir="ltr"
+            value={password} onChange={e => setPassword(e.target.value)} placeholder={t.atLeast8} />
+          <AuthInput label={t.typeAgain} type="password" autoComplete="new-password" required dir="ltr"
             value={confirm} onChange={e => setConfirm(e.target.value)} placeholder="••••••••" />
           {error && <p className="text-xs mb-4 px-3 py-2.5 rounded-xl bg-red-50 text-red-600 border border-red-100">{error}</p>}
-          <AuthButton type="submit" loading={loading}>Save password</AuthButton>
+          <AuthButton type="submit" loading={loading}>{t.savePassword}</AuthButton>
         </form>
       </AuthLayout>
     )
   }
 
   return (
-    <AuthLayout eyebrow="Reset password" title="Forgot your password?" subtitle="We will email you a link to choose a new one.">
+    <AuthLayout eyebrow={t.resetEyebrow} title={t.forgotTitle} subtitle={t.forgotSub}>
       {sent ? (
         <p className="text-sm leading-relaxed" style={{ color: PALETTE.slate }}>
-          If <strong style={{ color: PALETTE.carbon }}>{email.trim()}</strong> has an account, a reset link is on its
-          way. Open it on this device. It works once.
+          {t.sentA} <strong style={{ color: PALETTE.carbon }} dir="ltr">{email.trim()}</strong> {t.sentB}
         </p>
       ) : (
         <form onSubmit={sendLink}>
-          <AuthInput label="Email" type="email" autoComplete="email" required
-            value={email} onChange={e => setEmail(e.target.value)} placeholder="you@company.com" />
+          <AuthInput label={t.email} type="email" autoComplete="email" required dir="ltr"
+            value={email} onChange={e => setEmail(e.target.value)} placeholder={t.emailPh} />
           {error && <p className="text-xs mb-4 px-3 py-2.5 rounded-xl bg-red-50 text-red-600 border border-red-100">{error}</p>}
-          <AuthButton type="submit" loading={loading}>Send reset link</AuthButton>
+          <AuthButton type="submit" loading={loading}>{t.sendLink}</AuthButton>
         </form>
       )}
       <p className="text-sm mt-6 text-center" style={{ color: PALETTE.slate }}>
-        <Link to="/login" className="font-semibold" style={{ color: PALETTE.carbon }}>Back to sign in</Link>
+        <Link to="/login" className="font-semibold" style={{ color: PALETTE.carbon }}>{t.backToSignIn}</Link>
       </p>
     </AuthLayout>
   )

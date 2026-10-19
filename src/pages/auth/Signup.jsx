@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../store/auth'
 import { AuthLayout, AuthInput, AuthButton, PALETTE } from './AuthLayout'
+import { useT } from '../../lib/i18n'
+import { AW } from './words'
 
 // Signing up no longer creates anything. It files an access request that an
 // administrator approves — so the copy here promises a request, not a
@@ -13,6 +15,7 @@ import { AuthLayout, AuthInput, AuthButton, PALETTE } from './AuthLayout'
 // wants to phish or pester the one account that can grant access.
 export function Signup() {
   const { signUp } = useAuth()
+  const { t } = useT(AW)
   const navigate = useNavigate()
 
   const [fullName, setFullName] = useState('')
@@ -37,13 +40,13 @@ export function Signup() {
 
   if (confirmSent) {
     return (
-      <AuthLayout eyebrow="Almost there" title="Check your email" subtitle="">
+      <AuthLayout eyebrow={t.almostThere} title={t.checkEmail} subtitle="">
         <p className="text-sm leading-relaxed" style={{ color: PALETTE.slate }}>
-          We sent a confirmation link to <span className="font-semibold" style={{ color: PALETTE.carbon }}>{email}</span>.
-          Confirm it, then sign in — your access request has been sent to the administrator for approval.
+          {t.sentConfirmA} <span className="font-semibold" style={{ color: PALETTE.carbon }} dir="ltr">{email}</span>.
+          {' '}{t.sentConfirmB}
         </p>
         <Link to="/login" className="inline-block mt-6 text-sm font-semibold" style={{ color: PALETTE.carbon }}>
-          Back to sign in
+          {t.backToSignIn}
         </Link>
       </AuthLayout>
     )
@@ -51,34 +54,34 @@ export function Signup() {
 
   return (
     <AuthLayout
-      eyebrow="Get started"
-      title="Request access"
-      subtitle="Creating an account sends a request to the administrator. Once approved, you get full access to the companies they give you."
+      eyebrow={t.getStarted}
+      title={t.requestAccess}
+      subtitle={t.requestSub}
     >
       <form onSubmit={handleSubmit}>
         <AuthInput
-          label="Full name" type="text"
+          label={t.fullName} type="text" dir="auto"
           value={fullName} onChange={e => setFullName(e.target.value)}
-          placeholder="e.g. Sara Ahmed"
+          placeholder={t.fullNamePh}
         />
         <AuthInput
-          label="Email" type="email" autoComplete="email" required
+          label={t.email} type="email" autoComplete="email" required dir="ltr"
           value={email} onChange={e => setEmail(e.target.value)}
-          placeholder="you@company.com"
+          placeholder={t.emailPh}
         />
         <AuthInput
-          label="Password" type="password" autoComplete="new-password" required minLength={8}
+          label={t.password} type="password" autoComplete="new-password" required minLength={8} dir="ltr"
           value={password} onChange={e => setPassword(e.target.value)}
-          placeholder="At least 8 characters"
+          placeholder={t.atLeast8}
         />
         {error && (
           <p className="text-xs mb-4 px-3 py-2.5 rounded-xl bg-red-50 text-red-600 border border-red-100">{error}</p>
         )}
-        <AuthButton type="submit" loading={loading}>Request access</AuthButton>
+        <AuthButton type="submit" loading={loading}>{t.requestAccess}</AuthButton>
       </form>
       <p className="text-sm mt-6 text-center" style={{ color: PALETTE.slate }}>
-        Already have an account?{' '}
-        <Link to="/login" className="font-semibold" style={{ color: PALETTE.carbon }}>Sign in</Link>
+        {t.haveAccount}{' '}
+        <Link to="/login" className="font-semibold" style={{ color: PALETTE.carbon }}>{t.signIn}</Link>
       </p>
     </AuthLayout>
   )

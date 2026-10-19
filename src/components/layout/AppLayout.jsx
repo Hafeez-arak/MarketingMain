@@ -109,7 +109,7 @@ export function AppLayout({ children }) {
       {/* Wrapped only because the drawer returns a fragment, and an attribute
           cannot be hung on one. Its children are all `fixed`, so the wrapper
           is a zero-width flex item and changes nothing on screen. */}
-      <div data-print-hide dir="ltr"><AssistantDrawer /></div>
+      <div data-print-hide><AssistantDrawer /></div>
     </div>
     </NavBadgesContext.Provider>
   )

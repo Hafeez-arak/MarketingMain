@@ -4,6 +4,46 @@ import { supabase } from '../../lib/supabaseClient'
 import { createCompany, fetchAllAccess } from '../../lib/access'
 import { Card, Button, PageHeader, Skeleton } from '../../components/ui/index'
 import { fetchSpend, setCap, projectedMonth } from '../../lib/aiSpend'
+import { useT } from '../../lib/i18n'
+
+const SW = {
+  en: {
+    title: 'Settings', subtitle: 'Companies, workspace preferences, and account details.',
+    companies: 'Companies', companiesSub: 'Each company keeps its own brand brain, content, plans, and posts. A company is only seen by the people it has been given to — change who that is under Team & Access.',
+    addCompany: 'Add company', companyName: 'Company name', companyPh: 'e.g. Nour Interiors', creating: 'Creating…', create: 'Create', cancel: 'Cancel',
+    whoAccess: 'Who should have access?', youAndAdmin: 'You and the administrator. The administrator can add other people afterwards under Team & Access.',
+    peopleFailed: e => `The list of people could not be loaded (${e}). You can still create the company — only administrators will get it — and add people afterwards under Team & Access.`,
+    loadingPeople: 'Loading people…', adminsAlways: 'Administrators always have it. Tick anyone else who should see this company, or leave everyone unticked and add them later under Team & Access.',
+    nobodyElse: 'Nobody else has been approved yet.', active: 'Active', save: 'Save', switchTo: 'Switch', rename: 'Rename', delete: 'Delete',
+    danger: 'Danger Zone', dangerBody: 'Delete the active company. This permanently removes its brand brain, content, plans, and posts.', deleteCompany: 'Delete company',
+    needSecond: 'Create a second company before you can delete this one.', deleteQ: n => `Delete "${n}"?`,
+    deleteBody: 'All content, posts, campaigns, brand brain, and settings for this company will be permanently removed.', deleting: 'Deleting…',
+    yourAccount: 'Your account', signedInAs: e => `Signed in as ${e || '…'}`, pwChanged: 'Password changed. Use the new one next time you sign in.',
+    changePw: 'Change password', newPw: 'New password (at least 8 characters)', typeAgain: 'Type it again', saving: 'Saving…', savePw: 'Save password',
+    tooShort: 'Use at least 8 characters.', noMatch: 'The two passwords do not match.',
+    aiTitle: 'AI spending this month', aiSub: 'The assistant, research runs and the lead agent share one monthly limit. When it is reached they stop until the 1st.',
+    changeLimit: 'Change limit', spendFailed: e => `Spending could not be loaded: ${e}`, of: c => `of ${c}`, noLimit: 'no limit',
+    projected: (p, l) => `At this rate, about ${p} by month end · last month ${l}`, limitLabel: 'Monthly limit in US dollars', othersTold: 'The other administrators are told when the limit changes.',
+  },
+  ar: {
+    title: 'الإعدادات', subtitle: 'الشركات وتفضيلات العمل وبيانات الحساب.',
+    companies: 'الشركات', companiesSub: 'لكل شركة هوية علامتها ومحتواها وخططها ومنشوراتها. لا يرى الشركة إلا من مُنحت لهم، ويُغيَّر ذلك من صفحة الفريق والصلاحيات.',
+    addCompany: 'إضافة شركة', companyName: 'اسم الشركة', companyPh: 'مثل: نور للتصميم الداخلي', creating: 'جارٍ الإنشاء…', create: 'إنشاء', cancel: 'إلغاء',
+    whoAccess: 'من يجب أن يصل إليها؟', youAndAdmin: 'أنت والمسؤول. يمكن للمسؤول إضافة آخرين لاحقًا من صفحة الفريق والصلاحيات.',
+    peopleFailed: e => `تعذّر تحميل قائمة الأشخاص (${e}). يمكنك إنشاء الشركة رغم ذلك، وستكون للمسؤولين فقط، ثم تضيف الأشخاص لاحقًا.`,
+    loadingPeople: 'جارٍ تحميل الأشخاص…', adminsAlways: 'المسؤولون لديهم وصول دائمًا. اختر من يجب أن يرى هذه الشركة، أو اتركهم وأضفهم لاحقًا من صفحة الفريق والصلاحيات.',
+    nobodyElse: 'لم تتم الموافقة على أحد آخر بعد.', active: 'النشطة', save: 'حفظ', switchTo: 'انتقال', rename: 'إعادة تسمية', delete: 'حذف',
+    danger: 'منطقة الخطر', dangerBody: 'حذف الشركة النشطة. يزيل نهائيًا هوية علامتها ومحتواها وخططها ومنشوراتها.', deleteCompany: 'حذف الشركة',
+    needSecond: 'أنشئ شركة ثانية قبل أن تحذف هذه.', deleteQ: n => `حذف "${n}"؟`,
+    deleteBody: 'سيُحذف نهائيًا كل محتوى هذه الشركة ومنشوراتها وحملاتها وهوية علامتها وإعداداتها.', deleting: 'جارٍ الحذف…',
+    yourAccount: 'حسابك', signedInAs: e => `مسجّل باسم ${e || '…'}`, pwChanged: 'تم تغيير كلمة المرور. استخدم الجديدة في المرة القادمة.',
+    changePw: 'تغيير كلمة المرور', newPw: 'كلمة المرور الجديدة (٨ أحرف على الأقل)', typeAgain: 'اكتبها مرة أخرى', saving: 'جارٍ الحفظ…', savePw: 'حفظ كلمة المرور',
+    tooShort: 'استخدم ٨ أحرف على الأقل.', noMatch: 'كلمتا المرور غير متطابقتين.',
+    aiTitle: 'إنفاق الذكاء الاصطناعي هذا الشهر', aiSub: 'المساعد وعمليات البحث ووكيل العملاء يتشاركون حدًا شهريًا واحدًا. عند بلوغه تتوقف حتى أول الشهر.',
+    changeLimit: 'تغيير الحد', spendFailed: e => `تعذّر تحميل الإنفاق: ${e}`, of: c => `من ${c}`, noLimit: 'بلا حد',
+    projected: (p, l) => `بهذا المعدل نحو ${p} بنهاية الشهر · الشهر الماضي ${l}`, limitLabel: 'الحد الشهري بالدولار الأمريكي', othersTold: 'يُبلَّغ المسؤولون الآخرون عند تغيير الحد.',
+  },
+}
 
 // ─── Settings ──────────────────────────────────────────────────────────────
 // A "company" == a Supabase workspace. This section reads/writes the REAL
@@ -12,6 +52,7 @@ import { fetchSpend, setCap, projectedMonth } from '../../lib/aiSpend'
 // tenant that shows up in the sidebar switcher and gets its own brain/plans.
 export function Settings() {
   const { user, isAccessAdmin, workspaces, activeWorkspaceId, switchWorkspace, refreshWorkspaces } = useAuth()
+  const { t, lang, dir } = useT(SW)
   const [showCreate, setShowCreate] = useState(false)
   const [newWsName, setNewWsName]   = useState('')
   // Who else gets the company being created. A new company reaches the
@@ -90,8 +131,8 @@ export function Settings() {
   }
 
   return (
-    <div className="max-w-3xl space-y-4">
-      <PageHeader title="Settings" subtitle="Companies, workspace preferences, and account details." />
+    <div className="max-w-3xl space-y-4" dir={dir} lang={lang}>
+      <PageHeader title={t.title} subtitle={t.subtitle} />
 
       <AccountCard email={user?.email} />
 
@@ -100,12 +141,12 @@ export function Settings() {
       <Card className="overflow-hidden">
         <div className="px-5 py-4 border-b border-border flex items-center justify-between gap-4">
           <div>
-            <h3 className="font-semibold text-text text-sm">Companies</h3>
-            <p className="text-xs text-text-tertiary mt-0.5">Each company keeps its own brand brain, content, plans, and posts. A company is only seen by the people it has been given to — change who that is under Team &amp; Access.</p>
+            <h3 className="font-semibold text-text text-sm">{t.companies}</h3>
+            <p className="text-xs text-text-tertiary mt-0.5">{t.companiesSub}</p>
           </div>
           <Button size="sm" onClick={openCreate}>
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-            Add company
+            {t.addCompany}
           </Button>
         </div>
 
@@ -118,42 +159,40 @@ export function Settings() {
         {/* Create inline form */}
         {showCreate && (
           <div className="px-6 py-4 border-b border-border bg-amber-50/40">
-            <p className="text-xs font-semibold text-text-secondary mb-2">Company name</p>
+            <p className="text-xs font-semibold text-text-secondary mb-2">{t.companyName}</p>
             <div className="flex gap-2">
               <input
                 autoFocus
                 value={newWsName}
                 onChange={e => setNewWsName(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') handleCreate(); if (e.key === 'Escape') setShowCreate(false) }}
-                placeholder="e.g. Nour Interiors"
+                placeholder={t.companyPh} dir="auto"
                 className="flex-1 rounded-xl border border-border bg-white text-text text-sm px-3.5 py-2 focus:outline-none focus:ring-2 focus:ring-amber-400 transition-all"
               />
-              <Button size="sm" onClick={handleCreate} disabled={!newWsName.trim() || busy}>{busy ? 'Creating…' : 'Create'}</Button>
-              <Button size="sm" variant="secondary" onClick={() => setShowCreate(false)}>Cancel</Button>
+              <Button size="sm" onClick={handleCreate} disabled={!newWsName.trim() || busy}>{busy ? t.creating : t.create}</Button>
+              <Button size="sm" variant="secondary" onClick={() => setShowCreate(false)}>{t.cancel}</Button>
             </div>
 
             {/* Who gets it. Nothing is ticked to begin with: a new company
                 going to nobody is the safe default, and a tick is a decision. */}
-            <p className="text-xs font-semibold text-text-secondary mt-4 mb-1">Who should have access?</p>
+            <p className="text-xs font-semibold text-text-secondary mt-4 mb-1">{t.whoAccess}</p>
             {!isAccessAdmin ? (
               <p className="text-xs text-text-tertiary leading-relaxed">
-                You and the administrator. The administrator can add other people afterwards under Team &amp; Access.
+                {t.youAndAdmin}
               </p>
             ) : peopleError ? (
               <p className="text-xs text-red-600 leading-relaxed">
-                The list of people could not be loaded ({peopleError}). You can still create the company — only
-                administrators will get it — and add people afterwards under Team &amp; Access.
+                {t.peopleFailed(peopleError)}
               </p>
             ) : people === null ? (
-              <p className="text-xs text-text-tertiary">Loading people…</p>
+              <p className="text-xs text-text-tertiary">{t.loadingPeople}</p>
             ) : (
               <>
                 <p className="text-xs text-text-tertiary leading-relaxed mb-2">
-                  Administrators always have it. Tick anyone else who should see this company, or leave everyone
-                  unticked and add them later under Team &amp; Access.
+                  {t.adminsAlways}
                 </p>
                 {people.length === 0 ? (
-                  <p className="text-xs text-text-tertiary">Nobody else has been approved yet.</p>
+                  <p className="text-xs text-text-tertiary">{t.nobodyElse}</p>
                 ) : (
                   <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
                     {people.map(p => (
@@ -164,7 +203,7 @@ export function Settings() {
                           onChange={() => togglePerson(p.user_id)}
                           className="accent-amber-500 flex-shrink-0"
                         />
-                        <span className="truncate">{p.full_name || p.email}</span>
+                        <span className="truncate" dir="auto">{p.full_name || p.email}</span>
                       </label>
                     ))}
                   </div>
@@ -199,8 +238,8 @@ export function Settings() {
                   />
                 ) : (
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-text truncate">{ws.name}</p>
-                    {isActive && <p className="text-[10px] text-amber-600 font-semibold">Active</p>}
+                    <p className="text-sm font-medium text-text truncate" dir="auto">{ws.name}</p>
+                    {isActive && <p className="text-[10px] text-amber-600 font-semibold">{t.active}</p>}
                   </div>
                 )}
 
@@ -208,28 +247,28 @@ export function Settings() {
                 <div className="flex items-center gap-1.5 flex-shrink-0">
                   {isEditing ? (
                     <>
-                      <Button size="xs" onClick={() => handleRename(ws.id)} disabled={!editName.trim() || busy}>Save</Button>
-                      <Button size="xs" variant="secondary" onClick={() => setEditingId(null)}>Cancel</Button>
+                      <Button size="xs" onClick={() => handleRename(ws.id)} disabled={!editName.trim() || busy}>{t.save}</Button>
+                      <Button size="xs" variant="secondary" onClick={() => setEditingId(null)}>{t.cancel}</Button>
                     </>
                   ) : (
                     <>
                       {!isActive && (
                         <Button size="xs" variant="outline"
                           onClick={() => switchWorkspace(ws.id)}>
-                          Switch
+                          {t.switchTo}
                         </Button>
                       )}
                       <button
                         onClick={() => { setEditingId(ws.id); setEditName(ws.name) }}
                         className="w-7 h-7 rounded-lg flex items-center justify-center text-text-tertiary hover:text-text hover:bg-surface-subtle transition-colors"
-                        title="Rename">
+                        title={t.rename} aria-label={t.rename}>
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4z"/></svg>
                       </button>
                       {workspaces.length > 1 && (
                         <button
                           onClick={() => setConfirmDelete(ws)}
                           className="w-7 h-7 rounded-lg flex items-center justify-center text-text-tertiary hover:text-red-500 hover:bg-red-50 transition-colors"
-                          title="Delete">
+                          title={t.delete} aria-label={t.delete}>
                           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
                         </button>
                       )}
@@ -244,15 +283,15 @@ export function Settings() {
 
       {/* Danger Zone */}
       <Card className="p-6 border-red-200">
-        <h3 className="font-semibold text-red-600 mb-2">Danger Zone</h3>
-        <p className="text-xs text-text-secondary mb-4">Delete the active company. This permanently removes its brand brain, content, plans, and posts.</p>
+        <h3 className="font-semibold text-red-600 mb-2">{t.danger}</h3>
+        <p className="text-xs text-text-secondary mb-4">{t.dangerBody}</p>
         <Button variant="danger" size="sm"
           disabled={workspaces.length <= 1}
           onClick={() => setConfirmDelete(workspaces.find(w => w.id === activeId))}>
-          Delete company
+          {t.deleteCompany}
         </Button>
         {workspaces.length <= 1 && (
-          <p className="text-[11px] text-text-tertiary mt-2">Create a second company before you can delete this one.</p>
+          <p className="text-[11px] text-text-tertiary mt-2">{t.needSecond}</p>
         )}
       </Card>
 
@@ -261,13 +300,13 @@ export function Settings() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ background: 'rgba(28,35,33,0.45)' }}>
           <div className="bg-white rounded-2xl shadow-dropdown w-full max-w-sm border border-border animate-fade-scale p-6 space-y-4">
-            <h3 className="font-semibold text-text text-sm">Delete "{confirmDelete.name}"?</h3>
+            <h3 className="font-semibold text-text text-sm">{t.deleteQ(confirmDelete.name)}</h3>
             <p className="text-sm text-text-secondary leading-relaxed">
-              All content, posts, campaigns, brand brain, and settings for this company will be permanently removed.
+              {t.deleteBody}
             </p>
             <div className="flex gap-3 pt-1">
-              <Button variant="secondary" className="flex-1 justify-center" onClick={() => setConfirmDelete(null)}>Cancel</Button>
-              <Button variant="danger" className="flex-1 justify-center" onClick={() => handleDelete(confirmDelete.id)} disabled={busy}>{busy ? 'Deleting…' : 'Delete'}</Button>
+              <Button variant="secondary" className="flex-1 justify-center" onClick={() => setConfirmDelete(null)}>{t.cancel}</Button>
+              <Button variant="danger" className="flex-1 justify-center" onClick={() => handleDelete(confirmDelete.id)} disabled={busy}>{busy ? t.deleting : t.delete}</Button>
             </div>
           </div>
         </div>
@@ -282,6 +321,7 @@ export function Settings() {
 // owner: the app had no way to change a password, so "change it" meant a
 // trip to the Supabase dashboard.
 function AccountCard({ email }) {
+  const { t } = useT(SW)
   const [open, setOpen] = useState(false)
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -293,8 +333,8 @@ function AccountCard({ email }) {
 
   async function save() {
     setError(''); setDone(false)
-    if (password.length < 8) { setError('Use at least 8 characters.'); return }
-    if (password !== confirm) { setError('The two passwords do not match.'); return }
+    if (password.length < 8) { setError(t.tooShort); return }
+    if (password !== confirm) { setError(t.noMatch); return }
     setBusy(true)
     const { error: e } = await supabase.auth.updateUser({ password })
     setBusy(false)
@@ -308,26 +348,26 @@ function AccountCard({ email }) {
     <Card className="overflow-hidden">
       <div className="px-5 py-4 flex items-center justify-between gap-4">
         <div className="min-w-0">
-          <h3 className="font-semibold text-text text-sm">Your account</h3>
-          <p className="text-xs text-text-tertiary mt-0.5 truncate">Signed in as {email || '…'}</p>
-          {done && <p className="text-xs text-green-700 mt-1">Password changed. Use the new one next time you sign in.</p>}
+          <h3 className="font-semibold text-text text-sm">{t.yourAccount}</h3>
+          <p className="text-xs text-text-tertiary mt-0.5 truncate">{t.signedInAs(email)}</p>
+          {done && <p className="text-xs text-green-700 mt-1">{t.pwChanged}</p>}
         </div>
         {!open && (
-          <Button size="sm" variant="secondary" onClick={() => { reset(); setDone(false); setOpen(true) }}>Change password</Button>
+          <Button size="sm" variant="secondary" onClick={() => { reset(); setDone(false); setOpen(true) }}>{t.changePw}</Button>
         )}
       </div>
       {open && (
         <div className="px-5 py-4 border-t border-border bg-amber-50/40 space-y-2">
           <input type="password" autoComplete="new-password" autoFocus value={password}
-            onChange={e => setPassword(e.target.value)} placeholder="New password (at least 8 characters)" className={input} />
+            onChange={e => setPassword(e.target.value)} placeholder={t.newPw} className={input} dir="ltr" />
           <input type="password" autoComplete="new-password" value={confirm}
             onChange={e => setConfirm(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setOpen(false) }}
-            placeholder="Type it again" className={input} />
+            placeholder={t.typeAgain} className={input} dir="ltr" />
           {error && <p className="text-xs text-red-600">{error}</p>}
           <div className="flex gap-2 pt-1">
-            <Button size="sm" onClick={save} disabled={busy || !password}>{busy ? 'Saving…' : 'Save password'}</Button>
-            <Button size="sm" variant="secondary" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button size="sm" onClick={save} disabled={busy || !password}>{busy ? t.saving : t.savePw}</Button>
+            <Button size="sm" variant="secondary" onClick={() => setOpen(false)}>{t.cancel}</Button>
           </div>
         </div>
       )}
@@ -340,6 +380,7 @@ function AccountCard({ email }) {
 // Admins only: set_agent_cap() refuses anyone else and tells the other
 // admins, and a trigger warns every admin at 80% and 100%.
 function SpendCard({ workspaceId }) {
+  const { t } = useT(SW)
   const [data, setData] = useState(null)
   const [editing, setEditing] = useState(false)
   const [value, setValue] = useState('')
@@ -370,27 +411,27 @@ function SpendCard({ workspaceId }) {
     <Card className="overflow-hidden">
       <div className="px-5 py-4 flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <h3 className="font-semibold text-text text-sm">AI spending this month</h3>
+          <h3 className="font-semibold text-text text-sm">{t.aiTitle}</h3>
           <p className="text-xs text-text-tertiary mt-0.5">
-            The assistant, research runs and the lead agent share one monthly limit. When it is reached they stop until the 1st.
+            {t.aiSub}
           </p>
         </div>
         {data && !data.error && !editing && (
           <Button size="sm" variant="secondary" onClick={() => { setValue(String(data.cap ?? '')); setError(''); setEditing(true) }}>
-            Change limit
+            {t.changeLimit}
           </Button>
         )}
       </div>
 
       <div className="px-5 pb-5 space-y-3">
         {data === null ? <Skeleton className="h-16" /> : data.error ? (
-          <p className="text-xs text-red-600">Spending could not be loaded: {data.error}</p>
+          <p className="text-xs text-red-600">{t.spendFailed(data.error)}</p>
         ) : (
           <>
             <div>
               <div className="flex items-baseline justify-between text-sm">
-                <span className="font-semibold text-text tabular-nums">{money(data.total)} <span className="font-normal text-text-tertiary">of {data.cap == null ? 'no limit' : money(data.cap)}</span></span>
-                <span className="text-xs text-text-tertiary tabular-nums">At this rate, about {money(projected)} by month end · last month {money(data.lastTotal)}</span>
+                <span className="font-semibold text-text tabular-nums">{money(data.total)} <span className="font-normal text-text-tertiary">{t.of(data.cap == null ? t.noLimit : money(data.cap))}</span></span>
+                <span className="text-xs text-text-tertiary tabular-nums">{t.projected(money(projected), money(data.lastTotal))}</span>
               </div>
               {data.cap != null && (
                 <div className="h-1.5 bg-surface-subtle mt-2 overflow-hidden" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
@@ -412,16 +453,16 @@ function SpendCard({ workspaceId }) {
 
             {editing && (
               <div className="border-t border-border pt-3 space-y-2">
-                <label className="block text-xs font-semibold text-text-secondary">Monthly limit in US dollars</label>
+                <label className="block text-xs font-semibold text-text-secondary">{t.limitLabel}</label>
                 <div className="flex gap-2">
                   <input type="number" min="1" max="5000" step="1" autoFocus value={value}
                     onChange={e => setValue(e.target.value)}
                     onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false) }}
                     className="w-32 rounded-xl border border-border bg-white text-text text-sm px-3.5 py-2 focus:outline-none focus:ring-2 focus:ring-amber-400" />
-                  <Button size="sm" onClick={save} disabled={busy || !value}>{busy ? 'Saving…' : 'Save'}</Button>
-                  <Button size="sm" variant="secondary" onClick={() => setEditing(false)}>Cancel</Button>
+                  <Button size="sm" onClick={save} disabled={busy || !value}>{busy ? t.saving : t.save}</Button>
+                  <Button size="sm" variant="secondary" onClick={() => setEditing(false)}>{t.cancel}</Button>
                 </div>
-                <p className="text-[11px] text-text-tertiary">The other administrators are told when the limit changes.</p>
+                <p className="text-[11px] text-text-tertiary">{t.othersTold}</p>
                 {error && <p className="text-xs text-red-600">{error}</p>}
               </div>
             )}

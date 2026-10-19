@@ -2,12 +2,48 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../store/auth'
 import { PageHeader, Button, Modal, Skeleton, Empty, Textarea, Input, Select } from '../../components/ui/index'
-import { timeAgo } from '../../lib/utils'
 import {
   STATUS_LABEL, KIND_LABEL, columnOf, filterRequests,
   fetchRequests, fetchEvents, fetchPeople, fetchTaggable, updateRequest, addComment,
 } from '../../lib/requests'
 import { askAssistant, assistantMounted } from '../../lib/askAssistant'
+import { useT, ago } from '../../lib/i18n'
+import { AR_LABELS } from '../../lib/requests'
+
+const RW = {
+  en: {
+    title: 'Requests',
+    subtitle: 'Changes, fixes and tagged work from the assistant. Ask for something in the assistant, or tag Shadia or Hafeez with @, and it lands here.',
+    columns: { new: 'New', in_progress: 'In progress', closed: 'Done' },
+    views: { all: 'Everything I can see', mine: 'Asked by me', assigned: 'Assigned to me' },
+    loadFailed: e => `The requests could not be loaded: ${e}`,
+    emptyTitle: 'No requests yet',
+    emptyBody: 'Tell the assistant what should change, or tag someone with @Shadia or @Hafeez. The request appears here and the right person is notified.',
+    declined: 'Declined', nothing: 'Nothing here.', someone: 'Someone',
+    asked: 'asked', movedTo: s => `moved it to ${s}`, reassigned: 'reassigned it', commented: 'commented',
+    askedBy: (n, t) => `Asked by ${n} ${t}`, assignedTo: n => ` · assigned to ${n}`, onBoard: ' · on the board for the builders', from: pg => ` · from ${pg}`,
+    inTheirWords: 'In their words', brief: 'Brief', askArak: 'Ask Arak about this request', askLabel: t => `the request "${t}"`, result: 'Result: ',
+    note: 'Note for the asker', notePh: 'What was done, or why not', link: 'Link (optional)', linkPh: 'e.g. the pull request',
+    start: 'Start', markDone: 'Mark done', decline: 'Decline', reopen: 'Reopen', reassign: 'Reassign…', assign: 'Assign to…',
+    history: 'History', addComment: 'Add a comment', comment: 'Comment',
+  },
+  ar: {
+    title: 'الطلبات',
+    subtitle: 'التغييرات والإصلاحات والأعمال المُشار إليها من المساعد. اطلب أي شيء من المساعد، أو اذكر شادية أو حفيظ بـ @، وسيظهر هنا.',
+    columns: { new: 'جديد', in_progress: 'قيد التنفيذ', closed: 'منجز' },
+    views: { all: 'كل ما يمكنني رؤيته', mine: 'طلباتي', assigned: 'المسندة إليّ' },
+    loadFailed: e => `تعذّر تحميل الطلبات: ${e}`,
+    emptyTitle: 'لا توجد طلبات بعد',
+    emptyBody: 'أخبر المساعد بما يجب تغييره، أو اذكر أحدًا بـ @شادية أو @حفيظ. يظهر الطلب هنا ويُبلَّغ الشخص المعني.',
+    declined: 'مرفوض', nothing: 'لا شيء هنا.', someone: 'شخص ما',
+    asked: 'طلب', movedTo: s => `نقله إلى ${s}`, reassigned: 'أعاد إسناده', commented: 'علّق',
+    askedBy: (n, t) => `طلبه ${n} ${t}`, assignedTo: n => ` · مسند إلى ${n}`, onBoard: ' · على اللوحة لفريق التطوير', from: pg => ` · من ${pg}`,
+    inTheirWords: 'بكلماته', brief: 'الملخص', askArak: 'اسأل أراك عن هذا الطلب', askLabel: t => `الطلب "${t}"`, result: 'النتيجة: ',
+    note: 'ملاحظة لصاحب الطلب', notePh: 'ما الذي تم، أو لماذا لم يتم', link: 'رابط (اختياري)', linkPh: 'مثل رابط التعديل',
+    start: 'ابدأ', markDone: 'تم', decline: 'رفض', reopen: 'إعادة فتح', reassign: 'إعادة إسناد…', assign: 'إسناد إلى…',
+    history: 'السجل', addComment: 'أضف تعليقًا', comment: 'تعليق',
+  },
+}
 
 // ─── Requests ──────────────────────────────────────────────────────────────
 // 2026-10-18, PR 2 of docs/CEO-ASSISTANT-PLAN.md. Where "this isn't good,
@@ -19,17 +55,9 @@ import { askAssistant, assistantMounted } from '../../lib/askAssistant'
 // what they asked for or what is theirs to do. Moving a request notifies the
 // asker through a database trigger, not from here.
 
-const COLUMNS = [
-  { key: 'new', label: 'New' },
-  { key: 'in_progress', label: 'In progress' },
-  { key: 'closed', label: 'Done' },
-]
-
-const VIEWS = [
-  { key: 'all', label: 'Everything I can see' },
-  { key: 'mine', label: 'Asked by me' },
-  { key: 'assigned', label: 'Assigned to me' },
-]
+const COLUMNS = [{ key: 'new' }, { key: 'in_progress' }, { key: 'closed' }]
+const VIEWS = [{ key: 'all' }, { key: 'mine' }, { key: 'assigned' }]
+const labelsFor = lang => (lang === 'ar' ? AR_LABELS : { status: STATUS_LABEL, kind: KIND_LABEL })
 
 const STATUS_TONE = {
   new: 'text-amber-800 bg-amber-50 border-amber-200',
@@ -44,6 +72,8 @@ function Chip({ children, className = '' }) {
 
 export function Requests() {
   const { user, activeWorkspaceId, isAccessAdmin } = useAuth()
+  const { t, lang, dir } = useT(RW)
+  const L = labelsFor(lang)
   const [params, setParams] = useSearchParams()
   const [rows, setRows] = useState(null)
   const [error, setError] = useState('')
@@ -75,19 +105,17 @@ export function Requests() {
   }
 
   const shown = useMemo(() => filterRequests(rows || [], view, user?.id), [rows, view, user?.id])
-  const name = id => (id ? people.get(id) || 'Someone' : '')
+  const name = id => (id ? people.get(id) || t.someone : '')
 
   return (
-    <div className="space-y-4">
-      <PageHeader
-        title="Requests"
-        subtitle="Changes, fixes and tagged work from the assistant. Ask for something in the assistant, or tag Shadia or Hafeez with @, and it lands here.">
+    <div className="space-y-4" dir={dir} lang={lang}>
+      <PageHeader title={t.title} subtitle={t.subtitle}>
         <Select value={view} onChange={e => setView(e.target.value)} className="w-52">
-          {VIEWS.map(v => <option key={v.key} value={v.key}>{v.label}</option>)}
+          {VIEWS.map(v => <option key={v.key} value={v.key}>{t.views[v.key]}</option>)}
         </Select>
       </PageHeader>
 
-      {error && <p className="text-xs text-red-600 border border-red-200 bg-red-50 px-3 py-2">The requests could not be loaded: {error}</p>}
+      {error && <p className="text-xs text-red-600 border border-red-200 bg-red-50 px-3 py-2">{t.loadFailed(error)}</p>}
 
       {rows === null ? (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -96,8 +124,8 @@ export function Requests() {
       ) : !error && rows.length === 0 ? (
         <Empty
           icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>}
-          title="No requests yet"
-          description="Tell the assistant what should change, or tag someone with @Shadia or @Hafeez. The request appears here and the right person is notified." />
+          title={t.emptyTitle}
+          description={t.emptyBody} />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
           {COLUMNS.map(col => {
@@ -105,26 +133,26 @@ export function Requests() {
             return (
               <section key={col.key} className="border border-border bg-surface-subtle/60 min-w-0">
                 <header className="flex items-center justify-between px-3 py-2 border-b border-border">
-                  <p className="eyebrow">{col.label}</p>
+                  <p className="eyebrow">{t.columns[col.key]}</p>
                   <span className="text-[11px] text-text-tertiary tabular-nums">{list.length}</span>
                 </header>
                 <ul className="p-2 space-y-2 min-h-[120px]">
                   {list.map(r => (
                     <li key={r.id}>
                       <button onClick={() => setOpen(r.id)}
-                        className="w-full text-left bg-white border border-border hover:border-stone-400 px-3 py-2.5 transition-colors">
+                        className="w-full text-start bg-white border border-border hover:border-stone-400 px-3 py-2.5 transition-colors">
                         <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
-                          <Chip className="text-text-secondary bg-white border-border">{KIND_LABEL[r.kind] || r.kind}</Chip>
-                          {r.status === 'declined' && <Chip className={STATUS_TONE.declined}>Declined</Chip>}
+                          <Chip className="text-text-secondary bg-white border-border">{L.kind[r.kind] || r.kind}</Chip>
+                          {r.status === 'declined' && <Chip className={STATUS_TONE.declined}>{t.declined}</Chip>}
                         </div>
-                        <p className="text-sm font-medium text-text leading-snug">{r.title}</p>
+                        <p className="text-sm font-medium text-text leading-snug" dir="auto">{r.title}</p>
                         <p className="text-[11px] text-text-tertiary mt-1.5 truncate">
-                          {name(r.created_by)}{r.assigned_to ? ` → ${name(r.assigned_to)}` : ''} · {timeAgo(r.updated_at)}
+                          {name(r.created_by)}{r.assigned_to ? ` ${dir === 'rtl' ? '←' : '→'} ${name(r.assigned_to)}` : ''} · {ago(r.updated_at, lang)}
                         </p>
                       </button>
                     </li>
                   ))}
-                  {list.length === 0 && <li className="text-[11px] text-text-tertiary px-1 py-2">Nothing here.</li>}
+                  {list.length === 0 && <li className="text-[11px] text-text-tertiary px-1 py-2">{t.nothing}</li>}
                 </ul>
               </section>
             )
@@ -150,6 +178,8 @@ export function Requests() {
 }
 
 function RequestPanel({ request: r, name, taggable, canEdit, userId, workspaceId, onClose, onChanged }) {
+  const { t, lang, dir } = useT(RW)
+  const L = labelsFor(lang)
   const [events, setEvents] = useState(null)
   const [note, setNote] = useState(r.resolution || '')
   const [link, setLink] = useState(r.link || '')
@@ -190,63 +220,63 @@ function RequestPanel({ request: r, name, taggable, canEdit, userId, workspaceId
   }
 
   const describe = ev => {
-    if (ev.kind === 'created') return 'asked'
-    if (ev.kind === 'status') return `moved it to ${STATUS_LABEL[ev.to_status] || ev.to_status}`
-    if (ev.kind === 'assigned') return 'reassigned it'
-    return 'commented'
+    if (ev.kind === 'created') return t.asked
+    if (ev.kind === 'status') return t.movedTo(L.status[ev.to_status] || ev.to_status)
+    if (ev.kind === 'assigned') return t.reassigned
+    return t.commented
   }
 
   return (
     <Modal open onClose={onClose} title={r.title} width="max-w-2xl">
-      <div className="p-5 space-y-4">
+      <div className="p-5 space-y-4" dir={dir} lang={lang}>
         <div className="flex items-center gap-1.5 flex-wrap">
-          <Chip className={STATUS_TONE[r.status]}>{STATUS_LABEL[r.status]}</Chip>
-          <Chip className="text-text-secondary bg-white border-border">{KIND_LABEL[r.kind] || r.kind}</Chip>
+          <Chip className={STATUS_TONE[r.status]}>{L.status[r.status]}</Chip>
+          <Chip className="text-text-secondary bg-white border-border">{L.kind[r.kind] || r.kind}</Chip>
           <span className="text-[11px] text-text-tertiary">
-            Asked by {name(r.created_by)} {timeAgo(r.created_at)}
-            {r.assigned_to ? ` · assigned to ${name(r.assigned_to)}` : ' · on the board for the builders'}
-            {r.page ? ` · from ${r.page}` : ''}
+            {t.askedBy(name(r.created_by), ago(r.created_at, lang))}
+            {r.assigned_to ? t.assignedTo(name(r.assigned_to)) : t.onBoard}
+            {r.page ? t.from(r.page) : ''}
           </span>
         </div>
 
         {r.body && (
           <div>
-            <p className="eyebrow mb-1">In their words</p>
-            <p className="text-sm text-text whitespace-pre-wrap leading-relaxed">{r.body}</p>
+            <p className="eyebrow mb-1">{t.inTheirWords}</p>
+            <p className="text-sm text-text whitespace-pre-wrap leading-relaxed" dir="auto">{r.body}</p>
           </div>
         )}
         {r.brief && (
           <div>
-            <p className="eyebrow mb-1">Brief</p>
-            <p className="text-sm text-text whitespace-pre-wrap leading-relaxed">{r.brief}</p>
+            <p className="eyebrow mb-1">{t.brief}</p>
+            <p className="text-sm text-text whitespace-pre-wrap leading-relaxed" dir="auto">{r.brief}</p>
           </div>
         )}
         {assistantMounted() && (
-          <button type="button" onClick={() => { onClose(); askAssistant({ item: { entity: 'request', id: r.id, label: `the request "${r.title}"` } }) }}
+          <button type="button" onClick={() => { onClose(); askAssistant({ item: { entity: 'request', id: r.id, label: t.askLabel(r.title) } }) }}
             className="text-xs text-amber-800 hover:underline">
-            Ask Arak about this request
+            {t.askArak}
           </button>
         )}
         {r.link && (
-          <p className="text-xs"><span className="text-text-tertiary">Result: </span>
+          <p className="text-xs"><span className="text-text-tertiary">{t.result}</span>
             <a href={r.link} target="_blank" rel="noreferrer" className="text-amber-800 underline break-all">{r.link}</a>
           </p>
         )}
 
         {canEdit && (
           <div className="border border-border bg-surface-subtle/60 p-3 space-y-2">
-            <Textarea label="Note for the asker" rows={2} value={note} onChange={e => setNote(e.target.value)}
-              placeholder="What was done, or why not" />
-            <Input label="Link (optional)" value={link} onChange={e => setLink(e.target.value)} placeholder="e.g. the pull request" />
+            <Textarea label={t.note} rows={2} value={note} onChange={e => setNote(e.target.value)}
+              placeholder={t.notePh} dir="auto" />
+            <Input label={t.link} value={link} onChange={e => setLink(e.target.value)} placeholder={t.linkPh} dir="ltr" />
             <div className="flex flex-wrap gap-2 pt-1">
-              {r.status !== 'in_progress' && r.status !== 'done' && <Button size="sm" variant="secondary" disabled={busy} onClick={() => move({ status: 'in_progress' })}>Start</Button>}
-              {r.status !== 'done' && <Button size="sm" disabled={busy} onClick={() => move({ status: 'done' })}>Mark done</Button>}
-              {r.status !== 'declined' && r.status !== 'done' && <Button size="sm" variant="danger" disabled={busy} onClick={() => move({ status: 'declined' })}>Decline</Button>}
-              {(r.status === 'done' || r.status === 'declined') && <Button size="sm" variant="secondary" disabled={busy} onClick={() => move({ status: 'new' })}>Reopen</Button>}
+              {r.status !== 'in_progress' && r.status !== 'done' && <Button size="sm" variant="secondary" disabled={busy} onClick={() => move({ status: 'in_progress' })}>{t.start}</Button>}
+              {r.status !== 'done' && <Button size="sm" disabled={busy} onClick={() => move({ status: 'done' })}>{t.markDone}</Button>}
+              {r.status !== 'declined' && r.status !== 'done' && <Button size="sm" variant="danger" disabled={busy} onClick={() => move({ status: 'declined' })}>{t.decline}</Button>}
+              {(r.status === 'done' || r.status === 'declined') && <Button size="sm" variant="secondary" disabled={busy} onClick={() => move({ status: 'new' })}>{t.reopen}</Button>}
               {taggable.length > 0 && (
                 <Select value={r.assigned_to || ''} disabled={busy} className="w-44"
                   onChange={e => e.target.value && move({ assigned_to: e.target.value })}>
-                  <option value="">{r.assigned_to ? 'Reassign…' : 'Assign to…'}</option>
+                  <option value="">{r.assigned_to ? t.reassign : t.assign}</option>
                   {taggable.map(p => <option key={p.user_id} value={p.user_id}>{p.name}{p.label ? ` (${p.label})` : ''}</option>)}
                 </Select>
               )}
@@ -256,15 +286,15 @@ function RequestPanel({ request: r, name, taggable, canEdit, userId, workspaceId
         )}
 
         <div>
-          <p className="eyebrow mb-2">History</p>
+          <p className="eyebrow mb-2">{t.history}</p>
           {events === null ? <Skeleton className="h-12" /> : (
             <ul className="space-y-2">
               {events.map(ev => (
                 <li key={ev.id} className="text-xs leading-relaxed">
-                  <span className="font-medium text-text">{name(ev.actor) || 'Someone'}</span>{' '}
+                  <span className="font-medium text-text">{name(ev.actor) || t.someone}</span>{' '}
                   <span className="text-text-secondary">{describe(ev)}</span>{' '}
-                  <span className="text-text-tertiary">{timeAgo(ev.created_at)}</span>
-                  {ev.body && ev.kind !== 'created' && <p className="text-text-secondary whitespace-pre-wrap mt-0.5">{ev.body}</p>}
+                  <span className="text-text-tertiary">{ago(ev.created_at, lang)}</span>
+                  {ev.body && ev.kind !== 'created' && <p className="text-text-secondary whitespace-pre-wrap mt-0.5" dir="auto">{ev.body}</p>}
                 </li>
               ))}
             </ul>
@@ -272,9 +302,9 @@ function RequestPanel({ request: r, name, taggable, canEdit, userId, workspaceId
           <div className="flex gap-2 mt-3">
             <input value={comment} onChange={e => setComment(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') postComment() }}
-              placeholder="Add a comment"
+              placeholder={t.addComment} dir="auto"
               className="flex-1 border border-border px-3 py-1.5 text-sm focus:outline-none focus:border-stone-400" />
-            <Button size="sm" variant="secondary" disabled={busy || !comment.trim()} onClick={postComment}>Comment</Button>
+            <Button size="sm" variant="secondary" disabled={busy || !comment.trim()} onClick={postComment}>{t.comment}</Button>
           </div>
         </div>
       </div>

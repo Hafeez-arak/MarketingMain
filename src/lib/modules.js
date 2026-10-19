@@ -126,9 +126,9 @@ export const SECTIONS = [
  */
 export const GLOBAL_PAGES = [
   { to: '/tasks', label: 'Tasks', ar: 'المهام', icon: 'check-circle', badge: 'openTasks', translated: true },
-  { to: '/agent', label: 'Assistant', ar: 'المساعد', icon: 'chat' },
-  { to: '/requests', label: 'Requests', ar: 'الطلبات', icon: 'check-square', badge: 'waitingRequests' },
-  { to: '/settings', label: 'Settings', ar: 'الإعدادات', icon: 'gear' },
+  { to: '/agent', label: 'Assistant', ar: 'المساعد', icon: 'chat', translated: true },
+  { to: '/requests', label: 'Requests', ar: 'الطلبات', icon: 'check-square', badge: 'waitingRequests', translated: true },
+  { to: '/settings', label: 'Settings', ar: 'الإعدادات', icon: 'gear', translated: true },
 ]
 
 export const HOME = { to: '/', label: 'Home', ar: 'الرئيسية', icon: 'home', translated: true }

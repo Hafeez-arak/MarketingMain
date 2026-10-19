@@ -10,6 +10,11 @@ import { supabase } from './supabaseClient'
 
 export const STATUS_LABEL = { new: 'New', in_progress: 'In progress', done: 'Done', declined: 'Declined' }
 export const KIND_LABEL = { improvement: 'Improvement', bug: 'Bug', content: 'Content', question: 'Question', task: 'Task' }
+/** The same in Arabic (v2, lib/i18n.js). */
+export const AR_LABELS = {
+  status: { new: 'جديد', in_progress: 'قيد التنفيذ', done: 'منجز', declined: 'مرفوض' },
+  kind: { improvement: 'تحسين', bug: 'خلل', content: 'محتوى', question: 'سؤال', task: 'مهمة' },
+}
 
 /** The board's three columns. Declined sits with done: both are closed. */
 export function columnOf(status) {

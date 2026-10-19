@@ -12,6 +12,28 @@ import { AttachButton, AttachmentTray, TurnAttachments } from './ChatAttachments
 import { useChatAttachments } from '../lib/useChatAttachments'
 import { useTaggable } from '../lib/useTaggable'
 import { ASK_EVENT } from '../lib/askAssistant'
+import { useT } from '../lib/i18n'
+
+// The drawer's own words (lib/i18n.js). The suggestions and the "can see"
+// label come from lib/pageContext.js, which also tells the assistant what
+// is on screen, and stay in English for now; it answers in the language it
+// is asked in.
+const AW = {
+  en: {
+    latest: 'Latest', open: 'Ask the assistant  (⌘K)', title: 'Assistant', thisBrand: 'This brand', canSee: 'can see', new: 'New', close: 'Close',
+    introA: 'Answers come from your own data. It will say when a sample is too small to mean anything, and it can',
+    adminCan: 'change the Brand Brain, rules, research sources and drafts when you ask (every change can be undone)',
+    memberCan: 'propose rules and drafts', introB: '— never publish. You can attach images and PDFs.',
+    askAbout: l => `Ask about ${l}…`, askAnything: 'Ask anything, or @ to tag someone…', stop: 'Stop', ask: 'Ask',
+  },
+  ar: {
+    latest: 'الأحدث', open: 'اسأل المساعد  (⌘K)', title: 'المساعد', thisBrand: 'هذه الشركة', canSee: 'يرى', new: 'جديد', close: 'إغلاق',
+    introA: 'الإجابات من بياناتك أنت. سيخبرك إن كانت العينة أصغر من أن تعني شيئًا، ويمكنه',
+    adminCan: 'تعديل هوية العلامة والقواعد ومصادر البحث والمسودات عندما تطلب (ويمكن التراجع عن كل تغيير)',
+    memberCan: 'اقتراح القواعد والمسودات', introB: '— ولا ينشر أبدًا. يمكنك إرفاق صور وملفات PDF.',
+    askAbout: l => `اسأل عن ${l}…`, askAnything: 'اسأل أي شيء، أو اذكر أحدًا بـ @…', stop: 'إيقاف', ask: 'اسأل',
+  },
+}
 
 // ─── The assistant, on every page ──────────────────────────────────────────
 // AGENT.md §5a. A drawer that opens anywhere and knows what you are looking
@@ -45,6 +67,7 @@ function ToolTrace({ steps, busy }) {
 // Shown once the reader has scrolled up, so getting back to a still-arriving
 // answer is one click rather than a long drag.
 export function JumpToLatest({ onClick }) {
+  const { t } = useT(AW)
   return (
     <button
       type="button"
@@ -54,7 +77,7 @@ export function JumpToLatest({ onClick }) {
                  hover:border-stone-400 transition-colors"
     >
       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
-      Latest
+      {t.latest}
     </button>
   )
 }
@@ -62,6 +85,7 @@ export function JumpToLatest({ onClick }) {
 export function AssistantDrawer() {
   const location = useLocation()
   const { activeWorkspaceId, activeWorkspace, isAccessAdmin } = useAuth()
+  const { t: w, lang, dir } = useT(AW)
   const taggable = useTaggable(activeWorkspaceId)
   const [open, setOpen] = useState(false)
   // Whether the earlier-conversations popup is up. Tracked only so this
@@ -164,8 +188,8 @@ export function AssistantDrawer() {
       {!open ? (
         <button
           onClick={() => setOpen(true)}
-          title="Ask the assistant  (⌘K)"
-          className="fixed bottom-5 right-5 z-40 h-11 w-11 rounded-full shadow-dropdown bg-amber-700 text-white
+          title={w.open} aria-label={w.title}
+          className="fixed bottom-5 end-5 z-40 h-11 w-11 rounded-full shadow-dropdown bg-amber-700 text-white
                      shadow-dropdown hover:bg-amber-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-700 focus-visible:ring-offset-2 flex items-center justify-center"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
@@ -175,28 +199,28 @@ export function AssistantDrawer() {
       ) : null}
 
       {open ? (
-        <div className="fixed inset-0 z-50 flex justify-end">
+        <div className="fixed inset-0 z-50 flex justify-end" dir={dir} lang={lang}>
           {/* Click-away rather than a modal: the person is meant to keep
               working with this open, so it must never trap focus. */}
           <div className="flex-1 bg-stone-900/10" onClick={close} />
 
-          <aside className="w-full max-w-md bg-white h-full shadow-dropdown flex flex-col border-l border-border">
+          <aside className="w-full max-w-md bg-white h-full shadow-dropdown flex flex-col border-s border-border">
             <header className="px-4 py-3 border-b border-border-light flex items-start gap-2">
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold text-text">Assistant</div>
+                <div className="text-sm font-semibold text-text">{w.title}</div>
                 <div className="text-xs text-text-secondary truncate">
-                  {activeWorkspace?.name || 'This brand'}
+                  {activeWorkspace?.name || w.thisBrand}
                   {/* Saying what it can see, rather than silently having it.
                       An assistant with invisible context is harder to trust. */}
-                  {contextLabel ? <> · can see <span className="text-text">{contextLabel}</span></> : null}
+                  {contextLabel ? <> · {w.canSee} <span className="text-text" dir="auto">{contextLabel}</span></> : null}
                 </div>
               </div>
               {turns.length ? (
                 <button onClick={reset} className="text-xs font-semibold text-text-secondary hover:text-text px-2 py-1 border border-transparent hover:border-border transition-colors">
-                  New
+                  {w.new}
                 </button>
               ) : null}
-              <button onClick={close} aria-label="Close"
+              <button onClick={close} aria-label={w.close}
                 className="w-7 h-7 flex items-center justify-center text-text-tertiary border border-transparent hover:border-border hover:text-text transition-colors">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
               </button>
@@ -207,17 +231,15 @@ export function AssistantDrawer() {
               {turns.length === 0 ? (
                 <div className="pt-2">
                   <p className="text-xs text-text-secondary mb-2.5">
-                    Answers come from your own data. It will say when a sample is too small
-                    to mean anything, and it can {isAccessAdmin
-                      ? 'change the Brand Brain, rules, research sources and drafts when you ask (every change can be undone)'
-                      : 'propose rules and drafts'} — never publish. You can attach images and PDFs.
+                    {w.introA} {isAccessAdmin ? w.adminCan : w.memberCan} {w.introB}
                   </p>
                   <div className="space-y-1.5">
                     {suggestions.map(s => (
                       <button
                         key={s}
                         onClick={() => send(s)}
-                        className="block w-full text-left text-xs px-2.5 py-2 border transition-colors
+                        dir="auto"
+                        className="block w-full text-start text-xs px-2.5 py-2 border transition-colors
                                    border-border text-text-secondary hover:bg-surface-subtle"
                       >
                         {s}
@@ -229,18 +251,18 @@ export function AssistantDrawer() {
                 turns.map((t, i) => (
                   <div key={i}>
                     {t.role === 'user' ? (
-                      <div className="text-right">
+                      <div className="text-end">
                         <TurnAttachments items={t.attachments} />
                         {t.text ? (
                           <span className="inline-block bg-surface-muted px-3 py-1.5 text-sm
-                                           text-text max-w-[90%] text-left">
+                                           text-text max-w-[90%] text-start" dir="auto">
                             {t.text}
                           </span>
                         ) : null}
                       </div>
                     ) : (
                       <div>
-                        <AgentMarkdown>{t.text}</AgentMarkdown>
+                        <div dir="auto"><AgentMarkdown>{t.text}</AgentMarkdown></div>
                         {!t.text && !t.error && busy && i === turns.length - 1 ? <Spinner size="sm" /> : null}
                         {t.error ? (
                           <div className="mt-1 text-sm text-red-600">{t.error}</div>
@@ -287,13 +309,13 @@ export function AssistantDrawer() {
                 onPaste={files.onPaste}
                 canSubmitEmpty={files.items.length > 0}
                 mentions={taggable}
-                placeholder={contextLabel ? `Ask about ${contextLabel}…` : 'Ask anything, or @ to tag someone…'}
+                placeholder={contextLabel ? w.askAbout(contextLabel) : w.askAnything}
                 disabled={!ready}
               />
               {busy ? (
-                <Button variant="secondary" onClick={stop}>Stop</Button>
+                <Button variant="secondary" onClick={stop}>{w.stop}</Button>
               ) : (
-                <Button type="submit" disabled={(!question.trim() && !files.items.length) || files.preparing || !ready}>Ask</Button>
+                <Button type="submit" disabled={(!question.trim() && !files.items.length) || files.preparing || !ready}>{w.ask}</Button>
               )}
             </form>
           </aside>
