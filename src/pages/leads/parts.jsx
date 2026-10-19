@@ -40,6 +40,31 @@ export function LeadTabs({ tabs, value, onChange, children }) {
   )
 }
 
+/**
+ * A lead's name in a list (2026-10-19): bold with a dot until this person
+ * has opened it, plain after, like an inbox.
+ */
+export function LeadName({ lead, unread, fallback = 'Unknown sender' }) {
+  return (
+    <span className="flex items-center gap-1.5 min-w-0">
+      {unread && <span className="w-2 h-2 rounded-full bg-sky-600 flex-shrink-0" aria-label="Unread" />}
+      <span className={`text-sm truncate ${unread ? 'font-bold text-text' : 'font-normal text-text-secondary'}`} dir="auto">
+        {lead.company || lead.name || lead.email || fallback}
+      </span>
+    </span>
+  )
+}
+
+/** "Mark unread" on an opened lead: it closes, bold again. */
+export function MarkUnread({ onClick }) {
+  return (
+    <button type="button" onClick={onClick}
+      className="text-xs px-2.5 py-1 text-text-secondary hover:text-text hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400">
+      Mark unread
+    </button>
+  )
+}
+
 export function VerdictTag({ verdict, corrected = false }) {
   return (
     <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] leading-[1.4] whitespace-nowrap ${VERDICT_TONE[verdict] || VERDICT_TONE.pending}`}>

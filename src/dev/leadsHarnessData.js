@@ -97,6 +97,8 @@ const json = (body, status = 200) => new Response(JSON.stringify(body), { status
 const original = window.fetch.bind(window)
 
 const cards = {}
+const READS = new Set()
+const NOTES = [{ id: 'n1', kind: 'lead', title: 'Arif gave you a lead: Example Fit-Out Co', body: '60 linear profiles and DALI dimming for an office floor, Riyadh', link: '/leads?view=pipeline&lead=m1', workspace_id: WS, created_at: new Date(Date.now() - 20 * 60_000).toISOString(), read_at: null }]
 const CARD_CONTEXT = {
   suppliers: ['C°LB', 'Reggiani', 'Zennio'],
   accounts: [{ name: 'Nour Contracting Co', orders: 4, value_sar: 610000, last_order: '2026-05-01', status: 'new' }],
@@ -125,6 +127,19 @@ window.fetch = async (input, init = {}) => {
   if (mode === 'hang') return new Promise(() => {})
   if (mode === 'fail') return Promise.reject(new TypeError('Failed to fetch'))
   if (url.includes('/rest/v1/leads')) return restLeads(url)
+  // Read and unread (2026-10-19): everything before 6 Oct counts as read.
+  if (url.includes('/rest/v1/rpc/lead_read_before')) return json('2026-10-06T00:00:00Z')
+  if (url.includes('/rest/v1/lead_reads')) {
+    const method = (init.method || 'GET').toUpperCase()
+    if (method === 'POST') { const b = JSON.parse(init.body || '{}'); for (const r of [].concat(b)) READS.add(r.lead_id); return json([], 201) }
+    if (method === 'DELETE') { const id = new URL(url, window.location.origin).searchParams.get('lead_id')?.replace(/^eq\./, ''); READS.delete(id); return json([]) }
+    return json([...READS].map((lead_id) => ({ lead_id })))
+  }
+  // The bell: one made-up "you were given a lead".
+  if (url.includes('/rest/v1/notifications')) {
+    if ((init.method || 'GET').toUpperCase() === 'PATCH') { NOTES.forEach((n) => { n.read_at = n.read_at || new Date().toISOString() }); return json([]) }
+    return json(NOTES)
+  }
   // What a sales seat reads for the "Came in" filter (SalesApp).
   if (url.includes('/rest/v1/lead_mailboxes')) return json(status.mailboxes.map(({ id, email }) => ({ id, email, label: '' })))
   if (url.includes('/api/leads/status')) return json(status)

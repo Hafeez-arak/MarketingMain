@@ -7,7 +7,8 @@ import {
   SENDER_LABEL, PROJECT_LABEL, REQUEST_LABEL, FOLDER_LABEL, PHILIPS_LABEL, CRM_LABEL, channelLabel, brandOf, phonesOf, projectOf,
   ownerLabel, shortName, FORWARD_LABEL, assignable, leadTabs,
 } from '../../lib/leads/view'
-import { VerdictTag, LeadDetail, LeadTabs } from './parts'
+import { VerdictTag, LeadDetail, LeadTabs, LeadName, MarkUnread } from './parts'
+import { useLeadReads } from './useLeadReads'
 import BattleCard from './BattleCard'
 import { StageBar, DeleteLead } from './Pipeline'
 import LeadOverview from './LeadOverview'
@@ -182,7 +183,7 @@ function CardWaiting({ lead, canApprove, onAssign }) {
   )
 }
 
-function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailboxes, canApprove, onAsk, team, me, onAssign, onForward, onChange, onDeleted }) {
+function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailboxes, canApprove, onAsk, team, me, onAssign, onForward, onChange, onDeleted, unread, onMarkUnread }) {
   const v = effectiveVerdict(lead)
   const v2 = (lead.criteria_version || 1) >= 2
   const junk = lead.folder === 'junk'
@@ -205,7 +206,7 @@ function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailbo
           )}
         </Cell>
         <Cell label="From" className="col-span-2 md:col-span-1">
-          <span className="text-sm font-semibold text-text truncate block" dir="auto">{lead.company || lead.name || lead.email || 'Unknown sender'}</span>
+          <LeadName lead={lead} unread={unread} />
           <span className="text-[11px] text-text-tertiary truncate block">
             {lead.email ? lead.email.split('@')[1] : ''}{lead.email_kind === 'free' ? ' · free email' : ''}
           </span>
@@ -247,6 +248,7 @@ function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailbo
             <>
               <LeadTabs tabs={leadTabs(lead)} value={tab} onChange={setTab}>
                 <AskAboutLead lead={lead} />
+                <MarkUnread onClick={onMarkUnread} />
                 <DeleteLead lead={lead} workspaceId={workspaceId} me={me} canAll={canApprove} onDeleted={onDeleted} />
               </LeadTabs>
               {tab === 'lead'
@@ -429,6 +431,9 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
 
   useEffect(() => { queueMicrotask(load) }, [load])
 
+  // Read and unread, for this person (2026-10-19).
+  const reads = useLeadReads(workspaceId, me, list.rows)
+
   const replaceRow = (id, updated) => setList((s) => ({ ...s, rows: s.rows.map((l) => (l.id === id ? { ...l, ...updated } : l)) }))
 
   // A correction changes the row in place; it leaves the list on the next load.
@@ -561,7 +566,9 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
       ) : (
         <ul className="divide-y divide-border">
           {list.rows.map((l) => (
-            <Row key={l.id} lead={l} open={open === l.id} onToggle={() => setOpen(open === l.id ? null : l.id)} onReview={review}
+            <Row key={l.id} lead={l} open={open === l.id} unread={reads.unread(l)} onReview={review}
+              onToggle={() => { if (open !== l.id) reads.mark(l, true); setOpen(open === l.id ? null : l.id) }}
+              onMarkUnread={() => { reads.mark(l, false); setOpen(null) }}
               onSetProject={setProject} workspaceId={workspaceId} mailboxes={mailboxes} canApprove={canApprove} onAsk={(lead) => { setApproving({ busy: false, error: '' }); setAsking(lead) }}
               team={team} me={me} onAssign={(lead) => { setAssignState({ busy: false, error: '' }); setAssigning(lead) }} onForward={forwardAgain}
               onChange={(updated) => replaceRow(updated.id, updated)}

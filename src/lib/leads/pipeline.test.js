@@ -83,3 +83,15 @@ describe('the Lead tab', () => {
     expect(leadTabs({ source: 'manual' }).map(([k]) => k)).toEqual(['lead', 'card'])
   })
 })
+
+import { isUnread } from './view'
+
+describe('read and unread', () => {
+  const cut = '2026-10-14T00:00:00+03:00'
+  it('is unread from the cutoff on until this person opens it', () => {
+    expect(isUnread({ id: 'a', received_at: '2026-10-15T08:00:00Z' }, new Set(), cut)).toBe(true)
+    expect(isUnread({ id: 'a', received_at: '2026-10-15T08:00:00Z' }, new Set(['a']), cut)).toBe(false)
+    expect(isUnread({ id: 'b', received_at: '2026-10-13T20:59:00Z' }, new Set(), cut)).toBe(false)
+    expect(isUnread({ id: 'c', created_at: '2026-10-19T08:00:00Z' }, new Set(), null)).toBe(true)
+  })
+})

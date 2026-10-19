@@ -325,3 +325,14 @@ export const leadTabs = (lead = {}) => [
   ['card', 'Battle card'],
   ...(lead.source === 'manual' ? [] : [['email', 'Email and evidence']]),
 ]
+
+/**
+ * Unread for this person (2026-10-19): it arrived on or after the company's
+ * read_before and they have not opened it. `readIds` is a Set of their reads.
+ */
+export function isUnread(lead = {}, readIds = new Set(), readBefore = null) {
+  if (!lead.id || readIds.has(lead.id)) return false
+  const at = lead.received_at || lead.created_at
+  if (readBefore && at && new Date(at).getTime() < new Date(readBefore).getTime()) return false
+  return true
+}

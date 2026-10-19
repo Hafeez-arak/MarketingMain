@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import { manualLead, trackFields } from '../../src/lib/leads/pipeline.js'
 import { openCard } from './_card.js'
-import { teamMember, NOT_TO_ADMIN } from './_assign.js'
+import { teamMember, NOT_TO_ADMIN, notifyAssigned } from './_assign.js'
 
 // ─── The pipeline: leads added by hand, and each lead's stage ─────────────
 // The owner's decisions (2026-10-18): anyone on the sales team adds a lead
@@ -55,6 +55,9 @@ export async function addLead(deps, { workspaceId, user, body = {}, canAssign = 
   }) || []
   if (!lead) return { status: 500, error: 'The lead was not saved. Try again.' }
   const card = await openCard(deps, { workspaceId, leadId: lead.id }).catch(() => null)
+  // Added for someone else: their bell says so. Their own is read already.
+  if (owner && owner !== user.id) await notifyAssigned(deps, { workspaceId, lead, to: owner, by: user })
+  else await deps.db('lead_reads', { method: 'POST', prefer: 'resolution=ignore-duplicates,return=minimal', body: { lead_id: lead.id, user_id: user.id, workspace_id: workspaceId } }).catch(() => null)
   return { lead, card: card?.card || null }
 }
 

@@ -5,7 +5,8 @@ import { SENDER_LABEL, PROJECT_LABEL, channelLabel, ownerLabel, phonesOf, when, 
 import {
   STAGES, STAGE_LABEL, OPEN_STAGES, LOST_REASON_LABEL, CHANNEL_LABEL, groupByStage, pipelineStats, followUpState, shortDate, riyadhToday,
 } from '../../lib/leads/pipeline'
-import { LeadDetail, LeadTabs } from './parts'
+import { LeadDetail, LeadTabs, LeadName, MarkUnread } from './parts'
+import { useLeadReads } from './useLeadReads'
 import LeadOverview from './LeadOverview'
 import BattleCard from './BattleCard'
 
@@ -126,16 +127,16 @@ function StageSelect({ lead, onPick, busy }) {
   )
 }
 
-function Row({ lead, open, onToggle, onPick, busy, team, me, workspaceId, mailboxes, onReview, onChange, today, canAll, onDeleted }) {
+function Row({ lead, open, onToggle, onPick, busy, team, me, workspaceId, mailboxes, onReview, onChange, today, canAll, onDeleted, unread, onMarkUnread }) {
   const [tab, setTab] = useState('lead')
   const f = followUpState(lead.follow_up, today)
   return (
-    <li className={open ? 'bg-surface-subtle' : ''}>
+    <li id={`lead-${lead.id}`} className={`scroll-mt-4 ${open ? 'bg-surface-subtle' : ''}`}>
       <div role="button" tabIndex={0} onClick={onToggle} aria-expanded={open}
         onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onToggle() } }}
         className={`w-full text-left px-4 py-3 hover:bg-surface-subtle transition-colors cursor-pointer grid grid-cols-2 gap-x-3 gap-y-1.5 focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400 ${GRID}`}>
         <div className="col-span-2 md:col-span-1 min-w-0">
-          <span className="text-sm font-semibold text-text truncate block" dir="auto">{lead.company || lead.name || lead.email || 'Unknown'}</span>
+          <LeadName lead={lead} unread={unread} fallback="Unknown" />
           <span className="text-[11px] text-text-tertiary truncate block" dir="auto">
             {[lead.company ? lead.name : '', phonesOf(lead)[0]].filter(Boolean).join(' · ')}
           </span>
@@ -168,6 +169,7 @@ function Row({ lead, open, onToggle, onPick, busy, team, me, workspaceId, mailbo
         <div className="border-t border-border bg-white">
           <StageBar lead={lead} workspaceId={workspaceId} onChange={onChange} />
           <LeadTabs tabs={leadTabs(lead)} value={tab} onChange={setTab}>
+            <MarkUnread onClick={onMarkUnread} />
             <DeleteLead lead={lead} workspaceId={workspaceId} me={me} canAll={canAll} onDeleted={onDeleted} />
           </LeadTabs>
           {tab === 'lead'
@@ -181,7 +183,7 @@ function Row({ lead, open, onToggle, onPick, busy, team, me, workspaceId, mailbo
   )
 }
 
-export default function Pipeline({ workspaceId, refreshKey = 0, canApprove = false, team = [], me = '', mailboxes = [], onReview, onCount }) {
+export default function Pipeline({ workspaceId, refreshKey = 0, canApprove = false, team = [], me = '', mailboxes = [], onReview, onCount, focus = '' }) {
   const [owner, setOwner] = useState(canApprove ? '' : 'me')
   const [search, setSearch] = useState('')
   const [showClosed, setShowClosed] = useState(false)
@@ -201,6 +203,23 @@ export default function Pipeline({ workspaceId, refreshKey = 0, canApprove = fal
     }
   }, [workspaceId, owner, me, key])
   useEffect(() => { queueMicrotask(load) }, [load])
+
+  const reads = useLeadReads(workspaceId, me, data.rows)
+
+  // Opened from a notification (?lead=…): open that lead once it is loaded,
+  // show it whoever's it is, and scroll to it.
+  const [focused, setFocused] = useState('')
+  useEffect(() => {
+    if (!focus || focused === focus || data.key !== key) return
+    queueMicrotask(() => {
+      const lead = data.rows.find((l) => l.id === focus)
+      if (!lead) { if (owner) setOwner(''); else setFocused(focus); return }
+      setFocused(focus)
+      setOpen(focus)
+      reads.mark(lead, true)
+      setTimeout(() => document.getElementById(`lead-${focus}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 50)
+    })
+  }, [focus, focused, data, key, owner, reads])
 
   const replace = (lead) => setData((d) => ({ ...d, rows: d.rows.map((l) => (l.id === lead.id ? { ...l, ...lead } : l)) }))
   const { change, dialog, error: stageError, busy } = useStageChange(workspaceId, replace)
@@ -257,7 +276,9 @@ export default function Pipeline({ workspaceId, refreshKey = 0, canApprove = fal
             {g.leads.length > 0 && (
               <ul className="divide-y divide-border border-b border-border">
                 {g.leads.map((l) => (
-                  <Row key={l.id} lead={l} open={open === l.id} onToggle={() => setOpen(open === l.id ? null : l.id)} onPick={change} busy={busy}
+                  <Row key={l.id} lead={l} open={open === l.id} unread={reads.unread(l)} onPick={change} busy={busy}
+                    onToggle={() => { if (open !== l.id) reads.mark(l, true); setOpen(open === l.id ? null : l.id) }}
+                    onMarkUnread={() => { reads.mark(l, false); setOpen(null) }}
                     team={team} me={me} workspaceId={workspaceId} mailboxes={mailboxes} onReview={onReview} onChange={replace} today={today}
                     canAll={canApprove} onDeleted={(gone) => { setOpen(null); setData((d) => ({ ...d, rows: d.rows.filter((x) => x.id !== gone.id) })) }} />
                 ))}
