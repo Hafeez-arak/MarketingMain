@@ -11,6 +11,30 @@
       "maxDuration": 300
     }
   },
+  "redirects": [
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "leads.araklighting.com"
+        }
+      ],
+      "destination": "https://sales.araklighting.com/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "leads.arak-sa.com"
+        }
+      ],
+      "destination": "https://sales.araklighting.com/:path*",
+      "permanent": true
+    }
+  ],
   "rewrites": [
     {
       "source": "/((?!api/).*)",

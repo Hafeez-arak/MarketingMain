@@ -230,9 +230,12 @@ that mailbox's Sent Items. **Send test alert** on the page proves the path;
 
 ## 6. The sales team: Leads only
 
-A sales person signs in at **sales.araklighting.com** (the same app; the old
-leads.araklighting.com address still works) and sees the leads list and
-nothing else: no sidebar, no marketing app, no agent settings.
+A sales person signs in at **sales.araklighting.com** (the same app) and
+sees the leads list and nothing else: no sidebar, no marketing app, no agent
+settings. The old leads.araklighting.com and leads.arak-sa.com addresses are
+switched off (2026-10-19): vercel.json sends them to sales.araklighting.com.
+To remove them for good: Vercel → marketing-main → Settings → Domains →
+remove both, and delete the `leads` CNAME at GoDaddy.
 
 The address needs, once:
 - **GoDaddy** (araklighting.com → DNS): a CNAME record, name `sales`, value

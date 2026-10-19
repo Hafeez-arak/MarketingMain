@@ -19,7 +19,7 @@ import {
 // part of separating sales from marketing). Two views: Leads, the clean list
 // the sales team asked for (Board.jsx, 2026-10-11), and Agent settings, where
 // the agent is switched on or off, tried on any text, and its key and
-// mailboxes are managed. leads.araklighting.com opens straight onto it.
+// mailboxes are managed. sales.araklighting.com opens straight onto it.
 //
 // How it is wired (the Sheet's script, the keys) is in docs/LEADS-SETUP.md,
 // not on this page: the page says what is wrong, not how to fix it.
