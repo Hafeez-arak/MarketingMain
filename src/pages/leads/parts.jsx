@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Button, Spinner } from '../../components/ui/index'
 import { leadsApi } from '../../lib/leads/client'
-import { VERDICT_LABEL, VERDICT_TONE, CRM_LABEL, criteriaLabels, phonesOf, channelLabel, outlookLink, when, FOLDER_LABEL } from '../../lib/leads/view'
+import { VERDICT_TONE, criteriaLabels, phonesOf, channelLabel, outlookLink, when, leadLabels } from '../../lib/leads/view'
+import { useT } from '../../lib/i18n'
+import { LW } from './words'
 import { emailSegments, emailLinks, isFileLink, fileSize } from '../../lib/leads/emailText'
 
 // ─── Pieces shared by the leads list and the agent settings ────────────────
@@ -18,9 +20,10 @@ const TAB_ICON = {
  * [[key, label]]; `children` sits at the right end (Ask Arak, Delete).
  */
 export function LeadTabs({ tabs, value, onChange, children }) {
+  const { t } = useT(LW)
   return (
-    <div className="flex flex-wrap items-center gap-2 px-4 pt-3 md:pl-[8.25rem]">
-      <div role="tablist" aria-label="Lead" className="inline-flex border border-border bg-surface-subtle p-0.5">
+    <div className="flex flex-wrap items-center gap-2 px-4 pt-3 md:ps-[8.25rem]">
+      <div role="tablist" aria-label={t.leadTabsAria} className="inline-flex border border-border bg-surface-subtle p-0.5">
         {tabs.map(([k, label]) => {
           const on = value === k
           return (
@@ -35,7 +38,7 @@ export function LeadTabs({ tabs, value, onChange, children }) {
           )
         })}
       </div>
-      <div className="ml-auto flex items-center gap-1">{children}</div>
+      <div className="ms-auto flex items-center gap-1">{children}</div>
     </div>
   )
 }
@@ -44,12 +47,13 @@ export function LeadTabs({ tabs, value, onChange, children }) {
  * A lead's name in a list (2026-10-19): bold with a dot until this person
  * has opened it, plain after, like an inbox.
  */
-export function LeadName({ lead, unread, fallback = 'Unknown sender' }) {
+export function LeadName({ lead, unread, fallback = null }) {
+  const { t } = useT(LW)
   return (
     <span className="flex items-center gap-1.5 min-w-0">
-      {unread && <span className="w-2 h-2 rounded-full bg-sky-600 flex-shrink-0" aria-label="Unread" />}
+      {unread && <span className="w-2 h-2 rounded-full bg-sky-600 flex-shrink-0" aria-label={t.unread} />}
       <span className={`text-sm truncate ${unread ? 'font-bold text-text' : 'font-normal text-text-secondary'}`} dir="auto">
-        {lead.company || lead.name || lead.email || fallback}
+        {lead.company || lead.name || lead.email || fallback || t.unknownSender}
       </span>
     </span>
   )
@@ -57,32 +61,38 @@ export function LeadName({ lead, unread, fallback = 'Unknown sender' }) {
 
 /** "Mark unread" on an opened lead: it closes, bold again. */
 export function MarkUnread({ onClick }) {
+  const { t } = useT(LW)
   return (
     <button type="button" onClick={onClick}
       className="text-xs px-2.5 py-1 text-text-secondary hover:text-text hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400">
-      Mark unread
+      {t.markUnread}
     </button>
   )
 }
 
 export function VerdictTag({ verdict, corrected = false }) {
+  const { t, lang } = useT(LW)
   return (
     <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] leading-[1.4] whitespace-nowrap ${VERDICT_TONE[verdict] || VERDICT_TONE.pending}`}>
-      {VERDICT_LABEL[verdict] || verdict}
-      {corrected && <span className="font-semibold normal-case tracking-normal opacity-70">· corrected</span>}
+      {leadLabels(lang).verdict[verdict] || verdict}
+      {corrected && <span className="font-semibold normal-case tracking-normal opacity-70">{t.corrected}</span>}
     </span>
   )
 }
 
 /** The sales team's criteria as small chips. Junk and Philips only are red: someone must look. */
-const CHIP_TONE = { Junk: 'bg-red-50 text-red-600', 'Philips only': 'bg-red-50 text-red-600', Trader: 'bg-amber-100 text-amber-800', 'Not verified': 'bg-amber-100 text-amber-800' }
+// Coloured by meaning, in whichever language the chip is written.
+const chipTone = (label, L) => ([L.folder.junk, L.philips.only].includes(label) ? 'bg-red-50 text-red-600'
+  : [L.sender.trader, L.words.notVerified].includes(label) ? 'bg-amber-100 text-amber-800' : 'bg-stone-100 text-stone-600')
 export function CriteriaChips({ lead }) {
-  const labels = criteriaLabels(lead)
+  const { lang } = useT(LW)
+  const L = leadLabels(lang)
+  const labels = criteriaLabels(lead, lang)
   if (!labels.length) return null
   return (
     <div className="flex flex-wrap gap-1 mt-1">
       {labels.map((t) => (
-        <span key={t} className={`text-[10px] px-1.5 py-0.5 ${CHIP_TONE[t] || 'bg-stone-100 text-stone-600'}`}>{t}</span>
+        <span key={t} className={`text-[10px] px-1.5 py-0.5 ${chipTone(t, L)}`}>{t}</span>
       ))}
     </div>
   )
@@ -90,11 +100,12 @@ export function CriteriaChips({ lead }) {
 
 /** Why the agent read the sender, the source and the phase the way it did. */
 function Evidence({ lead }) {
+  const { t } = useT(LW)
   const rows = [
-    ['Why', lead.reason],
-    ['Sender', lead.sender_evidence],
-    ['Source', [lead.source_evidence, lead.website ? `website checked: ${lead.website}` : ''].filter(Boolean).join(' · ')],
-    ['Phase', lead.project_evidence],
+    [t.ev.why, lead.reason],
+    [t.ev.sender, lead.sender_evidence],
+    [t.ev.source, [lead.source_evidence, lead.website ? t.websiteChecked(lead.website) : ''].filter(Boolean).join(' · ')],
+    [t.ev.phase, lead.project_evidence],
   ].filter(([, v]) => v)
   if (!rows.length) return null
   return (
@@ -110,6 +121,8 @@ function Evidence({ lead }) {
  * is saved at once; the reason is saved with it when given.
  */
 function Review({ lead, onReview }) {
+  const { t, lang } = useT(LW)
+  const V = leadLabels(lang).verdict
   const [why, setWhy] = useState(null) // { verdict, text } while the box is open
   async function no(v) {
     const updated = await onReview(lead, v)
@@ -123,14 +136,14 @@ function Review({ lead, onReview }) {
   return (
     <div className="space-y-2 pt-1">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-text-tertiary">Is the agent right?</span>
-        <Button size="xs" variant={lead.human_verdict === lead.verdict ? 'primary' : 'secondary'} onClick={() => { setWhy(null); onReview(lead, lead.verdict) }}>Yes</Button>
+        <span className="text-text-tertiary">{t.agentRight}</span>
+        <Button size="xs" variant={lead.human_verdict === lead.verdict ? 'primary' : 'secondary'} onClick={() => { setWhy(null); onReview(lead, lead.verdict) }}>{t.yes}</Button>
         {['qualified', 'needs_review', 'unqualified'].filter((v) => v !== lead.verdict).map((v) => (
           <Button key={v} size="xs" variant={lead.human_verdict === v ? 'primary' : 'secondary'} onClick={() => no(v)}>
-            No, {VERDICT_LABEL[v].toLowerCase()}
+            {t.noVerdict(V[v])}
           </Button>
         ))}
-        {lead.human_verdict && <Button size="xs" variant="ghost" onClick={() => { setWhy(null); onReview(lead, null) }}>Clear</Button>}
+        {lead.human_verdict && <Button size="xs" variant="ghost" onClick={() => { setWhy(null); onReview(lead, null) }}>{t.clear}</Button>}
       </div>
       {why && (
         <form onSubmit={saveWhy} className="flex flex-wrap items-center gap-2">
@@ -139,16 +152,17 @@ function Review({ lead, onReview }) {
             value={why.text}
             onChange={(e) => setWhy({ ...why, text: e.target.value })}
             maxLength={500}
-            placeholder="Why? (optional) e.g. a trader asking for a price list"
-            aria-label="Why the agent was wrong (optional)"
+            placeholder={t.whyPh}
+            aria-label={t.whyAria}
+            dir="auto"
             className="flex-1 min-w-[14rem] border border-border bg-white text-text text-xs px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-amber-400"
           />
-          <Button size="xs" type="submit" disabled={!why.text.trim()}>Save</Button>
-          <Button size="xs" variant="ghost" onClick={() => setWhy(null)}>Skip</Button>
+          <Button size="xs" type="submit" disabled={!why.text.trim()}>{t.save}</Button>
+          <Button size="xs" variant="ghost" onClick={() => setWhy(null)}>{t.skip}</Button>
         </form>
       )}
       {!why && lead.human_reason && lead.human_verdict && lead.human_verdict !== lead.verdict && (
-        <p className="text-text-tertiary">Why it was corrected: <span className="text-text" dir="auto">{lead.human_reason}</span></p>
+        <p className="text-text-tertiary">{t.whyCorrected}<span className="text-text" dir="auto">{lead.human_reason}</span></p>
       )}
     </div>
   )
@@ -160,7 +174,7 @@ function Review({ lead, onReview }) {
  */
 export function EmailText({ text }) {
   return (
-    <p className="whitespace-pre-wrap text-text leading-relaxed border-l-2 border-border pl-3 break-words" dir="auto">
+    <p className="whitespace-pre-wrap text-text leading-relaxed border-s-2 border-border ps-3 break-words" dir="auto">
       {emailSegments(text).map((p, i) => (p.href ? (
         <a key={i} href={p.href} target="_blank" rel="noreferrer noopener" className="text-sky-700 underline underline-offset-2 hover:text-sky-900 break-all">{p.link}</a>
       ) : <span key={i}>{p.text}</span>))}
@@ -208,6 +222,7 @@ async function download(workspaceId, lead, a) {
  * has no access to the info@ mailbox, so this is where they get the BOQ.
  */
 export function Attachments({ lead, workspaceId }) {
+  const { t } = useT(LW)
   const [list, setList] = useState({ for: null, items: [], error: '' })
   const [busy, setBusy] = useState('')
   const [fail, setFail] = useState('')
@@ -230,22 +245,22 @@ export function Attachments({ lead, workspaceId }) {
   }
   return (
     <div className="space-y-1.5">
-      <p className="eyebrow">Attachments and shared files</p>
-      {loading ? <p className="text-text-tertiary flex items-center gap-1.5"><Spinner size="sm" /> Looking in the mailbox…</p>
-        : list.error ? <p className="text-text-tertiary">Could not list the attachments: {list.error}</p>
-        : isEmail && !list.items.length && !files.length ? <p className="text-text-tertiary">No attachments on this email.</p> : null}
+      <p className="eyebrow">{t.attTitle}</p>
+      {loading ? <p className="text-text-tertiary flex items-center gap-1.5"><Spinner size="sm" /> {t.lookingMailbox}</p>
+        : list.error ? <p className="text-text-tertiary">{t.attFailed(list.error)}</p>
+        : isEmail && !list.items.length && !files.length ? <p className="text-text-tertiary">{t.noAtt}</p> : null}
       {list.items.length > 0 && (
         <ul className="flex flex-wrap gap-2">
           {list.items.map((a) => (
             <li key={a.id}>
               <button type="button" onClick={() => get(a)} disabled={busy === a.id || a.tooBig || a.kind === 'link'}
-                title={a.tooBig ? 'Too large to download here: open the email in Outlook.' : a.kind === 'link' ? 'A link to a shared file: open the email in Outlook.' : a.big ? 'Download (a large file: it takes a moment to prepare)' : 'Download'}
+                title={a.tooBig ? t.tooBigTitle : a.kind === 'link' ? t.linkTitle : a.big ? t.bigTitle : t.download}
                 className="inline-flex items-center gap-1.5 border border-border bg-white px-2.5 py-1.5 text-xs hover:bg-surface-subtle disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400">
                 {busy === a.id ? <Spinner size="sm" /> : (
                   <svg className="w-3.5 h-3.5 text-text-tertiary" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v3h16v-3"/></svg>
                 )}
                 <span className="font-semibold text-text max-w-[16rem] truncate" dir="auto">{a.name}</span>
-                <span className="text-text-tertiary">{a.tooBig ? `${fileSize(a.size)}, too large` : fileSize(a.size)}</span>
+                <span className="text-text-tertiary" dir="ltr">{a.tooBig ? t.tooLarge(fileSize(a.size)) : fileSize(a.size)}</span>
               </button>
             </li>
           ))}
@@ -254,7 +269,7 @@ export function Attachments({ lead, workspaceId }) {
       {files.length > 0 && (
         <ul className="space-y-0.5">
           {files.map((l) => (
-            <li key={l.href}><a href={l.href} target="_blank" rel="noreferrer noopener" className="text-sky-700 underline underline-offset-2 hover:text-sky-900 break-all">{l.host ? `Shared files on ${l.host}` : l.link}</a></li>
+            <li key={l.href}><a href={l.href} target="_blank" rel="noreferrer noopener" className="text-sky-700 underline underline-offset-2 hover:text-sky-900 break-all">{l.host ? t.sharedOn(l.host) : l.link}</a></li>
           ))}
         </ul>
       )}
@@ -279,6 +294,7 @@ export function Attachments({ lead, workspaceId }) {
  * reason shown here.
  */
 function OpenInOutlook({ lead, workspaceId, fallback }) {
+  const { t } = useT(LW)
   const [state, setState] = useState({ busy: false, error: '' })
   async function open() {
     const tab = window.open('', '_blank')
@@ -289,19 +305,19 @@ function OpenInOutlook({ lead, workspaceId, fallback }) {
       return setState({ busy: false, error: '' })
     }
     tab?.close()
-    setState({ busy: false, error: r.error || 'Could not open the email.' })
+    setState({ busy: false, error: r.error || t.openFailed })
   }
   return (
     <>
       <Button size="xs" variant="secondary" onClick={open} disabled={state.busy}
-        title="Opens the email in Outlook on the web, in the mailbox it arrived in. Needs access to that mailbox.">
-        {state.busy ? <Spinner size="sm" /> : null}Open in Outlook
+        title={t.outlookTitle}>
+        {state.busy ? <Spinner size="sm" /> : null}{t.openOutlook}
         <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3h7v7M10 14L21 3M21 14v7H3V3h7"/></svg>
       </Button>
       {state.error && (
         <span className="text-[11px] text-red-600">
           {state.error}
-          {fallback && !/deleted/.test(state.error) && <> <a href={fallback} target="_blank" rel="noreferrer" className="underline">Try the saved link</a></>}
+          {fallback && !/deleted/.test(state.error) && <> <a href={fallback} target="_blank" rel="noreferrer" className="underline">{t.trySaved}</a></>}
         </span>
       )}
     </>
@@ -309,48 +325,50 @@ function OpenInOutlook({ lead, workspaceId, fallback }) {
 }
 
 export function LeadDetail({ lead, onReview, workspaceId, mailboxes = [], wide = false }) {
+  const { t, lang } = useT(LW)
+  const L = leadLabels(lang)
   const href = outlookLink(lead, mailboxes)
   const d = lead.details || {}
-  const facts = [['Products', d.products], ['Brands', d.brands], ['Quantity', d.quantity], ['Location', d.location], ['Stage', d.stage], ['Urgency', d.urgency]].filter(([, v]) => v)
+  const facts = [[t.facts.products, d.products], [t.facts.brands, d.brands], [t.facts.quantity, d.quantity], [t.facts.location, d.location], [t.facts.stage, d.stage], [t.facts.urgency, d.urgency]].filter(([, v]) => v)
   const asks = Array.isArray(lead.ask_next) ? lead.ask_next : []
   return (
-    <div className={`px-4 pb-4 space-y-3 text-xs ${wide ? 'pt-4 md:pl-[8.25rem]' : 'pl-[7.75rem]'}`}>
+    <div className={`px-4 pb-4 space-y-3 text-xs ${wide ? 'pt-4 md:ps-[8.25rem]' : 'ps-[7.75rem]'}`}>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-text-secondary">
-        <p><span className="text-text-tertiary">Name </span>{lead.name || '—'}</p>
-        <p className="truncate"><span className="text-text-tertiary">Email </span>{lead.email || '—'}</p>
-        <p><span className="text-text-tertiary">{phonesOf(lead).length > 1 ? 'Phones ' : 'Phone '}</span>
+        <p><span className="text-text-tertiary">{t.nameL}</span><span dir="auto">{lead.name || '—'}</span></p>
+        <p className="truncate"><span className="text-text-tertiary">{t.emailL}</span><span dir="ltr">{lead.email || '—'}</span></p>
+        <p><span className="text-text-tertiary">{phonesOf(lead).length > 1 ? t.phonesL : t.phoneL}</span>
           {phonesOf(lead).length
             ? phonesOf(lead).map((p, i) => <span key={p} className="tabular-nums" dir="ltr">{i ? ', ' : ''}<a href={`tel:${p.replace(/[^\d+]/g, '')}`} className="hover:underline">{p}</a></span>)
             : '—'}
         </p>
       </div>
-      <p className="text-text-tertiary">Came in: <span className="text-text-secondary">{channelLabel(lead)}{lead.mailbox ? ` (${lead.mailbox})` : ''}{lead.folder && lead.source === 'email' ? `, ${FOLDER_LABEL[lead.folder] || lead.folder} folder` : ''}</span></p>
-      {lead.subject && <p className="text-text-tertiary">{lead.subject}</p>}
+      <p className="text-text-tertiary">{t.cameInL}<span className="text-text-secondary">{channelLabel(lead, { lang })}{lead.mailbox ? ` (${lead.mailbox})` : ''}{lead.folder && lead.source === 'email' ? t.folderSuffix(L.folder[lead.folder] || lead.folder) : ''}</span></p>
+      {lead.subject && <p className="text-text-tertiary" dir="auto">{lead.subject}</p>}
       <EmailText text={lead.message} />
       <Attachments lead={lead} workspaceId={workspaceId} />
       <Evidence lead={lead} />
       {facts.length > 0 && (
         <div className="flex flex-wrap gap-x-4 gap-y-1">
-          {facts.map(([k, v]) => <p key={k}><span className="text-text-tertiary">{k} </span><span className="text-text">{v}</span></p>)}
+          {facts.map(([k, v]) => <p key={k}><span className="text-text-tertiary">{k} </span><span className="text-text" dir="auto">{v}</span></p>)}
         </div>
       )}
       {asks.length > 0 && (
         <div>
-          <p className="eyebrow mb-1">Ask on the first call</p>
-          <ul className="list-disc pl-4 space-y-0.5 text-text">{asks.map((a) => <li key={a}>{a}</li>)}</ul>
+          <p className="eyebrow mb-1">{t.askFirstCall}</p>
+          <ul className="list-disc ps-4 space-y-0.5 text-text">{asks.map((a) => <li key={a} dir="auto">{a}</li>)}</ul>
         </div>
       )}
       {lead.verdict && lead.verdict !== 'duplicate' && lead.source !== 'manual' && <Review lead={lead} onReview={onReview} />}
       {lead.crm_status && (
         <p className="text-text-tertiary">
-          CRM: <span className={lead.crm_status === 'failed' ? 'text-red-600 font-semibold' : 'text-text-secondary'}>{CRM_LABEL[lead.crm_status]}</span>
-          {lead.approved_at ? <span> · approved {when(lead.approved_at)}</span> : null}
-          {lead.crm_status === 'failed' && lead.crm_error ? <span className="block text-red-600">Odoo said: {lead.crm_error}</span> : null}
+          {t.crmL}<span className={lead.crm_status === 'failed' ? 'text-red-600 font-semibold' : 'text-text-secondary'}>{L.crm[lead.crm_status]}</span>
+          {lead.approved_at ? <span>{t.approvedOn(when(lead.approved_at, lang))}</span> : null}
+          {lead.crm_status === 'failed' && lead.crm_error ? <span className="block text-red-600">{t.odooSaid(lead.crm_error)}</span> : null}
         </p>
       )}
       <div className="flex flex-wrap items-center gap-3">
         {lead.source === 'email' && <OpenInOutlook lead={lead} workspaceId={workspaceId} fallback={href} />}
-        <p className="text-[10px] text-text-tertiary">{[lead.mailbox, lead.confidence ? `${lead.confidence} confidence` : ''].filter(Boolean).join(' · ')}</p>
+        <p className="text-[10px] text-text-tertiary">{[lead.mailbox, lead.confidence ? t.confidence(lead.confidence) : ''].filter(Boolean).join(' · ')}</p>
       </div>
     </div>
   )

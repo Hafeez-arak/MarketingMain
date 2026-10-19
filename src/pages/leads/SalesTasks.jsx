@@ -7,6 +7,8 @@ import { useTaskBoard } from '../tasks/useTaskBoard'
 import { TaskList, TaskForm, TaskPanel, Dialog } from '../tasks/parts'
 import SalesShell from './SalesShell'
 import { tasksChanged } from './useDueTaskCount'
+import { useT } from '../../lib/i18n'
+import { TW } from '../tasks/words'
 
 // ─── The sales team's Tasks page (v2, 2026-10-19) ─────────────────────────
 // docs/TASKS-PLAN.md: the same My tasks and I assigned the marketing app has
@@ -18,12 +20,10 @@ import { tasksChanged } from './useDueTaskCount'
 // given, and comments on either. The database decides (20261102_tasks.sql);
 // the buttons only follow it.
 
-const TABS = [
-  { key: 'mine', label: 'My tasks' },
-  { key: 'assigned', label: 'I assigned' },
-]
 
 export default function SalesTasks() {
+  const { t: w } = useT(TW)
+  const TABS = [{ key: 'mine', label: w.tabs.mine }, { key: 'assigned', label: w.tabs.assigned }]
   const [params, setParams] = useSearchParams()
   const tab = params.get('tab') === 'assigned' ? 'assigned' : 'mine'
   const openId = params.get('task') || ''
@@ -68,12 +68,12 @@ export default function SalesTasks() {
       <div className="max-w-4xl space-y-4">
         <div className="flex items-end justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="text-lg font-semibold text-text tracking-tight">Tasks</h1>
+            <h1 className="text-lg font-semibold text-text tracking-tight">{w.title}</h1>
             <p className="text-xs text-text-secondary mt-0.5">
-              Your to-do list and the follow-ups you set for others. Deadlines and reminders come to the bell, and every morning a summary.
+              {w.salesSubtitle}
             </p>
           </div>
-          <Button size="sm" onClick={() => setCreating({})} disabled={!ws}>+ New task</Button>
+          <Button size="sm" onClick={() => setCreating({})} disabled={!ws}>{w.newTask}</Button>
         </div>
 
         <SubTabs items={TABS} value={tab} onChange={(k) => setParam('tab', k === 'mine' ? '' : k)} />
@@ -83,12 +83,12 @@ export default function SalesTasks() {
         {tasks === null ? <Skeleton className="h-48 w-full" /> : (
           <TaskList tasks={tasks} people={people} now={now} showAssignee={tab === 'assigned'} showSetter={tab === 'mine'}
             onOpen={(t) => setParam('task', t.id)} onToggle={toggle} busyId={board.busyId}
-            empty={tab === 'mine' ? 'Nothing on your list. Tasks given to you, and ones you add, show up here.' : 'You have not set anyone a task yet.'} />
+            empty={tab === 'mine' ? w.emptyMine : w.emptyAssigned} />
         )}
 
         {creating && (
-          <Dialog title={creating.follow_up_of ? 'Add a follow-up' : 'New task'} onClose={() => setCreating(null)}>
-            <TaskForm initial={creating} people={people} me={me} submitLabel={creating.follow_up_of ? 'Add follow-up' : 'Add task'} onSubmit={create} onCancel={() => setCreating(null)} />
+          <Dialog title={creating.follow_up_of ? w.addFollowUp : w.newTask.replace('+ ', '')} onClose={() => setCreating(null)}>
+            <TaskForm initial={creating} people={people} me={me} submitLabel={creating.follow_up_of ? w.addFollowUpBtn : w.addTask} onSubmit={create} onCancel={() => setCreating(null)} />
           </Dialog>
         )}
 
@@ -107,7 +107,7 @@ export default function SalesTasks() {
               if (out.error) board.setError(out.error)
               else { setParam('task', ''); board.load(); tasksChanged() }
             }}
-            onFollowUp={(t) => setCreating({ follow_up_of: t.id, title: `Follow up: ${t.title}`, assigned_to: t.assigned_to, lead_id: t.lead_id, account_id: t.account_id, meeting_id: t.meeting_id, section: t.section })} />
+            onFollowUp={(t) => setCreating({ follow_up_of: t.id, title: `${w.followUpPrefix}${t.title}`, assigned_to: t.assigned_to, lead_id: t.lead_id, account_id: t.account_id, meeting_id: t.meeting_id, section: t.section })} />
         )}
       </div>
     </SalesShell>

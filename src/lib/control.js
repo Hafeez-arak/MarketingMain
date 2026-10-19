@@ -5,6 +5,8 @@
 // api/leads/_control.js. The leads route carries them because Vercel Hobby
 // builds twelve functions and all twelve exist.
 
+import { getLang } from './i18n'
+
 async function call(action, workspaceId, accessToken, body = {}) {
   try {
     const res = await fetch(`/api/leads/${action}`, {
@@ -13,10 +15,10 @@ async function call(action, workspaceId, accessToken, body = {}) {
       body: JSON.stringify({ workspace_id: workspaceId, ...body }),
     })
     const out = await res.json().catch(() => ({}))
-    if (!res.ok || out.ok === false) return { error: out.error || `It did not work (${res.status}).` }
+    if (!res.ok || out.ok === false) return { error: out.error || (getLang() === 'ar' ? `لم ينجح ذلك (${res.status}).` : `It did not work (${res.status}).`) }
     return out
   } catch (err) {
-    return { error: err?.message || 'It did not work. Check the connection and try again.' }
+    return { error: err?.message || (getLang() === 'ar' ? 'لم ينجح ذلك. تحقق من الاتصال وحاول مجددًا.' : 'It did not work. Check the connection and try again.') }
   }
 }
 

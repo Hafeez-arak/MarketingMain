@@ -4,9 +4,11 @@ import { Button, Skeleton, Input, Select, Spinner } from '../../components/ui/in
 import { fetchLeadsPage, leadsApi } from '../../lib/leads/client'
 import {
   SHOW_OPTIONS, EMPTY_FILTERS, activeFilterCount, effectiveVerdict, PAGE_SIZE, pageLabel, pageCount, when,
-  SENDER_LABEL, PROJECT_LABEL, REQUEST_LABEL, FOLDER_LABEL, PHILIPS_LABEL, CRM_LABEL, channelLabel, brandOf, phonesOf, projectOf,
-  ownerLabel, shortName, FORWARD_LABEL, leadTabs, forwardWords, assignable,
+  channelLabel, brandOf, phonesOf, projectOf,
+  ownerLabel, shortName, leadTabs, forwardWords, assignable, leadLabels,
 } from '../../lib/leads/view'
+import { useT } from '../../lib/i18n'
+import { LW } from './words'
 import { VerdictTag, LeadDetail, LeadTabs, LeadName, MarkUnread } from './parts'
 import { useLeadReads } from './useLeadReads'
 import BattleCard from './BattleCard'
@@ -41,10 +43,6 @@ import LeadTasks from './LeadTasks'
 // the Pipeline (Pipeline.jsx). An opened lead in the pipeline shows its
 // stage bar here too.
 
-const SENDER_OPTIONS = Object.entries(SENDER_LABEL)
-const PROJECT_OPTIONS = [...Object.entries(PROJECT_LABEL), ['none', 'Not stated']]
-const REQUEST_OPTIONS = Object.entries(REQUEST_LABEL)
-const FOLDER_OPTIONS = Object.entries(FOLDER_LABEL)
 
 // Column widths, shared by the header and every row so they line up.
 const GRID = 'md:grid md:grid-cols-[6.5rem_minmax(0,1.6fr)_minmax(0,2fr)_6.5rem_6rem_6rem_5.5rem_6.5rem_6.5rem_7rem] md:gap-3 md:items-start'
@@ -53,7 +51,7 @@ function Cell({ label, children, className = '' }) {
   // On a phone each value carries its own label; on a desktop the header does.
   return (
     <div className={`min-w-0 ${className}`}>
-      <span className="md:hidden text-[10px] text-text-tertiary uppercase tracking-wide mr-1.5">{label}</span>
+      <span className="md:hidden text-[10px] text-text-tertiary uppercase tracking-wide me-1.5">{label}</span>
       {children}
     </div>
   )
@@ -66,24 +64,26 @@ const stop = (e) => e.stopPropagation()
 
 /** Where the lead stands with Odoo, and the Approve button for those who may. */
 function CrmCell({ lead, canApprove, onAsk }) {
+  const { t, lang } = useT(LW)
+  const CRM = leadLabels(lang).crm
   const st = lead.crm_status
   if (st === 'sent') {
     return lead.crm_url
-      ? <a href={lead.crm_url} target="_blank" rel="noreferrer" onClick={stop} className="text-xs font-semibold text-sage-700 hover:underline">In Odoo ↗</a>
-      : <span className="text-xs font-semibold text-sage-700">{CRM_LABEL.sent}</span>
+      ? <a href={lead.crm_url} target="_blank" rel="noreferrer" onClick={stop} className="text-xs font-semibold text-sage-700 hover:underline">{t.inOdoo}</a>
+      : <span className="text-xs font-semibold text-sage-700">{CRM.sent}</span>
   }
-  if (st === 'queued') return <span className="text-[11px] font-semibold text-amber-800 leading-tight block">{CRM_LABEL.queued}</span>
-  if (st === 'sending') return <span className="text-[11px] text-text-secondary">{CRM_LABEL.sending}</span>
+  if (st === 'queued') return <span className="text-[11px] font-semibold text-amber-800 leading-tight block">{CRM.queued}</span>
+  if (st === 'sending') return <span className="text-[11px] text-text-secondary">{CRM.sending}</span>
   if (st === 'failed') {
     return (
       <span className="block" title={lead.crm_error || ''}>
-        <span className="text-[11px] font-semibold text-red-600 block">{CRM_LABEL.failed}</span>
-        {canApprove && <Button size="xs" variant="secondary" className="mt-1" onClick={(e) => { stop(e); onAsk(lead) }}>Retry</Button>}
+        <span className="text-[11px] font-semibold text-red-600 block">{CRM.failed}</span>
+        {canApprove && <Button size="xs" variant="secondary" className="mt-1" onClick={(e) => { stop(e); onAsk(lead) }}>{t.retry}</Button>}
       </span>
     )
   }
   if (canApprove && lead.verdict !== 'duplicate') {
-    return <Button size="xs" variant="primary" onClick={(e) => { stop(e); onAsk(lead) }}>Approve</Button>
+    return <Button size="xs" variant="primary" onClick={(e) => { stop(e); onAsk(lead) }}>{t.approve}</Button>
   }
   return dash
 }
@@ -93,19 +93,20 @@ function CrmCell({ lead, canApprove, onAsk }) {
  * that failed shows here in red, since the person has not got the email.
  */
 function OwnerCell({ lead, team, me, canApprove, onAssign }) {
-  const label = ownerLabel(lead, team, me)
+  const { t, lang } = useT(LW)
+  const label = ownerLabel(lead, team, me, lang)
   const failed = lead.forward_status === 'failed'
-  const tone = !lead.assigned_to ? 'text-text-tertiary' : label === 'You' ? 'text-text font-semibold' : 'text-text'
+  const tone = !lead.assigned_to ? 'text-text-tertiary' : lead.assigned_to === me ? 'text-text font-semibold' : 'text-text'
   if (!canApprove) {
     return <span className={`text-xs ${tone}`}>{label}</span>
   }
   return (
     <span onClick={stop} className="block">
       {lead.assigned_to
-        ? <button type="button" onClick={() => onAssign(lead)} title="Assign to someone else"
+        ? <button type="button" onClick={() => onAssign(lead)} title={t.assignElse}
             className={`text-xs hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400 ${tone}`}>{label}</button>
-        : <Button size="xs" variant="secondary" onClick={() => onAssign(lead)}>Assign</Button>}
-      {failed && <span className="block text-[10px] font-semibold text-red-600">{FORWARD_LABEL.failed}</span>}
+        : <Button size="xs" variant="secondary" onClick={() => onAssign(lead)}>{t.assign}</Button>}
+      {failed && <span className="block text-[10px] font-semibold text-red-600">{leadLabels(lang).forward.failed}</span>}
     </span>
   )
 }
@@ -115,24 +116,26 @@ function OwnerCell({ lead, team, me, canApprove, onAssign }) {
  * email reached them. A failed forward says why and offers to try again.
  */
 function OwnerLine({ lead, team, me, canApprove, onForward }) {
+  const { t, lang } = useT(LW)
+  const FWD = leadLabels(lang).forward
   const [busy, setBusy] = useState(false)
   if (!lead.assigned_to) return null
   const person = team.find((m) => m.user_id === lead.assigned_to)
-  const who = lead.assigned_to === me ? 'you' : person ? (person.full_name || person.email) : 'someone who has left the team'
+  const who = lead.assigned_to === me ? t.youWord : person ? (person.full_name || person.email) : t.someoneLeft
   async function again() {
     setBusy(true)
     await onForward(lead)
     setBusy(false)
   }
   return (
-    <div className="px-4 pt-3 md:pl-[8.25rem] text-[11px] text-text-secondary flex flex-wrap items-center gap-x-2 gap-y-1">
-      <span>Assigned to <span className="font-semibold text-text">{who}</span>{lead.assigned_at ? ` · ${when(lead.assigned_at)}` : ''}</span>
-      {lead.forward_status === 'sent' && <span className="text-sage-700">· {FORWARD_LABEL.sent}{lead.forwarded_at ? ` ${when(lead.forwarded_at)}` : ''}</span>}
-      {lead.forward_status === 'sending' && <span>· {FORWARD_LABEL.sending}</span>}
+    <div className="px-4 pt-3 md:ps-[8.25rem] text-[11px] text-text-secondary flex flex-wrap items-center gap-x-2 gap-y-1">
+      <span>{t.assignedTo} <span className="font-semibold text-text">{who}</span>{lead.assigned_at ? ` · ${when(lead.assigned_at, lang)}` : ''}</span>
+      {lead.forward_status === 'sent' && <span className="text-sage-700">· {FWD.sent}{lead.forwarded_at ? ` ${when(lead.forwarded_at, lang)}` : ''}</span>}
+      {lead.forward_status === 'sending' && <span>· {FWD.sending}</span>}
       {lead.forward_status === 'failed' && (
         <>
-          <span className="text-red-600 font-semibold">· {FORWARD_LABEL.failed}: {lead.forward_error}</span>
-          {canApprove && <Button size="xs" variant="secondary" onClick={again} disabled={busy}>{busy ? <Spinner size="sm" /> : null}Try again</Button>}
+          <span className="text-red-600 font-semibold">· {FWD.failed}: {lead.forward_error}</span>
+          {canApprove && <Button size="xs" variant="secondary" onClick={again} disabled={busy}>{busy ? <Spinner size="sm" /> : null}{t.tryAgain}</Button>}
         </>
       )}
     </div>
@@ -145,6 +148,7 @@ function OwnerLine({ lead, team, me, canApprove, onForward }) {
  * admin) marks each here; the CEO page counts from these marks.
  */
 function ProgressLine({ lead, me, canApprove, onMark }) {
+  const { t, lang } = useT(LW)
   const [busy, setBusy] = useState('')
   const [value, setValue] = useState('')
   const [asking, setAsking] = useState(false)
@@ -156,23 +160,23 @@ function ProgressLine({ lead, me, canApprove, onMark }) {
     setAsking(false)
   }
   return (
-    <div className="px-4 pt-2 md:pl-[8.25rem] text-[11px] text-text-secondary flex flex-wrap items-center gap-x-3 gap-y-1.5">
+    <div className="px-4 pt-2 md:ps-[8.25rem] text-[11px] text-text-secondary flex flex-wrap items-center gap-x-3 gap-y-1.5">
       {lead.first_reply_at
-        ? <span className="text-sage-700">First reply sent {when(lead.first_reply_at)}</span>
-        : <Button size="xs" variant="secondary" onClick={() => mark('replied')} disabled={Boolean(busy)}>{busy === 'replied' ? <Spinner size="sm" /> : null}Mark first reply sent</Button>}
+        ? <span className="text-sage-700">{t.firstReplySent(when(lead.first_reply_at, lang))}</span>
+        : <Button size="xs" variant="secondary" onClick={() => mark('replied')} disabled={Boolean(busy)}>{busy === 'replied' ? <Spinner size="sm" /> : null}{t.markReply}</Button>}
       {lead.quote_sent_at ? (
         <span className="text-sage-700">
-          Quote sent {when(lead.quote_sent_at)}{Number(lead.deal_value_sar) > 0 ? ` · SAR ${Math.round(lead.deal_value_sar).toLocaleString('en-US')}` : ''}
-          <button type="button" className="ml-2 text-text-tertiary hover:text-text underline" onClick={() => mark('clear_quote')} disabled={Boolean(busy)}>undo</button>
+          {t.quoteSent(when(lead.quote_sent_at, lang))}{Number(lead.deal_value_sar) > 0 ? ` · ${lang === 'ar' ? '' : 'SAR '}${Math.round(lead.deal_value_sar).toLocaleString('en-US')}${lang === 'ar' ? ' ر.س' : ''}` : ''}
+          <button type="button" className="ms-2 text-text-tertiary hover:text-text underline" onClick={() => mark('clear_quote')} disabled={Boolean(busy)}>{t.undo}</button>
         </span>
       ) : asking ? (
         <span className="inline-flex items-center gap-2">
-          <Input type="number" min="0" inputMode="decimal" placeholder="Quote value (SAR, optional)" value={value} onChange={(e) => setValue(e.target.value)} className="w-52" />
-          <Button size="xs" onClick={() => mark('quote_sent', { deal_value_sar: value })} disabled={Boolean(busy)}>{busy === 'quote_sent' ? <Spinner size="sm" /> : null}Save</Button>
-          <button type="button" className="text-text-tertiary hover:text-text" onClick={() => setAsking(false)}>Cancel</button>
+          <Input type="number" min="0" inputMode="decimal" placeholder={t.quoteValuePh} value={value} onChange={(e) => setValue(e.target.value)} className="w-52" />
+          <Button size="xs" onClick={() => mark('quote_sent', { deal_value_sar: value })} disabled={Boolean(busy)}>{busy === 'quote_sent' ? <Spinner size="sm" /> : null}{t.save}</Button>
+          <button type="button" className="text-text-tertiary hover:text-text" onClick={() => setAsking(false)}>{t.cancel}</button>
         </span>
       ) : (
-        <Button size="xs" variant="secondary" onClick={() => setAsking(true)} disabled={Boolean(busy)}>Mark quote sent</Button>
+        <Button size="xs" variant="secondary" onClick={() => setAsking(true)} disabled={Boolean(busy)}>{t.markQuote}</Button>
       )}
     </div>
   )
@@ -184,6 +188,8 @@ function ProgressLine({ lead, me, canApprove, onMark }) {
  * goes back to following the agent.
  */
 function ProjectPicker({ lead, onSet }) {
+  const { t, lang } = useT(LW)
+  const PROJECT = leadLabels(lang).project
   const [busy, setBusy] = useState(false)
   // The choices exist only while the menu is open (2026-10-18): a <select>
   // on every row put "Not stated JIH Tender Maintenance" into the page text,
@@ -193,8 +199,8 @@ function ProjectPicker({ lead, onSet }) {
   const box = useRef(null)
   const toggle = useRef(null)
   const value = projectOf(lead) || 'none'
-  const choices = [['none', 'Not stated'], ...Object.entries(PROJECT_LABEL)]
-  const label = value === 'none' ? 'Not stated' : PROJECT_LABEL[value] || value
+  const choices = [['none', t.notStated], ...Object.entries(PROJECT)]
+  const label = value === 'none' ? t.notStated : PROJECT[value] || value
 
   useEffect(() => {
     if (!open) return
@@ -225,26 +231,26 @@ function ProjectPicker({ lead, onSet }) {
     setBusy(false)
   }
   return (
-    <span ref={box} onClick={stop} onKeyDown={onKey} className="relative block -ml-1">
+    <span ref={box} onClick={stop} onKeyDown={onKey} className="relative block -ms-1">
       {/* aria-disabled rather than disabled while saving: a disabled button
           drops keyboard focus, and the person picking would lose their place. */}
       <button ref={toggle} type="button" aria-disabled={busy || undefined} onClick={() => { if (!busy) setOpen((o) => !o) }}
-        aria-haspopup="menu" aria-expanded={open} aria-label={`Project phase: ${label}. Change`}
-        className={`max-w-full text-left text-xs border border-transparent hover:border-border focus:border-border focus:outline-none px-1 py-0.5 cursor-pointer ${busy ? 'opacity-50' : ''} ${value !== 'none' ? 'font-semibold text-text' : 'text-text-tertiary'}`}>
+        aria-haspopup="menu" aria-expanded={open} aria-label={t.projectPhase(label)}
+        className={`max-w-full text-start text-xs border border-transparent hover:border-border focus:border-border focus:outline-none px-1 py-0.5 cursor-pointer ${busy ? 'opacity-50' : ''} ${value !== 'none' ? 'font-semibold text-text' : 'text-text-tertiary'}`}>
         {label}
       </button>
       {open && (
-        <span role="menu" aria-label="Project phase"
-          className="absolute left-0 top-full z-20 mt-0.5 min-w-[8rem] py-1 bg-surface border border-border shadow-md flex flex-col">
+        <span role="menu" aria-label={t.projectPhaseMenu}
+          className="absolute start-0 top-full z-20 mt-0.5 min-w-[8rem] py-1 bg-surface border border-border shadow-md flex flex-col">
           {choices.map(([k, l]) => (
             <button key={k} type="button" role="menuitemradio" aria-checked={k === value} onClick={() => change(k)}
-              className={`text-left text-xs px-2 py-1 hover:bg-surface-subtle focus:bg-surface-subtle focus:outline-none ${k === value ? 'font-semibold text-text' : 'text-text-secondary'}`}>
+              className={`text-start text-xs px-2 py-1 hover:bg-surface-subtle focus:bg-surface-subtle focus:outline-none ${k === value ? 'font-semibold text-text' : 'text-text-secondary'}`}>
               {l}
             </button>
           ))}
         </span>
       )}
-      {lead.human_project_type && <span className="block px-1 text-[10px] text-text-tertiary">set by team</span>}
+      {lead.human_project_type && <span className="block px-1 text-[10px] text-text-tertiary">{t.setByTeam}</span>}
     </span>
   )
 }
@@ -255,20 +261,23 @@ function ProjectPicker({ lead, onSet }) {
  * who may.
  */
 function CardWaiting({ lead, canApprove, onAssign }) {
+  const { t } = useT(LW)
   return (
-    <div className="px-4 pb-5 pt-3 md:pl-[8.25rem] text-xs space-y-2">
-      <p className="text-text">This lead gets its battle card when it is assigned.</p>
+    <div className="px-4 pb-5 pt-3 md:ps-[8.25rem] text-xs space-y-2">
+      <p className="text-text">{t.cardWhenAssigned}</p>
       <p className="text-text-secondary leading-relaxed max-w-[60ch]">
-        Assigning gives it to a salesperson and puts it in the Pipeline. The card is built from the email and our records, and they work from it; approving later sends the lead and its card to Odoo.
+        {t.cardWhy}
       </p>
       {canApprove
-        ? <Button size="xs" onClick={() => onAssign(lead)}>Assign and make the card</Button>
-        : <p className="text-text-tertiary">A sales admin assigns leads.</p>}
+        ? <Button size="xs" onClick={() => onAssign(lead)}>{t.assignAndCard}</Button>
+        : <p className="text-text-tertiary">{t.adminAssigns}</p>}
     </div>
   )
 }
 
 function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailboxes, canApprove, onAsk, team, me, onAssign, onForward, onChange, onDeleted, unread, onMarkUnread, onMark }) {
+  const { t, lang } = useT(LW)
+  const L = leadLabels(lang)
   const v = effectiveVerdict(lead)
   const v2 = (lead.criteria_version || 1) >= 2
   const junk = lead.folder === 'junk'
@@ -282,46 +291,46 @@ function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailbo
           cannot hold another. Keyboard: Enter or Space opens it. */}
       <div role="button" tabIndex={0} onClick={onToggle} aria-expanded={open}
         onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onToggle() } }}
-        className={`w-full text-left px-4 py-3 hover:bg-surface-subtle transition-colors cursor-pointer grid grid-cols-2 gap-x-3 gap-y-1.5 focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400 ${GRID}`}>
-        <Cell label="Received" className="col-span-2 md:col-span-1">
-          <span className="text-[11px] text-text-secondary tabular-nums">{when(lead.received_at || lead.created_at)}</span>
-          <span className="block text-[10px] mt-0.5 text-text-secondary font-semibold">{channelLabel(lead)}</span>
+        className={`w-full text-start px-4 py-3 hover:bg-surface-subtle transition-colors cursor-pointer grid grid-cols-2 gap-x-3 gap-y-1.5 focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400 ${GRID}`}>
+        <Cell label={t.col.received} className="col-span-2 md:col-span-1">
+          <span className="text-[11px] text-text-secondary tabular-nums">{when(lead.received_at || lead.created_at, lang)}</span>
+          <span className="block text-[10px] mt-0.5 text-text-secondary font-semibold">{channelLabel(lead, { lang })}</span>
           {lead.source === 'email' && lead.folder && (
-            <span className={`block text-[10px] ${junk ? 'text-red-600 font-semibold' : 'text-text-tertiary'}`}>{FOLDER_LABEL[lead.folder] || lead.folder}</span>
+            <span className={`block text-[10px] ${junk ? 'text-red-600 font-semibold' : 'text-text-tertiary'}`}>{L.folder[lead.folder] || lead.folder}</span>
           )}
         </Cell>
-        <Cell label="From" className="col-span-2 md:col-span-1">
+        <Cell label={t.col.from} className="col-span-2 md:col-span-1">
           <LeadName lead={lead} unread={unread} />
           <span className="text-[11px] text-text-tertiary truncate block">
-            {lead.email ? lead.email.split('@')[1] : ''}{lead.email_kind === 'free' ? ' · free email' : ''}
+            <span dir="ltr">{lead.email ? lead.email.split('@')[1] : ''}</span>{lead.email_kind === 'free' ? t.freeEmailTag : ''}
           </span>
           {phonesOf(lead)[0] && <span className="text-[11px] text-text-secondary truncate block tabular-nums" dir="ltr">{phonesOf(lead)[0]}{phonesOf(lead).length > 1 ? ` +${phonesOf(lead).length - 1}` : ''}</span>}
         </Cell>
-        <Cell label="Wants" className="col-span-2 md:col-span-1">
+        <Cell label={t.col.wants} className="col-span-2 md:col-span-1">
           <span className="text-xs text-text line-clamp-2" dir="auto">{lead.summary || lead.subject || lead.message}</span>
-          {PHILIPS_LABEL[lead.philips] && <span className={`text-[10px] ${lead.philips === 'only' ? 'text-red-600 font-semibold' : 'text-text-tertiary'}`}>{PHILIPS_LABEL[lead.philips]}</span>}
+          {L.philips[lead.philips] && <span className={`text-[10px] ${lead.philips === 'only' ? 'text-red-600 font-semibold' : 'text-text-tertiary'}`}>{L.philips[lead.philips]}</span>}
         </Cell>
-        <Cell label="Who">
-          <span className={`text-xs ${lead.sender_type === 'trader' ? 'text-amber-800 font-semibold' : 'text-text'}`}>{v2 ? SENDER_LABEL[lead.sender_type] || dash : dash}</span>
+        <Cell label={t.col.who}>
+          <span className={`text-xs ${lead.sender_type === 'trader' ? 'text-amber-800 font-semibold' : 'text-text'}`}>{v2 ? L.sender[lead.sender_type] || dash : dash}</span>
         </Cell>
-        <Cell label="Request">
-          <span className="text-xs text-text">{REQUEST_LABEL[lead.request_type] || dash}</span>
+        <Cell label={t.col.request}>
+          <span className="text-xs text-text">{L.request[lead.request_type] || dash}</span>
         </Cell>
-        <Cell label="Project">
+        <Cell label={t.col.project}>
           <ProjectPicker lead={lead} onSet={onSetProject} />
         </Cell>
-        <Cell label="Source">
+        <Cell label={t.col.source}>
           {v2 && lead.source_check
-            ? <span className={`text-xs ${lead.source_check === 'verified' ? 'text-sage-700' : 'text-amber-800'}`}>{lead.source_check === 'verified' ? 'Verified' : 'Not verified'}</span>
+            ? <span className={`text-xs ${lead.source_check === 'verified' ? 'text-sage-700' : 'text-amber-800'}`}>{lead.source_check === 'verified' ? L.words.verified : L.words.notVerified}</span>
             : dash}
         </Cell>
-        <Cell label="Verdict" className="md:text-right">
+        <Cell label={t.col.verdict} className="md:text-end">
           <VerdictTag verdict={v} corrected={Boolean(lead.human_verdict && lead.human_verdict !== lead.verdict)} />
         </Cell>
-        <Cell label="Owner">
+        <Cell label={t.col.owner}>
           <OwnerCell lead={lead} team={team} me={me} canApprove={canApprove} onAssign={onAssign} />
         </Cell>
-        <Cell label="CRM" className="md:text-right">
+        <Cell label={t.col.crm} className="md:text-end">
           <CrmCell lead={lead} canApprove={canApprove} onAsk={onAsk} />
         </Cell>
       </div>
@@ -333,7 +342,7 @@ function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailbo
           <LeadTasks lead={lead} workspaceId={workspaceId} me={me} />
           {hasTabs ? (
             <>
-              <LeadTabs tabs={leadTabs(lead)} value={tab} onChange={setTab}>
+              <LeadTabs tabs={leadTabs(lead, lang)} value={tab} onChange={setTab}>
                 <AskAboutLead lead={lead} />
                 <MarkUnread onClick={onMarkUnread} />
                 <DeleteLead lead={lead} workspaceId={workspaceId} me={me} canAll={canApprove} onDeleted={onDeleted} />
@@ -346,7 +355,7 @@ function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailbo
             </>
           ) : (
             <>
-              <div className="flex px-4 pt-3 md:pl-[8.25rem]"><span className="ml-auto"><DeleteLead lead={lead} workspaceId={workspaceId} me={me} canAll={canApprove} onDeleted={onDeleted} /></span></div>
+              <div className="flex px-4 pt-3 md:ps-[8.25rem]"><span className="ms-auto"><DeleteLead lead={lead} workspaceId={workspaceId} me={me} canAll={canApprove} onDeleted={onDeleted} /></span></div>
               <LeadDetail lead={lead} onReview={onReview} workspaceId={workspaceId} mailboxes={mailboxes} wide />
             </>
           )}
@@ -362,12 +371,13 @@ function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailbo
  * no assistant (the sales-only Leads app).
  */
 function AskAboutLead({ lead }) {
+  const { t } = useT(LW)
   if (!assistantMounted()) return null
-  const who = lead.company || lead.name || 'this sender'
+  const who = lead.company || lead.name || t.thisSender
   return (
-    <button type="button" onClick={() => askAssistant({ item: { entity: 'lead', id: lead.id, label: `the lead from ${who}` } })}
+    <button type="button" onClick={() => askAssistant({ item: { entity: 'lead', id: lead.id, label: t.askLabel(who) } })}
       className="text-xs px-2.5 py-1 text-amber-800 hover:text-amber-900 hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400">
-      Ask Arak about this lead
+      {t.askArak}
     </button>
   )
 }
@@ -379,22 +389,24 @@ function AskAboutLead({ lead }) {
  * (which forwards them the email, as Assign does).
  */
 function ApproveDialog({ lead, team, busy, error, onCancel, onConfirm }) {
+  const { t, lang, dir } = useT(LW)
+  const L = leadLabels(lang)
   const [to, setTo] = useState(lead.assigned_to || '')
   const person = team.find((m) => m.user_id === to)
   const changing = to && to !== lead.assigned_to
   const phones = phonesOf(lead)
   const rows = [
-    ['Company', lead.company], ['Contact', lead.name], ['Email', lead.email], ['Phone', phones.join(', ')],
-    ['Wants', lead.summary || lead.subject], ['Who', SENDER_LABEL[lead.sender_type]], ['Project', PROJECT_LABEL[lead.project_type]],
-    ['Came in', channelLabel(lead)],
+    [t.d.company, lead.company], [t.d.contact, lead.name], [t.d.email, lead.email], [t.d.phone, phones.join(', ')],
+    [t.d.wants, lead.summary || lead.subject], [t.d.who, L.sender[lead.sender_type]], [t.d.project, L.project[lead.project_type]],
+    [t.d.cameIn, channelLabel(lead, { lang })],
   ].filter(([, v]) => v)
   const notQualified = effectiveVerdict(lead) !== 'qualified'
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(28,35,33,0.45)' }} onClick={busy ? undefined : onCancel}>
-      <div role="dialog" aria-modal="true" aria-labelledby="approve-title" onClick={stop}
+      <div role="dialog" aria-modal="true" aria-labelledby="approve-title" onClick={stop} dir={dir} lang={lang}
         className="bg-white shadow-dropdown w-full max-w-md border border-border animate-fade-scale p-6 space-y-4">
         <h3 id="approve-title" className="font-semibold text-text text-sm">
-          {lead.crm_status === 'failed' ? 'Try sending this lead to Odoo again?' : 'Approve this lead and send it to Odoo?'}
+          {lead.crm_status === 'failed' ? t.retryOdooQ : t.approveQ}
         </h3>
         <dl className="grid grid-cols-[5.5rem_1fr] gap-x-3 gap-y-1.5 text-xs">
           {rows.map(([k, v]) => (
@@ -404,21 +416,21 @@ function ApproveDialog({ lead, team, busy, error, onCancel, onConfirm }) {
             </div>
           ))}
         </dl>
-        <Select label="Assigned to" value={to} onChange={(e) => setTo(e.target.value)} disabled={lead.crm_status === 'failed' && Boolean(lead.assigned_to)}>
-          <option value="">Choose who works it…</option>
+        <Select label={t.assignedTo} value={to} onChange={(e) => setTo(e.target.value)} disabled={lead.crm_status === 'failed' && Boolean(lead.assigned_to)}>
+          <option value="">{t.chooseWho}</option>
           <PersonOptions team={team} />
         </Select>
-        {changing && <p className="text-xs text-text-secondary leading-relaxed">{forwardWords(lead, person)}</p>}
+        {changing && <p className="text-xs text-text-secondary leading-relaxed">{forwardWords(lead, person, lang)}</p>}
         <p className="text-xs text-text-secondary leading-relaxed">
-          It becomes a lead in Odoo CRM with {person ? shortName(person) : 'them'} as its salesperson, the email, the criteria and the agent's questions; its battle card stays with it. It can't be sent twice.
-          {notQualified ? ' Approving also marks it qualified.' : ''}
-          {' '}If Odoo isn't connected yet, it is marked approved and sent as soon as it is.
+          {t.approveBody(person ? shortName(person) : t.them)}
+          {notQualified ? t.alsoQualified : ''}
+          {' '}{t.ifNotConnected}
         </p>
         {error && <p className="text-xs text-red-600">{error}</p>}
         <div className="flex gap-3 pt-1">
-          <Button variant="secondary" className="flex-1 justify-center" disabled={busy} onClick={onCancel}>Cancel</Button>
+          <Button variant="secondary" className="flex-1 justify-center" disabled={busy} onClick={onCancel}>{t.cancel}</Button>
           <Button className="flex-1 justify-center" disabled={busy || !to} onClick={() => onConfirm(to)}>
-            {busy ? <Spinner size="sm" /> : null}{busy ? 'Sending…' : 'Approve and send'}
+            {busy ? <Spinner size="sm" /> : null}{busy ? t.sending : t.approveSend}
           </Button>
         </div>
       </div>
@@ -427,6 +439,8 @@ function ApproveDialog({ lead, team, busy, error, onCancel, onConfirm }) {
 }
 
 export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mailboxes = [], canApprove = false, team = [], me = '' }) {
+  const { t, lang, dir } = useT(LW)
+  const L = leadLabels(lang)
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   // The search box waits for a pause in typing before it asks the database.
   const [searchText, setSearchText] = useState('')
@@ -505,7 +519,7 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
     const r = await leadsApi('assign', workspaceId, { lead_id: assigning.id, user_id: userId })
     if (r.error) return setAssignState({ busy: false, error: r.error })
     replaceRow(assigning.id, r.lead)
-    setActionError(r.odooError ? `Assigned here, but the salesperson in Odoo was not changed: ${r.odooError}` : '')
+    setActionError(r.odooError ? t.odooOwnerFailed(r.odooError) : '')
     setAssignState({ busy: false, error: '' })
     setAssigning(null)
   }
@@ -536,69 +550,69 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
   const extra = activeFilterCount(filters)
 
   return (
-    <div ref={top} className="bg-white border border-border min-w-0 scroll-mt-4">
+    <div ref={top} className="bg-white border border-border min-w-0 scroll-mt-4" dir={dir} lang={lang}>
       {/* ── Filters ── */}
       <div className="p-4 border-b border-border grid grid-cols-2 md:grid-cols-4 xl:grid-cols-[1.3fr_1fr_1.1fr_1fr_1fr_1fr_1fr_1fr_1.5fr] gap-3 items-end">
-        <Select label="Show" value={filters.show} onChange={set('show')} className="col-span-2 md:col-span-1">
-          {SHOW_OPTIONS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+        <Select label={t.f.show} value={filters.show} onChange={set('show')} className="col-span-2 md:col-span-1">
+          {SHOW_OPTIONS.map((o) => <option key={o.key} value={o.key}>{L.show[o.key]}</option>)}
         </Select>
-        <Select label="Owner" value={filters.owner} onChange={set('owner')}>
-          <option value="">Anyone</option>
-          {me && <option value="me">Mine</option>}
-          {canApprove && <option value="none">Unassigned</option>}
+        <Select label={t.f.owner} value={filters.owner} onChange={set('owner')}>
+          <option value="">{t.anyone}</option>
+          {me && <option value="me">{t.mine}</option>}
+          {canApprove && <option value="none">{t.unassigned}</option>}
           {canApprove && assignable(team).filter((m) => m.user_id !== me).map((m) => <option key={m.user_id} value={m.user_id}>{m.full_name || m.email}</option>)}
         </Select>
-        <Select label="Came in" value={filters.channel} onChange={set('channel')}>
-          <option value="">Anywhere</option>
-          <option value="website">{channelLabel({ source: 'website_form' })}</option>
-          <option value="manual">Added by hand</option>
-          {mailboxes.map((m) => <option key={m.id} value={m.label || m.email}>{brandOf(m.label || m.email)} email ({m.label || m.email})</option>)}
+        <Select label={t.f.cameIn} value={filters.channel} onChange={set('channel')}>
+          <option value="">{t.anywhere}</option>
+          <option value="website">{channelLabel({ source: 'website_form' }, { lang })}</option>
+          <option value="manual">{L.source.manual}</option>
+          {mailboxes.map((m) => <option key={m.id} value={m.label || m.email}>{t.mailboxOption(brandOf(m.label || m.email), m.label || m.email)}</option>)}
         </Select>
-        <Select label="Who" value={filters.sender} onChange={set('sender')}>
-          <option value="">Anyone</option>
-          {SENDER_OPTIONS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+        <Select label={t.f.who} value={filters.sender} onChange={set('sender')}>
+          <option value="">{t.anyone}</option>
+          {Object.entries(L.sender).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
         </Select>
-        <Select label="Project" value={filters.project} onChange={set('project')}>
-          <option value="">Any</option>
-          {PROJECT_OPTIONS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+        <Select label={t.f.project} value={filters.project} onChange={set('project')}>
+          <option value="">{t.any}</option>
+          {[...Object.entries(L.project), ['none', t.notStated]].map(([k, l]) => <option key={k} value={k}>{l}</option>)}
         </Select>
-        <Select label="Request" value={filters.request} onChange={set('request')}>
-          <option value="">Any</option>
-          {REQUEST_OPTIONS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+        <Select label={t.f.request} value={filters.request} onChange={set('request')}>
+          <option value="">{t.any}</option>
+          {Object.entries(L.request).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
         </Select>
-        <Select label="Folder" value={filters.folder} onChange={set('folder')}>
-          <option value="">Any</option>
-          {FOLDER_OPTIONS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+        <Select label={t.f.folder} value={filters.folder} onChange={set('folder')}>
+          <option value="">{t.any}</option>
+          {Object.entries(L.folder).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
         </Select>
-        <Select label="Email" value={filters.emailKind} onChange={set('emailKind')}>
-          <option value="">Any</option>
-          <option value="company">Company domain</option>
-          <option value="free">Free email (Gmail…)</option>
+        <Select label={t.f.email} value={filters.emailKind} onChange={set('emailKind')}>
+          <option value="">{t.any}</option>
+          <option value="company">{t.companyDomain}</option>
+          <option value="free">{t.freeEmail}</option>
         </Select>
         <div className="col-span-2 md:col-span-2 xl:col-span-1">
-          <Input id="leads-search" label="Search" placeholder="Company, subject, words…" value={searchText} onChange={(e) => setSearchText(e.target.value)} />
+          <Input id="leads-search" label={t.f.search} placeholder={t.searchPh} value={searchText} onChange={(e) => setSearchText(e.target.value)} dir="auto" />
         </div>
       </div>
       {actionError && <p className="px-4 py-2 text-xs text-red-600 border-b border-border">{actionError}</p>}
       <div className="px-4 py-2 flex items-center justify-between gap-3 border-b border-border">
         <p className="text-[11px] text-text-secondary tabular-nums">
-          {loading ? 'Loading…' : `${list.total} ${list.total === 1 ? 'lead' : 'leads'}`}
-          {extra > 0 && !loading ? ` · ${extra} filter${extra === 1 ? '' : 's'} on` : ''}
+          {loading ? t.loading : t.leadsN(list.total)}
+          {extra > 0 && !loading ? t.filtersOn(extra) : ''}
         </p>
-        {extra > 0 && <Button size="xs" variant="ghost" onClick={clear}>Clear filters</Button>}
+        {extra > 0 && <Button size="xs" variant="ghost" onClick={clear}>{t.clearFilters}</Button>}
       </div>
 
       {/* ── Header (desktop) ── */}
       <div className={`hidden ${GRID} px-4 py-2 border-b border-border text-[10px] font-semibold text-text-tertiary uppercase tracking-wide`}>
-        <span>Received</span><span>From</span><span>Wants</span><span>Who</span><span>Request</span><span>Project</span><span>Source</span><span className="text-right">Verdict</span><span>Owner</span><span className="text-right">CRM</span>
+        <span>{t.col.received}</span><span>{t.col.from}</span><span>{t.col.wants}</span><span>{t.col.who}</span><span>{t.col.request}</span><span>{t.col.project}</span><span>{t.col.source}</span><span className="text-end">{t.col.verdict}</span><span>{t.col.owner}</span><span className="text-end">{t.col.crm}</span>
       </div>
 
       {loading ? (
         <div className="p-4 space-y-3">{[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
       ) : list.error ? (
-        <p className="px-4 py-10 text-sm text-red-600 text-center">Could not load the leads: {list.error}</p>
+        <p className="px-4 py-10 text-sm text-red-600 text-center">{t.loadFailed(list.error)}</p>
       ) : !list.rows.length ? (
-        <p className="px-4 py-10 text-sm text-text-tertiary text-center">{extra ? 'No leads match these filters.' : 'No leads here yet.'}</p>
+        <p className="px-4 py-10 text-sm text-text-tertiary text-center">{extra ? t.noMatch : t.noneYet}</p>
       ) : (
         <ul className="divide-y divide-border">
           {list.rows.map((l) => (
@@ -615,14 +629,14 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
       )}
 
       <div className="flex items-center justify-between gap-2 px-4 py-2.5 border-t border-border">
-        <p className="text-[11px] text-text-tertiary tabular-nums">{pageLabel(page, PAGE_SIZE, list.total)}</p>
+        <p className="text-[11px] text-text-tertiary tabular-nums">{pageLabel(page, PAGE_SIZE, list.total, lang)}</p>
         {pages > 1 && (
           <div className="flex items-center gap-1.5">
-            <Button size="xs" variant="ghost" onClick={() => goTo(0)} disabled={page === 0}>First</Button>
-            <Button size="xs" variant="secondary" onClick={() => goTo(page - 1)} disabled={page === 0}>Previous</Button>
-            <span className="text-[11px] text-text-secondary tabular-nums px-1">Page {page + 1} of {pages}</span>
-            <Button size="xs" variant="secondary" onClick={() => goTo(page + 1)} disabled={page >= pages - 1}>Next</Button>
-            <Button size="xs" variant="ghost" onClick={() => goTo(pages - 1)} disabled={page >= pages - 1}>Last</Button>
+            <Button size="xs" variant="ghost" onClick={() => goTo(0)} disabled={page === 0}>{t.first}</Button>
+            <Button size="xs" variant="secondary" onClick={() => goTo(page - 1)} disabled={page === 0}>{t.previous}</Button>
+            <span className="text-[11px] text-text-secondary tabular-nums px-1">{t.pageOf(page + 1, pages)}</span>
+            <Button size="xs" variant="secondary" onClick={() => goTo(page + 1)} disabled={page >= pages - 1}>{t.next}</Button>
+            <Button size="xs" variant="ghost" onClick={() => goTo(pages - 1)} disabled={page >= pages - 1}>{t.last}</Button>
           </div>
         )}
       </div>

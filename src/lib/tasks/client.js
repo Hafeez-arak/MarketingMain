@@ -1,4 +1,5 @@
 import { supabase } from '../supabaseClient'
+import { getLang } from '../i18n'
 
 // ─── Tasks: the browser's reads and writes ─────────────────────────────────
 // 2026-10-19, docs/TASKS-PLAN.md. Straight to the database with the person's
@@ -8,7 +9,7 @@ import { supabase } from '../supabaseClient'
 
 const TASK_COLS = 'id,workspace_id,title,details,assigned_to,created_by,due_at,remind_at,priority,status,section,meeting_id,lead_id,account_id,follow_up_of,completed_at,created_at,updated_at'
 
-const fail = error => ({ error: error?.message || 'It did not work. Try again.' })
+const fail = error => ({ error: error?.message || (getLang() === 'ar' ? 'لم ينجح ذلك. حاول مجددًا.' : 'It did not work. Try again.') })
 
 /**
  * Tasks for one view:

@@ -10,6 +10,8 @@ import LeadsBoard from './Board'
 import Pipeline, { AddLeadDialog } from './Pipeline'
 import SalesShell from './SalesShell'
 import SalesTasks from './SalesTasks'
+import { useT, fmtDay } from '../../lib/i18n'
+import { LW } from './words'
 
 // ─── The sales team's app: Leads ──────────────────────────────────────────
 // What a 'sales' account sees instead of the marketing app (2026-10-11): one
@@ -36,6 +38,7 @@ export default function SalesApp() {
 
 function SalesLeads() {
   const { user, workspaces, activeWorkspaceId, switchWorkspace, canApproveLeads } = useAuth()
+  const { t, lang } = useT(LW)
   const [monthLeads, setMonthLeads] = useState([])
   const [mailboxes, setMailboxes] = useState([])
   // The company's sales team by name: the Owner column and the Assign choice.
@@ -87,7 +90,7 @@ function SalesLeads() {
 
   const loading = loadedFor !== activeWorkspaceId
   const stats = useMemo(() => monthStats(monthLeads, now), [monthLeads, now])
-  const month = now.toLocaleString('en-GB', { month: 'long' })
+  const month = fmtDay(now, lang, { month: 'long' })
 
   async function review(lead, verdict, reason) {
     const r = await leadsApi('review', activeWorkspaceId, { lead_id: lead.id, verdict, reason })
@@ -106,31 +109,29 @@ function SalesLeads() {
       <div className="space-y-4">
         <div className="flex items-end justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="text-lg font-semibold text-text tracking-tight">Leads</h1>
+            <h1 className="text-lg font-semibold text-text tracking-tight">{t.leadsTitle}</h1>
             <p className="text-xs text-text-secondary mt-0.5">
-              {canApproveLeads
-                ? 'Inbox: every enquiry, sorted by the agent. Approve and assign the real ones; they move to the Pipeline, where each is worked stage by stage.'
-                : 'Pipeline: your leads by stage, with the battle card for each. Add the ones that come by phone, WhatsApp or a visit yourself.'}
+              {canApproveLeads ? t.approverIntro : t.repIntro}
             </p>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
-            <Button size="sm" onClick={() => setAdding(true)} disabled={!activeWorkspaceId}>+ Add lead</Button>
+            <Button size="sm" onClick={() => setAdding(true)} disabled={!activeWorkspaceId}>{t.addLead}</Button>
             <Button variant="secondary" size="sm" onClick={refresh} disabled={refreshing || !activeWorkspaceId}>
               {refreshing ? <Spinner size="sm" /> : null}
-              Refresh
+              {t.refresh}
             </Button>
           </div>
         </div>
 
-        <SubTabs items={[{ key: 'inbox', label: 'Inbox' }, { key: 'pipeline', label: openCount ? `Pipeline (${openCount})` : 'Pipeline' }]} value={view} onChange={setView} />
+        <SubTabs items={[{ key: 'inbox', label: t.inbox }, { key: 'pipeline', label: openCount ? t.pipelineN(openCount) : t.pipeline }]} value={view} onChange={setView} />
 
-        {error && <Notice tone="red" title="Something went wrong">{error}</Notice>}
+        {error && <Notice tone="red" title={t.somethingWrong}>{error}</Notice>}
 
         {view === 'inbox' && <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-border border border-border">
-          <Stat label={`Leads in ${month}`} value={stats.qualified} loading={loading} tone="text-sage-700" hint="Qualified, by the agent or by you" />
-          <Stat label="Needs a look" value={stats.needs_review} loading={loading} tone={stats.needs_review ? 'text-amber-800' : ''} hint="The agent was not sure; decide in the row" />
-          <Stat label="Not leads" value={stats.unqualified} loading={loading} hint="Spam, sales pitches, job seekers and the like" />
-          <Stat label="Everything" value={stats.total} loading={loading} hint={`All enquiries in ${month}`} />
+          <Stat label={t.statLeads(month)} value={stats.qualified} loading={loading} tone="text-sage-700" hint={t.statLeadsHint} />
+          <Stat label={t.statLook} value={stats.needs_review} loading={loading} tone={stats.needs_review ? 'text-amber-800' : ''} hint={t.statLookHint} />
+          <Stat label={t.statNot} value={stats.unqualified} loading={loading} hint={t.statNotHint} />
+          <Stat label={t.statAll} value={stats.total} loading={loading} hint={t.statAllHint(month)} />
         </div>}
 
         {view === 'inbox'

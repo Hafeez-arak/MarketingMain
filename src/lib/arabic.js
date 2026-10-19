@@ -8,5 +8,8 @@ export const arDays = n => (n === 1 ? 'يوم واحد' : n === 2 ? 'يومان'
 /** The same for hours. */
 export const arHours = n => (n === 1 ? 'ساعة واحدة' : n === 2 ? 'ساعتان' : n >= 3 && n <= 10 ? `${n} ساعات` : `${n} ساعة`)
 
+/** "عميل واحد، عميلان، ٣ عملاء، ١١ عميلًا": a count of a noun (singular, dual, plural, accusative singular). */
+export const arCount = (n, [one, two, few, many]) => (n === 1 ? one : n === 2 ? two : n >= 3 && n <= 10 ? `${n} ${few}` : `${n} ${many}`)
+
 export const AR_WEEKDAYS = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت']
 export const AR_MONTHS = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر']

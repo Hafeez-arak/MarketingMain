@@ -5,6 +5,8 @@ import { fetchRuns, fetchLensResults } from '../../lib/agentRun'
 import { isLive } from '../../lib/agent/progress'
 import { ResearchTab } from '../insights/ResearchTab'
 import SalesShell from './SalesShell'
+import { useT } from '../../lib/i18n'
+import { LW } from './words'
 
 // ─── The sales team's Research page (2026-10-19) ─────────────────────────
 // The weekly research the marketing team reads, in its Sales view: top
@@ -17,6 +19,7 @@ import SalesShell from './SalesShell'
 
 export default function SalesResearch() {
   const { activeWorkspaceId, accessToken } = useAuth()
+  const { t } = useT(LW)
   const [runs, setRuns] = useState([])
   const [lensRows, setLensRows] = useState([])
   const [selectedId, setSelectedId] = useState(null)
@@ -62,9 +65,9 @@ export default function SalesResearch() {
     <SalesShell>
       <div className="space-y-4">
         <div className="min-w-0">
-          <h1 className="text-lg font-semibold text-text tracking-tight">Research</h1>
+          <h1 className="text-lg font-semibold text-text tracking-tight">{t.researchTitle}</h1>
           <p className="text-xs text-text-secondary mt-0.5">
-            What this week&apos;s market research found for sales: openings and tenders, what competitors are doing, and events coming up. Read only.
+            {t.researchSub}
           </p>
         </div>
 
@@ -75,10 +78,11 @@ export default function SalesResearch() {
           </div>
         ) : error ? (
           <Card>
-            <Empty title="The research could not be loaded" description="This is a connection problem, not missing research. Please refresh the page to try again." />
+            <Empty title={t.researchFailed} description={t.researchFailedBody} />
           </Card>
         ) : (
-          <ResearchTab
+          // The report is Insights' and still in English: kept left to right.
+          <div dir="ltr"><ResearchTab
             readOnly
             run={selected}
             runs={runs}
@@ -86,7 +90,7 @@ export default function SalesResearch() {
             selectedId={selectedId}
             onSelectRun={setSelectedId}
             now={now}
-          />
+          /></div>
         )}
       </div>
     </SalesShell>

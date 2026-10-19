@@ -14,6 +14,7 @@ export const TW = {
   en: {
     title: 'Tasks',
     subtitle: 'Your to-do list, the follow-ups you set for others, and what each meeting agreed. Reminders and deadlines come to the bell, and every morning a summary.',
+    salesSubtitle: 'Your to-do list and the follow-ups you set for others. Deadlines and reminders come to the bell, and every morning a summary.',
     newTask: '+ New task', tabsLabel: 'Tasks',
     tabs: { mine: 'My tasks', assigned: 'I assigned', team: 'Team', meetings: 'Meetings' },
     person: 'Person', open: 'Open', overdue: 'Overdue', dueWeek: 'Due this week', doneWeek: 'Done (7 days)', salesTag: 'sales',
@@ -53,6 +54,7 @@ export const TW = {
   ar: {
     title: 'المهام',
     subtitle: 'قائمة مهامك، والمتابعات التي كلّفت بها غيرك، وما اتُّفق عليه في كل اجتماع. التذكيرات والمواعيد تصلك في الإشعارات، وملخص كل صباح.',
+    salesSubtitle: 'قائمة مهامك والمتابعات التي كلّفت بها غيرك. المواعيد والتذكيرات تصلك في الإشعارات، وملخص كل صباح.',
     newTask: '+ مهمة جديدة', tabsLabel: 'المهام',
     tabs: { mine: 'مهامي', assigned: 'كلّفت بها', team: 'الفريق', meetings: 'الاجتماعات' },
     person: 'الشخص', open: 'مفتوحة', overdue: 'متأخرة', dueWeek: 'مستحقة هذا الأسبوع', doneWeek: 'أُنجزت (٧ أيام)', salesTag: 'مبيعات',

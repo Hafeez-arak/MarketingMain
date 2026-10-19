@@ -23,7 +23,7 @@
 //
 // Pure. No network.
 
-import { projectOf, SENDER_LABEL } from '../leads/view.js'
+import { projectOf, SENDER_LABEL, leadLabels } from '../leads/view.js'
 import { scoreTarget } from './icp.js'
 
 const str = (v) => String(v ?? '').trim()
@@ -536,14 +536,37 @@ export function afterCallFields(body = {}) {
 }
 
 /** Header chips for a lead and its card, in display order. */
-export function cardChips(lead = {}, card = {}) {
+export function cardChips(lead = {}, card = {}, lang = 'en') {
   const c = normaliseLeadCard(card)
-  const out = [{ tone: 'kind', text: CARD_KINDS[c.kind] }]
-  const who = SENDER_LABEL[lead.sender_type]
-  if (who) out.push({ tone: '', text: `${who}${lead.source_check === 'verified' ? ' · verified' : lead.source_check ? ' · not verified' : ''}` })
+  const C = cardLabels(lang)
+  const L = leadLabels(lang)
+  const out = [{ tone: 'kind', text: C.kinds[c.kind] }]
+  const who = L.sender[lead.sender_type]
+  if (who) out.push({ tone: '', text: `${who}${lead.source_check === 'verified' ? ` · ${C.verified}` : lead.source_check ? ` · ${C.notVerified}` : ''}` })
   const phase = projectOf(lead)
-  out.push({ tone: '', text: phase ? ({ jih: 'JIH', tender: 'Tender', maintenance: 'Maintenance' }[phase] || phase) : 'Phase not set' })
-  out.push({ tone: c.customer === 'existing' ? 'good' : c.customer === 'parked' ? 'warn' : '', text: CUSTOMER_LABEL[c.customer] })
-  if (c.fit.band) out.push({ tone: c.fit.band === 'strong' ? 'good' : c.fit.band === 'weak' ? 'warn' : '', text: BAND_LABEL[c.fit.band] })
+  out.push({ tone: '', text: phase ? (L.project[phase] || phase) : C.phaseNotSet })
+  out.push({ tone: c.customer === 'existing' ? 'good' : c.customer === 'parked' ? 'warn' : '', text: C.customer[c.customer] })
+  if (c.fit.band) out.push({ tone: c.fit.band === 'strong' ? 'good' : c.fit.band === 'weak' ? 'warn' : '', text: C.bands[c.fit.band] })
   return out
 }
+
+// ─── Arabic (v2, lib/i18n.js) ──────────────────────────────────────────────
+// The card's own words in each language. English stays the default; the
+// card's content (the headline, the facts, the questions) is the agent's
+// and stays in the language it was written in.
+const CARD_AR = {
+  kinds: { project: 'عرض سعر لمشروع', quick: 'عرض سعر سريع' },
+  decisions: { quote_today: 'عرض سعر اليوم', project_quote: 'عرض سعر لمشروع، مع موعد', park: 'تعليق حتى الترسية', decline: 'اعتذار، مع السبب' },
+  customer: { existing: 'عميل حالي', parked: 'حساب معلّق', repeat: 'مرسل متكرر', new: 'جديد علينا' },
+  facts: { who: 'من هم', wants: 'ما الذي يريدونه', brand: 'شرط العلامة', due: 'الموعد النهائي' },
+  bands: { strong: 'ملاءمة قوية', possible: 'ملاءمة محتملة', weak: 'ملاءمة ضعيفة' },
+  verified: 'موثّق', notVerified: 'غير موثّق', phaseNotSet: 'المرحلة غير محددة',
+}
+const CARD_EN = {
+  kinds: CARD_KINDS, decisions: DECISIONS, customer: CUSTOMER_LABEL,
+  facts: Object.fromEntries(FACTS), bands: BAND_LABEL,
+  verified: 'verified', notVerified: 'not verified', phaseNotSet: 'Phase not set',
+}
+
+/** The battle card's labels in one language. */
+export const cardLabels = (lang = 'en') => (lang === 'ar' ? CARD_AR : CARD_EN)

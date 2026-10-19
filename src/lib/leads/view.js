@@ -104,10 +104,11 @@ export function pageRange(page = 0, size = PAGE_SIZE) {
 }
 
 /** "26–50 of 542". */
-export function pageLabel(page, size, total) {
-  if (!total) return '0 of 0'
+export function pageLabel(page, size, total, lang = 'en') {
+  const of = lang === 'ar' ? 'من' : 'of'
+  if (!total) return `0 ${of} 0`
   const { from, to } = pageRange(page, size)
-  return `${from + 1}–${Math.min(to + 1, total)} of ${total}`
+  return `${from + 1}–${Math.min(to + 1, total)} ${of} ${total}`
 }
 
 export const pageCount = (total, size = PAGE_SIZE) => Math.max(1, Math.ceil((Number(total) || 0) / size))
@@ -139,16 +140,17 @@ export function projectOf(lead = {}) {
  * who, verified, phase, what, Philips, folder, email kind. Only what is known;
  * a lead read before the criteria (version 1) gives none.
  */
-export function criteriaLabels(lead = {}) {
+export function criteriaLabels(lead = {}, lang = 'en') {
   if ((lead.criteria_version || 1) < 2) return []
+  const L = leadLabels(lang)
   const out = []
-  if (lead.sender_type) out.push(SENDER_LABEL[lead.sender_type] || lead.sender_type)
-  if (lead.source_check) out.push(lead.source_check === 'verified' ? 'Verified' : 'Not verified')
-  if (projectOf(lead)) out.push(PROJECT_LABEL[projectOf(lead)] || projectOf(lead))
-  if (lead.request_type) out.push(REQUEST_LABEL[lead.request_type] || lead.request_type)
-  if (PHILIPS_LABEL[lead.philips]) out.push(PHILIPS_LABEL[lead.philips])
-  if (lead.folder && lead.folder !== 'inbox') out.push(FOLDER_LABEL[lead.folder] || lead.folder)
-  if (lead.email_kind === 'free') out.push('Free email')
+  if (lead.sender_type) out.push(L.sender[lead.sender_type] || lead.sender_type)
+  if (lead.source_check) out.push(lead.source_check === 'verified' ? L.words.verified : L.words.notVerified)
+  if (projectOf(lead)) out.push(L.project[projectOf(lead)] || projectOf(lead))
+  if (lead.request_type) out.push(L.request[lead.request_type] || lead.request_type)
+  if (L.philips[lead.philips]) out.push(L.philips[lead.philips])
+  if (lead.folder && lead.folder !== 'inbox') out.push(L.folder[lead.folder] || lead.folder)
+  if (lead.email_kind === 'free') out.push(L.words.freeEmail)
   return out
 }
 
@@ -221,10 +223,10 @@ export const activeFilterCount = (f = EMPTY_FILTERS) =>
 export const money = (n) => `$${(Number(n) || 0).toFixed(n && n < 0.1 ? 4 : 2)}`
 
 /** "6 Oct, 13:00" in Riyadh time. */
-export function when(iso) {
+export function when(iso, lang = 'en') {
   if (!iso) return '—'
   const d = new Date(iso)
-  return d.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Riyadh' })
+  return d.toLocaleString(lang === 'ar' ? 'ar-SA-u-nu-latn-ca-gregory' : 'en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Riyadh' })
 }
 
 /** "Arak" from info@arak-sa.com, "CLB" from info@clb-sa.com: the company a mailbox belongs to. */
@@ -235,11 +237,13 @@ export function brandOf(address = '') {
 }
 
 /** Where a lead came in, the way the team says it: "Arak website", "Arak email", "CLB email". */
-export function channelLabel(lead = {}, { websiteBrand = 'Arak' } = {}) {
-  if (lead.source === 'website_form') return `${websiteBrand} website`
-  if (lead.source === 'manual') return CHANNEL_LABEL[lead.channel] ? `Added · ${CHANNEL_LABEL[lead.channel]}` : 'Added by hand'
+export function channelLabel(lead = {}, { websiteBrand = 'Arak', lang = 'en' } = {}) {
+  const L = leadLabels(lang)
+  const ar = lang === 'ar'
+  if (lead.source === 'website_form') return ar ? `موقع ${websiteBrand}` : `${websiteBrand} website`
+  if (lead.source === 'manual') return L.channel[lead.channel] ? `${L.words.added} · ${L.channel[lead.channel]}` : L.source.manual
   const brand = brandOf(lead.mailbox)
-  return brand ? `${brand} email` : 'Email'
+  return brand ? (ar ? `بريد ${brand}` : `${brand} email`) : L.source.email
 }
 
 /**
@@ -299,10 +303,11 @@ export function shortName(member) {
  * The Owner column's words for a lead: "You", a first name, "Unassigned",
  * or "Someone else" when the person has left the team.
  */
-export function ownerLabel(lead, team = [], me = '') {
-  if (!lead?.assigned_to) return 'Unassigned'
-  if (me && lead.assigned_to === me) return 'You'
-  return shortName(team.find((m) => m.user_id === lead.assigned_to)) || 'Someone else'
+export function ownerLabel(lead, team = [], me = '', lang = 'en') {
+  const w = leadLabels(lang).words
+  if (!lead?.assigned_to) return w.unassigned
+  if (me && lead.assigned_to === me) return w.you
+  return shortName(team.find((m) => m.user_id === lead.assigned_to)) || w.someoneElse
 }
 
 /**
@@ -312,8 +317,17 @@ export function ownerLabel(lead, team = [], me = '') {
  */
 export const assignable = (team = []) => team.filter((m) => !m.approver)
 
+
 /** What the person gets when a lead is assigned: the email forwarded, from where. */
-export function forwardWords(lead = {}, person = null) {
+export function forwardWords(lead = {}, person = null, lang = 'en') {
+  if (lang === 'ar') {
+    const n = person ? shortName(person) : 'سيحصل'
+    return lead.source === 'email'
+      ? `${n}: يُحوَّل إليه بريد العميل الآن من ${lead.mailbox || 'صندوق البريد الذي وصل إليه'} مع المرفقات، ويرد من هناك.`
+      : lead.source === 'manual'
+        ? `${n}: يصله إشعار؛ لا يوجد بريد لتحويله في عميل أُضيف يدويًا.`
+        : `${n}: يصله استفسار الموقع هذا بالبريد الآن، وعنوان العميل للرد.`
+  }
   const name = person ? shortName(person) : 'They'
   return lead.source === 'email'
     ? `${name} gets the customer's email forwarded from ${lead.mailbox || 'the mailbox it came to'} now, attachments and all, and replies from there.`
@@ -330,11 +344,14 @@ export const FORWARD_LABEL = { sending: 'Forwarding…', sent: 'Email forwarded'
  * Battle card, and the email as it arrived. A lead added by hand has no
  * email; its notes are on the Lead tab.
  */
-export const leadTabs = (lead = {}) => [
-  ['lead', 'Lead'],
-  ['card', 'Battle card'],
-  ...(lead.source === 'manual' ? [] : [['email', 'Email and evidence']]),
-]
+export const leadTabs = (lead = {}, lang = 'en') => {
+  const t = leadLabels(lang).tabs
+  return [
+    ['lead', t.lead],
+    ['card', t.card],
+    ...(lead.source === 'manual' ? [] : [['email', t.email]]),
+  ]
+}
 
 /**
  * Unread for this person (2026-10-19): it arrived on or after the company's
@@ -346,3 +363,38 @@ export function isUnread(lead = {}, readIds = new Set(), readBefore = null) {
   if (readBefore && at && new Date(at).getTime() < new Date(readBefore).getTime()) return false
   return true
 }
+
+// ─── Arabic (v2, lib/i18n.js) ──────────────────────────────────────────────
+// The same labels in Arabic; leadLabels(lang) gives a screen the set for its
+// language. English stays the default everywhere, so nothing that reads the
+// English maps directly (the server, emails, exports) changes.
+
+const AR = {
+  verdict: { qualified: 'مؤهَّل', unqualified: 'غير مؤهَّل', needs_review: 'يحتاج مراجعة', duplicate: 'مكرر', pending: 'لم يُفحص بعد' },
+  source: { website_form: 'الموقع', email: 'البريد', manual: 'أُضيف يدويًا' },
+  channel: { phone: 'مكالمة هاتفية', whatsapp: 'واتساب', walk_in: 'زيارة مباشرة', referral: 'توصية', exhibition: 'معرض أو فعالية', site_visit: 'زيارة موقع', outbound: 'تواصلنا معهم', other: 'أخرى' },
+  sender: { contractor: 'مقاول', developer_owner: 'مطوّر / مالك', consultant: 'استشاري', end_client: 'العميل النهائي', facility_company: 'شركة إدارة مرافق', trader: 'تاجر', individual: 'فرد', unknown: 'المرسل غير واضح' },
+  project: { jih: 'JIH', tender: 'مناقصة', maintenance: 'صيانة' },
+  request: { requirement: 'طلب احتياج', inquiry: 'استفسار' },
+  folder: { inbox: 'البريد الوارد', junk: 'البريد غير المرغوب', deleted: 'المحذوفات', archive: 'الأرشيف', other: 'مجلد آخر', website: 'نموذج الموقع' },
+  philips: { only: 'فيليبس فقط', mixed: 'فيليبس وغيرها', or_equivalent: 'فيليبس أو ما يعادلها' },
+  show: { leads: 'العملاء للعمل عليهم', qualified: 'مؤهَّل', needs_review: 'يحتاج مراجعة', unqualified: 'غير مؤهَّل', duplicate: 'المكررات', pending: 'لم يُفحص بعد', corrected: 'صحّحه شخص', approved: 'معتمد / في النظام', all: 'الكل' },
+  crm: { queued: 'معتمد · بانتظار أودو', sending: 'جارٍ الإرسال إلى أودو…', sent: 'في أودو', failed: 'رفضه أودو' },
+  forward: { sending: 'جارٍ التحويل…', sent: 'حُوّل البريد', failed: 'لم يُحوَّل البريد' },
+  tabs: { lead: 'العميل', card: 'بطاقة المنافسة', email: 'البريد والأدلة' },
+  stage: { new: 'جديد', contacted: 'تم التواصل', rfq: 'وصل طلب التسعير', quotation: 'أُرسل عرض السعر', negotiating: 'تفاوض', won: 'مكسوب', lost: 'خاسر' },
+  lost: { price: 'السعر', brand: 'العلامة ليست لدينا / غير معتمدة', lead_time: 'مدة التوريد أو المخزون', no_reply: 'توقفوا عن الرد', cancelled: 'أُلغي المشروع أو توقف', other: 'أخرى' },
+  words: { verified: 'موثّق', notVerified: 'غير موثّق', freeEmail: 'بريد مجاني', you: 'أنت', unassigned: 'بلا مسؤول', someoneElse: 'شخص آخر', added: 'أُضيف', website: 'الموقع', emailWord: 'البريد' },
+}
+const EN = {
+  verdict: VERDICT_LABEL, source: SOURCE_LABEL, channel: CHANNEL_LABEL, sender: SENDER_LABEL, project: PROJECT_LABEL,
+  request: REQUEST_LABEL, folder: FOLDER_LABEL, philips: PHILIPS_LABEL,
+  show: Object.fromEntries(SHOW_OPTIONS.map((o) => [o.key, o.label])), crm: CRM_LABEL, forward: FORWARD_LABEL,
+  tabs: { lead: 'Lead', card: 'Battle card', email: 'Email and evidence' },
+  stage: { new: 'New', contacted: 'Contacted', rfq: 'RFQ received', quotation: 'Quotation sent', negotiating: 'Negotiating', won: 'Won', lost: 'Lost' },
+  lost: { price: 'Price', brand: 'Brand not ours / not approved', lead_time: 'Lead time or stock', no_reply: 'They stopped replying', cancelled: 'Project cancelled or on hold', other: 'Other' },
+  words: { verified: 'Verified', notVerified: 'Not verified', freeEmail: 'Free email', you: 'You', unassigned: 'Unassigned', someoneElse: 'Someone else', added: 'Added', website: 'website', emailWord: 'email' },
+}
+
+/** Every lead label map in one language: leadLabels('ar').verdict.qualified === 'مؤهَّل'. */
+export const leadLabels = (lang = 'en') => (lang === 'ar' ? AR : EN)

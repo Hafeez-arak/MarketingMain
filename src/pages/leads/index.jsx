@@ -13,6 +13,8 @@ import { RULE_LABELS } from '../../lib/leads/qualify'
 import {
   monthStats, sheetHealth, modelName, money,
 } from '../../lib/leads/view'
+import { useT } from '../../lib/i18n'
+import { LW } from './words'
 
 // ─── Leads ─────────────────────────────────────────────────────────────────
 // Admin only for now (the owner's decision, 2026-10-06; who else gets in is
@@ -26,11 +28,7 @@ import {
 
 // Inbox: every enquiry, where leads are sorted, approved and assigned.
 // Pipeline (2026-10-18): the approved and hand-added ones, by stage.
-const VIEWS = [
-  { key: 'leads', label: 'Inbox' },
-  { key: 'pipeline', label: 'Pipeline' },
-  { key: 'settings', label: 'Agent settings' },
-]
+const VIEWS = ['leads', 'pipeline', 'settings']
 
 // What went wrong with "Connect a mailbox", in the words a person needs.
 const MS_ERRORS = {
@@ -51,6 +49,7 @@ const MS_ERRORS = {
 
 export default function LeadAgent() {
   const { canSection, activeWorkspaceId, user } = useAuth()
+  const { t, lang, dir } = useT(LW)
   // v2: Sales section access (was: the access admin only). Agent settings
   // change how the lead agent works, so they ask for manage.
   const canUse = canSection('sales')
@@ -133,23 +132,23 @@ export default function LeadAgent() {
   }
 
   return (
-    <div className="max-w-7xl space-y-4">
-      <PageHeader title="Leads" subtitle="Inbox: every enquiry from the website and the info@ mailboxes, sorted by the agent. Pipeline: the approved and hand-added leads, worked stage by stage.">
-        <Button size="sm" onClick={() => setAdding(true)} disabled={!activeWorkspaceId}>+ Add lead</Button>
+    <div className="max-w-7xl space-y-4" dir={dir} lang={lang}>
+      <PageHeader title={t.leadsTitle} subtitle={t.mainIntro}>
+        <Button size="sm" onClick={() => setAdding(true)} disabled={!activeWorkspaceId}>{t.addLead}</Button>
         <Button variant="secondary" size="sm" onClick={refresh} disabled={refreshing || !activeWorkspaceId}>
           {refreshing ? <Spinner size="sm" /> : null}
-          Refresh
+          {t.refresh}
         </Button>
       </PageHeader>
 
-      <SubTabs items={canManage ? VIEWS : VIEWS.filter(v => v.key !== 'settings')} value={view} onChange={chooseView} />
+      <SubTabs items={(canManage ? VIEWS : VIEWS.filter(v => v !== 'settings')).map(k => ({ key: k, label: t.views[k] }))} value={view} onChange={chooseView} />
 
       {msBack?.ok && msBack.approved && <Notice tone="sage" title="The other organisation approved the app">Its mailboxes can now be connected with "Connect a mailbox from another Microsoft 365".</Notice>}
       {msBack?.ok && !msBack.approved && msBack.forwarding === 'on' && <Notice tone="sage" title={`${msBack.mailbox} may forward now`}>Assigning a lead that came to it forwards the customer's email to the salesperson.</Notice>}
       {msBack?.ok && !msBack.approved && msBack.forwarding === 'refused' && <Notice tone="red" title={`${msBack.mailbox} is still read only`}>Microsoft did not grant sending. On another Microsoft 365, its admin approves the app again (the approval link below) before signing in with "Allow forwarding".</Notice>}
       {msBack?.ok && !msBack.approved && !msBack.forwarding && <Notice tone="sage" title={`${msBack.mailbox} is connected`}>The agent reads its new mail every 5 minutes, read only, from 1 October, and imports July to September in the background.</Notice>}
       {msBack && !msBack.ok && <Notice tone="red" title="The mailbox was not connected">{MS_ERRORS[msBack.code] || 'Microsoft did not finish the sign-in. Try again.'}</Notice>}
-      {error && <Notice tone="red" title="Something went wrong">{error}</Notice>}
+      {error && <Notice tone="red" title={t.somethingWrong}>{error}</Notice>}
 
       {adding && (
         <AddLeadDialog workspaceId={activeWorkspaceId} canAssign team={team} me={user?.id || ''}
@@ -161,7 +160,9 @@ export default function LeadAgent() {
       ) : view === 'pipeline' ? (
         <Pipeline workspaceId={activeWorkspaceId} onReview={review} refreshKey={refreshKey} mailboxes={status?.mailboxes || []} canApprove team={team} me={user?.id || ''} focus={params.get('lead') || ''} />
       ) : (
-        <>
+        // Agent settings: the admin's configuration, in English for now.
+        <div dir="ltr" lang="en" className="space-y-4">
+          {lang === 'ar' && <p className="text-[11px] text-text-tertiary" dir="rtl" lang="ar">{t.settingsEnglish}</p>}
           {status?.error && <Notice tone="red" title="Could not load the agent's settings">{status.error}</Notice>}
         {/* ── Is it running ── */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-px bg-border border border-border">
@@ -212,7 +213,7 @@ export default function LeadAgent() {
             </div>
             <Connection workspaceId={activeWorkspaceId} status={status} loading={loading} onChange={setStatus} onError={setError} onReload={reload} now={now} />
           </div>
-        </>
+        </div>
       )}
     </div>
   )

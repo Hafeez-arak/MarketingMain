@@ -6,6 +6,8 @@ import { fetchTasks, fetchTaskPeople, createTask, updateTask } from '../../lib/t
 import { bucketOf, dueLabel, isOpen } from '../../lib/tasks/logic'
 import { TaskForm, Dialog } from '../tasks/parts'
 import { tasksChanged } from './useDueTaskCount'
+import { useT } from '../../lib/i18n'
+import { LW } from './words'
 
 // ─── An opened lead's follow-up tasks (v2, 2026-10-19) ────────────────────
 // docs/TASKS-PLAN.md: "any lead can get a follow-up task that links back to
@@ -19,7 +21,7 @@ import { tasksChanged } from './useDueTaskCount'
 // Where the database has no tasks table (production before v2) the line is
 // not shown at all.
 
-const nameOf = (people, id) => people.find((p) => p.user_id === id)?.name || (id ? 'someone who left' : 'nobody')
+const nameOf = (people, id, t) => people.find((p) => p.user_id === id)?.name || (id ? t.someoneLeftLc : t.nobody)
 
 const DUE_TONE = { overdue: 'text-red-600 font-semibold', today: 'text-text font-semibold' }
 
@@ -27,6 +29,7 @@ const noTable = (msg) => /schema cache|does not exist/i.test(String(msg || ''))
 
 export default function LeadTasks({ lead, workspaceId, me }) {
   const { isSales } = useAuth()
+  const { t: w, lang } = useT(LW)
   const [people, setPeople] = useState([])
   const [tasks, setTasks] = useState(null)
   const [error, setError] = useState('')
@@ -70,25 +73,25 @@ export default function LeadTasks({ lead, workspaceId, me }) {
   const href = (t) => (isSales ? `/leads?view=tasks&task=${t.id}` : `/tasks?id=${t.id}`)
 
   return (
-    <div className="px-4 pt-2 md:pl-[8.25rem] text-[11px] text-text-secondary space-y-1">
+    <div className="px-4 pt-2 md:ps-[8.25rem] text-[11px] text-text-secondary space-y-1">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span>Follow-up tasks</span>
-        {tasks !== null && !open.length && <span className="text-text-tertiary">· none open{done ? `, ${done} done` : ''}</span>}
-        {open.length > 0 && done > 0 && <span className="text-text-tertiary">· {done} done</span>}
-        <Button size="xs" variant="secondary" onClick={() => setAdding(true)} disabled={!workspaceId}>+ Add follow-up task</Button>
+        <span>{w.followTasks}</span>
+        {tasks !== null && !open.length && <span className="text-text-tertiary">{w.noneOpen(done)}</span>}
+        {open.length > 0 && done > 0 && <span className="text-text-tertiary">{w.doneN(done)}</span>}
+        <Button size="xs" variant="secondary" onClick={() => setAdding(true)} disabled={!workspaceId}>{w.addFollowTask}</Button>
       </div>
       {open.length > 0 && (
-        <ul className="space-y-1" aria-label="Open follow-up tasks">
+        <ul className="space-y-1" aria-label={w.openTasksAria}>
           {open.map((t) => {
             const b = bucketOf(t, now)
             return (
               <li key={t.id} className="flex items-start gap-2">
-                <button type="button" onClick={() => tick(t)} disabled={busyId === t.id} aria-label={`Mark done: ${t.title}`}
+                <button type="button" onClick={() => tick(t)} disabled={busyId === t.id} aria-label={w.markDone(t.title)}
                   className="w-3.5 h-3.5 mt-px rounded-full border border-stone-300 hover:border-green-600 flex-shrink-0 disabled:opacity-50" />
                 <span className="min-w-0">
                   <Link to={href(t)} className="text-text hover:underline" dir="auto">{t.title}</Link>
-                  {t.due_at && <span className={DUE_TONE[b] || 'text-text-tertiary'}> · {dueLabel(t, now)}</span>}
-                  <span className="text-text-tertiary"> · {t.assigned_to === me ? 'you' : nameOf(people, t.assigned_to)}</span>
+                  {t.due_at && <span className={DUE_TONE[b] || 'text-text-tertiary'}> · {dueLabel(t, now, lang)}</span>}
+                  <span className="text-text-tertiary"> · {t.assigned_to === me ? w.youLc : nameOf(people, t.assigned_to, w)}</span>
                 </span>
               </li>
             )
@@ -97,11 +100,11 @@ export default function LeadTasks({ lead, workspaceId, me }) {
       )}
       {error && <p className="text-red-600" dir="auto">{error}</p>}
       {adding && (
-        <Dialog title="Add a follow-up task" onClose={() => setAdding(false)}>
-          <p className="text-xs text-text-secondary -mt-1 mb-3" dir="auto">For the lead from {lead.company || lead.name || lead.email || 'this sender'}. It links back here.</p>
+        <Dialog title={w.addFollowTitle} onClose={() => setAdding(false)}>
+          <p className="text-xs text-text-secondary -mt-1 mb-3" dir="auto">{w.forLead(lead.company || lead.name || lead.email || w.thisSender)}</p>
           <TaskForm
-            initial={{ title: `Follow up: ${lead.company || lead.name || lead.email || 'this lead'}`, assigned_to: lead.assigned_to || me }}
-            people={people} me={me} submitLabel="Add follow-up" onSubmit={add} onCancel={() => setAdding(false)} />
+            initial={{ title: `${w.followUpPrefix}${lead.company || lead.name || lead.email || w.thisLead}`, assigned_to: lead.assigned_to || me }}
+            people={people} me={me} submitLabel={w.addFollow} onSubmit={add} onCancel={() => setAdding(false)} />
         </Dialog>
       )}
     </div>
