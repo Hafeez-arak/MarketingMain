@@ -209,3 +209,26 @@ Step 1 needs none of the decisions above, so it can start the day the owner says
 1. Sweep the links inside pages to the new addresses. They work today through the redirect, but each one costs a hop.
 2. The CEO panel's migration (`20261025_ceo_control.sql`), which this branch carries.
 3. Step 2: per-person section access.
+
+## v2 look (decided 2026-10-19)
+
+Taken from Arak's own Brand Brain: near-black `#0A0A0A`, warm cream
+`#FEFBF6`, mid grey, and "the only accent colour is the light itself, a warm
+amber/gold glow". The aim is clean and premium, not an "AI" look.
+
+- **Ink for action.** Primary buttons, selected chips and toggles are
+  near-black with white text.
+- **Gold for light, and only that.** Gold marks the open section, highlights,
+  focus borders and amber warnings. It is never a fill on large areas.
+- **Warm neutrals.** The page is cream-grey (`#F7F6F3`), cards are white,
+  lines are warm grey (`#E7E5E0`), and small print is `#78716C` (4.8:1).
+- **No gradients, glows or purple**, the logo mark included.
+- **Square corners and 1px rules**, as in v1. Architectural, like the brand.
+- **Fonts:** DM Sans for Latin, IBM Plex Sans Arabic for Arabic.
+- **The rail is near-black**, with the open section's icon in gold. Notification
+  counts are red, the universal convention.
+- **Status colours keep their meaning:** green good, gold/amber watch, red bad.
+
+All of it lives in `tailwind.config.js`. v1 used `amber-700` as "the primary
+action", so the accent scale's light end (50–600) is the gold and its dark end
+(700–900) is ink. Every existing page picks up the look with no page edits.

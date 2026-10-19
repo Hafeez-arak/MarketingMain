@@ -27,50 +27,65 @@ export default {
     },
     extend: {
       fontFamily: {
-        // One family. `display` is deliberately absent — see the note in
-        // src/index.css; nothing referenced it after the boxy pass, and a
-        // half-wired font utility is worse than no utility.
-        sans: ['"DM Sans"', 'system-ui', 'sans-serif'],
+        // One Latin family. Arabic falls through to IBM Plex Sans Arabic
+        // (loaded in src/index.css) rather than whatever the system has: DM
+        // Sans has no Arabic glyphs, and the CEO reads the app in Arabic.
+        sans: ['"DM Sans"', '"IBM Plex Sans Arabic"', 'system-ui', 'sans-serif'],
       },
+      // ── v2 palette (2026-10-19): Arak's own identity ──
+      // Brand Brain, Arak: near-black #0A0A0A, warm cream #FEFBF6, mid grey
+      // #828182, and "the only accent colour is the light itself: a warm
+      // amber/gold glow". So the UI is warm neutrals, near-black for anything
+      // strong, and gold used sparingly. No gradients, no glow, no purple.
+      //
+      // The class NAMES stay what ~140 files already use; their values
+      // change:
+      //   amber  = the accent scale. Its light end (50–600) is the gold
+      //            light: highlights, markers, warnings, focus borders. Its
+      //            dark end (700–900) is ink, because v1 used amber-700 as
+      //            "the primary action": primary buttons, toggles, selected
+      //            chips and links become near-black, which is cleaner than
+      //            a gold or a steel fill.
+      //   stone  = warm neutral greys (Tailwind's own stone family).
+      //   clay   = the secondary dark, now the same warm neutrals.
+      //   sage   = unchanged: green means "good" whatever the brand.
       colors: {
-        // Primary accent — was warm amber/sand, now Cool Steel
         amber: {
-          50:  '#eef1ef',
-          100: '#e1e7e6',
-          200: '#c8d3d5',
-          300: '#afc0c4',
-          400: '#96acb2',
-          500: '#7d98a1',
-          600: '#657b81',
-          700: '#4c5e61',
-          800: '#344041',
-          900: '#1c2321',
+          50:  '#fdf9f1',
+          100: '#faf0dc',
+          200: '#f2ddb2',
+          300: '#e6c27c',
+          400: '#d9a54c',
+          500: '#c68a2c',
+          600: '#9a6a20',
+          700: '#1c1917',
+          800: '#0c0a09',
+          900: '#0a0a0a',
         },
-        // Neutral — was warm stone/tan, now a cool Powder-Blue-to-Carbon grey
         stone: {
-          50:  '#eef1ef',
-          100: '#e0e5e6',
-          200: '#c5ccd4',
-          300: '#a9b4c2',
-          400: '#929ca7',
-          500: '#7a848c',
-          600: '#626c72',
-          700: '#4b5357',
-          800: '#343b3c',
-          900: '#1c2321',
+          50:  '#fafaf9',
+          100: '#f5f5f4',
+          200: '#e7e5e4',
+          300: '#d6d3d1',
+          400: '#a8a29e',
+          500: '#78716c',
+          600: '#57534e',
+          700: '#44403c',
+          800: '#292524',
+          900: '#1c1917',
+          950: '#0c0a09',
         },
-        // Secondary accent — was terracotta/clay, now Blue Slate
         clay: {
-          50:  '#eef1ef',
-          100: '#dee1e1',
-          200: '#bec2c5',
-          300: '#9ea3aa',
-          400: '#7e848e',
-          500: '#5e6572',
-          600: '#4e545e',
-          700: '#3d444a',
-          800: '#2c3435',
-          900: '#1c2321',
+          50:  '#fafaf9',
+          100: '#f5f5f4',
+          200: '#e7e5e4',
+          300: '#d6d3d1',
+          400: '#a8a29e',
+          500: '#78716c',
+          600: '#57534e',
+          700: '#292524',
+          800: '#1c1917',
+          900: '#0c0a09',
         },
         // Sage stays untouched — Approved/Published/Live status colors carry
         // usability meaning (green = good) independent of brand color.
@@ -88,21 +103,21 @@ export default {
         },
         surface: {
           DEFAULT: '#ffffff',
-          muted:   '#eef1ef',
-          subtle:  '#f3f5f4',
+          muted:   '#f7f6f3',   // the page: Arak's cream, a step darker so white cards read
+          subtle:  '#fafaf8',   // hover and table stripes
           card:    '#ffffff',
-          warm:    '#f6f8f7',
+          warm:    '#fefbf6',   // Arak's cream itself
         },
         border: {
-          DEFAULT: '#dde3e2',
-          strong:  '#a9b4c2',
-          light:   '#e9eceb',
+          DEFAULT: '#e7e5e0',
+          strong:  '#d6d3d1',
+          light:   '#f0eeea',
         },
         text: {
-          DEFAULT:   '#1c2321',
-          secondary: '#5e6572',
-          tertiary:  '#7d98a1',
-          disabled:  '#a9b4c2',
+          DEFAULT:   '#1c1917',
+          secondary: '#57534e',
+          tertiary:  '#78716c',   // 4.8:1 on white, so small print stays readable
+          disabled:  '#a8a29e',
         },
       },
       boxShadow: {
@@ -118,19 +133,17 @@ export default {
         'amber':     'none',
         'amber-lg':  'none',
         'clay':      'none',
-        'dropdown':  '0 8px 24px rgba(28,35,33,0.10), 0 2px 6px rgba(28,35,33,0.06)',
+        'dropdown':  '0 8px 24px rgba(12,10,9,0.10), 0 2px 6px rgba(12,10,9,0.06)',
         'inset':     'none',
       },
       backgroundImage: {
-        // One gradient survives the flattening: the logo mark. It's the single
-        // brand signature in an otherwise flat UI, so it reads as intentional
-        // rather than leftover. Everything else resolves to a solid fill —
-        // the *-gradient names stay so existing `bg-amber-gradient` call sites
-        // keep working, they just paint one color now.
-        'logo-mark':      'linear-gradient(135deg, #7d98a1 0%, #344041 100%)',
-        'amber-gradient': 'linear-gradient(#4c5e61, #4c5e61)',
-        'clay-gradient':  'linear-gradient(#3d444a, #3d444a)',
-        'warm-gradient':  'linear-gradient(#eef1ef, #eef1ef)',
+        // No gradients in v2, the logo mark included: Arak's mark is a solid
+        // near-black square. The *-gradient names stay so existing call
+        // sites keep working; each paints one colour.
+        'logo-mark':      'linear-gradient(#0a0a0a, #0a0a0a)',
+        'amber-gradient': 'linear-gradient(#1c1917, #1c1917)',
+        'clay-gradient':  'linear-gradient(#292524, #292524)',
+        'warm-gradient':  'linear-gradient(#fefbf6, #fefbf6)',
         'card-warm':      'linear-gradient(#ffffff, #ffffff)',
         'hero-warm':      'none',
         'sidebar-warm':   'linear-gradient(#ffffff, #ffffff)',

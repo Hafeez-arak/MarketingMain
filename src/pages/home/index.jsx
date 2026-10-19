@@ -36,8 +36,9 @@ export function HomePage() {
           return (
             <li key={s.key}>
               <Link to={s.pages[0].to}
-                className="group relative flex flex-col h-full bg-white border border-border px-4 py-4 hover:border-stone-400 hover:shadow-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400">
-                <span className="w-10 h-10 flex items-center justify-center bg-amber-700 text-white">
+                className="group relative flex flex-col h-full bg-white border border-border px-4 py-4 hover:border-amber-400 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400">
+                {/* Light against dark: Arak's gold on its near-black. */}
+                <span className="w-10 h-10 flex items-center justify-center bg-stone-950 text-amber-400">
                   <NavIcon name={s.icon} className="w-5 h-5" />
                 </span>
                 <span className="text-sm font-semibold text-text mt-3">{s.label}</span>

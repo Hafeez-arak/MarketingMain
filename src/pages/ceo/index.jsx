@@ -185,7 +185,7 @@ export function CeoPage() {
         </div>
       </header>
 
-      <nav className="flex gap-1 overflow-x-auto border-b border-border -mx-1 px-1" aria-label={T[lang].title}>
+      <nav className="flex gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden border-b border-border -mx-1 px-1" aria-label={T[lang].title}>
         {TABS.map(k => (
           <button key={k} type="button" onClick={() => openTab(k)} aria-current={tab === k ? 'page' : undefined}
             className={`whitespace-nowrap px-3 py-2 text-xs border-b-2 -mb-px ${tab === k ? 'border-amber-700 text-text font-semibold' : 'border-transparent text-text-secondary hover:text-text'}`}>

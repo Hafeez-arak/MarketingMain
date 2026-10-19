@@ -12,8 +12,10 @@ import { STATUS_META, PLATFORM_META } from '../../lib/utils'
      that are actually circular: Avatar, Spinner, status dots.
    · Structure comes from 1px rules, never from elevation. Only surfaces that
      genuinely float above the page (Modal, dropdowns) carry a shadow.
-   · One accent. Solid steel (amber-700 #4c5e61) marks the primary action on a
-     screen; everything else is white, border, and ink.
+   · Ink for action, gold for light (v2, Arak's own palette). Near-black
+     (amber-700 #1c1917) marks the primary action on a screen; Arak's gold
+     (amber-50…600) is the only colour, used for highlights and markers;
+     everything else is white, warm border, and ink.
    · Controls share a border on every variant — including a transparent one on
      the borderless variants — so a row of mixed buttons lines up on the same
      baseline instead of the ghost ones sitting 2px short.

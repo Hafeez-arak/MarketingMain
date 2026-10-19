@@ -11,8 +11,10 @@ import { useBadges, sectionBadge } from './useNavBadges'
 // alone cannot do: it sends you back to Home each time. See lib/modules.js
 // and docs/COMPANY-HUB-PLAN.md.
 
+// Near-black, as Arak's brand: the open section is lit in its gold, the way
+// the brand shows light against shadow. Everything else is a quiet grey.
 const cell = active => `relative w-10 h-10 flex items-center justify-center transition-colors
-  ${active ? 'bg-amber-700 text-white' : 'text-stone-300 hover:bg-stone-700 hover:text-white'}`
+  ${active ? 'bg-white/10 text-amber-400' : 'text-stone-400 hover:bg-white/5 hover:text-white'}`
 
 function Dot({ n }) {
   if (!n) return null
@@ -41,17 +43,17 @@ export function Rail({ onNavigate }) {
 
   return (
     <nav aria-label="Sections" data-print-hide
-      className="w-14 flex-shrink-0 h-full bg-stone-800 flex flex-col items-center py-2 gap-1.5">
+      className="w-14 flex-shrink-0 h-full bg-stone-950 flex flex-col items-center py-2 gap-1.5">
       {/* The brand mark, the height of the top bar so their rules line up. */}
       <div className="h-12 flex items-center justify-center mb-1">
-        <div className="w-8 h-8 bg-logo-mark flex items-center justify-center" title="Arak">
-          <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
+        <div className="w-8 h-8 border border-white/15 flex items-center justify-center" title="Arak">
+          <svg className="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/>
           </svg>
         </div>
       </div>
       {link(HOME.to, HOME.label, HOME.icon, pathname === '/', 0)}
-      <span className="w-6 border-t border-stone-600 my-1" aria-hidden="true" />
+      <span className="w-6 border-t border-white/10 my-1" aria-hidden="true" />
       {sections.map(s => link(s.pages[0].to, s.label, s.icon, here === s.key, sectionBadge(s, badges)))}
       <div className="flex-1" />
       {GLOBAL_PAGES.map(g => link(g.to, g.label, g.icon, pathname === g.to || pathname.startsWith(`${g.to}/`), g.badge ? badges[g.badge] : 0))}

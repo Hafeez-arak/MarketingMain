@@ -7,9 +7,9 @@ import { useBadges } from './useNavBadges'
 // ─── The open section's pages (v2) ─────────────────────────────────────────
 // 2026-10-19. v1 had one sidebar listing every page in the app under ten
 // headings. v2 shows only the pages of the section you are in, next to the
-// rail (Rail.jsx) that switches sections. Home and the global pages
-// (assistant, Requests, Settings) belong to no section, and there is no
-// sidebar on them: the page gets the width. See lib/modules.js.
+// rail (Rail.jsx) that switches sections. Home, the global pages (assistant,
+// Requests, Settings) and one-page sections get no sidebar: the page gets
+// the width. See lib/modules.js.
 
 export function Sidebar({ onNavigate }) {
   const { pathname } = useLocation()
@@ -18,6 +18,9 @@ export function Sidebar({ onNavigate }) {
   const section = sectionOf(pathname)
   if (!section) return null
   const pages = section.pages.filter(pg => !pg.hidden && canOpen(pg, { isAccessAdmin }))
+  // A one-page section (CEO, Admin today) needs no menu: the rail already
+  // opened it, and a column holding one link is 208px taken for nothing.
+  if (pages.length < 2) return null
 
   return (
     <aside aria-label={section.label} data-print-hide
