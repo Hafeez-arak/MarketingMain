@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   sweepPlan, siteOf, handleOf, linkedinOf, belongs, headlinesFrom, mergeResults,
   sweepBlock, findingsBySource, sourceRecord, depthOf,
+  parseFeed, isFeed, parseLinkedinPage, linkedinIdDate, instagramItems, freshAndNew, marketWords, rankByMarket,
 } from './sourceSweep.js'
 import { sourcesBlock } from './lensPrompts.js'
 
@@ -132,7 +133,7 @@ describe('sweepBlock', () => {
   })
   it('names the empty and the unreachable in one line each', () => {
     const b = sweepBlock(checks)
-    expect(b).toContain('Searched, nothing new came back: @riyadh_today.')
+    expect(b).toContain('Searched, nothing came back: @riyadh_today.')
     expect(b).toContain('Could not be checked this week: tenders.etimad.sa.')
   })
   it('is what the project lenses get in place of the bare list when there is a sweep', () => {
@@ -170,5 +171,99 @@ describe('sourceRecord', () => {
   })
   it('says nothing was checked when nothing was', () => {
     expect(sourceRecord([]).checkedAt).toBeNull()
+  })
+})
+
+describe('reading a source directly', () => {
+  it('plans the direct route for each kind of source', () => {
+    expect(sweepPlan(src('news', 'enterpriseam.com/ksa', 2)).direct)
+      .toEqual({ kind: 'feed', urls: ['https://enterpriseam.com/feed/', 'https://enterpriseam.com/feed', 'https://enterpriseam.com/rss', 'https://enterpriseam.com/rss.xml'] })
+    expect(sweepPlan(src('linkedin', 'linkedin.com/company/saudi-projects', 1)).direct)
+      .toEqual({ kind: 'linkedin', url: 'https://www.linkedin.com/company/saudi-projects/' })
+    expect(sweepPlan(src('instagram', '@addadruh', 1)).direct).toEqual({ kind: 'instagram', handle: 'addadruh' })
+    // A name is not an address: it stays on search.
+    expect(sweepPlan(src('linkedin', 'Khaled AlOjyan', 3)).direct).toBeUndefined()
+    expect(sweepPlan(src('hashtag', '#x', 1)).direct).toBeUndefined()
+  })
+  it('cuts a long geography to the country before searching', () => {
+    expect(sweepPlan(src('news', 'meed.com', 1), { geography: 'Saudi Arabia — Riyadh and the Central Region' }).searches[0].query)
+      .toBe('site:meed.com Saudi Arabia project contract awarded')
+  })
+
+  it('reads RSS and Atom, newest first', () => {
+    const rss = `<?xml version="1.0"?><rss><channel>
+      <item><title><![CDATA[Safari Construction Awarded Contract to Build Seven Schools]]></title>
+        <link>https://www.saudigulfprojects.com/2026/10/safari/</link>
+        <pubDate>Sun, 18 Oct 2026 15:30:49 +0000</pubDate>
+        <description><![CDATA[<p>Safari Construction has been awarded &amp; more</p>]]></description></item>
+      <item><title>China Energy Wins DAMAC Capri Towers Contract</title>
+        <link>https://www.saudigulfprojects.com/2026/10/china/</link>
+        <pubDate>Mon, 19 Oct 2026 11:17:14 +0000</pubDate></item>
+    </channel></rss>`
+    expect(isFeed(rss)).toBe(true)
+    expect(isFeed('<!doctype html><html>')).toBe(false)
+    const items = parseFeed(rss)
+    expect(items.map(i => i.url)).toEqual(['https://www.saudigulfprojects.com/2026/10/china/', 'https://www.saudigulfprojects.com/2026/10/safari/'])
+    expect(items[1]).toMatchObject({ published_at: '2026-10-18T15:30:49.000Z', snippet: 'Safari Construction has been awarded & more' })
+    const atom = '<feed><entry><title>T is long enough</title><link href="https://a.com/x"/><updated>2026-10-19T00:00:00Z</updated><summary>S</summary></entry></feed>'
+    expect(parseFeed(atom)).toEqual([{ title: 'T is long enough', url: 'https://a.com/x', snippet: 'S', published_at: '2026-10-19T00:00:00.000Z' }])
+  })
+
+  it('dates a LinkedIn post from its activity id', () => {
+    expect(linkedinIdDate('7517864731303673856')).toBe('2026-10-19T08:30:27.115Z')
+    expect(linkedinIdDate('nope')).toBeNull()
+  })
+  it('reads the posts on a logged-out LinkedIn company page', () => {
+    const html = `<article class="x" data-activity-urn="urn:li:activity:7517564002974072832" data-x="1">
+        <p data-test-id="main-feed-activity-card__commentary" dir="ltr">Ritz-Carlton Residences &amp; 106 villas</p></article>
+      <article data-activity-urn="urn:li:activity:7517564002974072832"><p data-test-id="main-feed-activity-card__commentary">dup</p></article>
+      <article data-activity-urn="urn:li:activity:7517610127642939392"><p>no commentary</p></article>`
+    expect(parseLinkedinPage(html)).toEqual([{
+      title: 'Ritz-Carlton Residences & 106 villas',
+      url: 'https://www.linkedin.com/feed/update/urn:li:activity:7517564002974072832/',
+      snippet: 'Ritz-Carlton Residences & 106 villas',
+      published_at: '2026-10-18T12:35:27.894Z',
+    }])
+  })
+  it('turns Instagram media into results', () => {
+    expect(instagramItems([{ caption: 'Westfield Riyadh final works', permalink: 'https://www.instagram.com/p/1/', timestamp: '2026-10-18T10:00:00+0000' }, { caption: 'no link' }]))
+      .toEqual([{ title: 'Westfield Riyadh final works', url: 'https://www.instagram.com/p/1/', snippet: 'Westfield Riyadh final works', published_at: '2026-10-18T10:00:00.000Z' }])
+  })
+})
+
+describe('only what is new and about our market', () => {
+  const now = new Date('2026-10-19T12:00:00Z')
+  it('drops stale dated items and marks what was handed on last time', () => {
+    const out = freshAndNew([
+      { url: 'https://a.com/new', published_at: '2026-10-18T00:00:00Z' },
+      { url: 'https://www.a.com/seen/', published_at: '2026-10-10T00:00:00Z' },
+      { url: 'https://a.com/old', published_at: '2026-08-01T00:00:00Z' },
+      { url: 'https://a.com/undated' },
+    ], [{ url: 'https://a.com/seen' }], now)
+    expect(out.map(r => [r.url, r.is_new])).toEqual([
+      ['https://a.com/new', true], ['https://www.a.com/seen/', false], ['https://a.com/undated', true],
+    ])
+  })
+  it('builds market words from the geography and the ICP regions, not from a list in code', () => {
+    expect(marketWords('Saudi Arabia — Riyadh and the Central Region', ['riyadh', 'الرياض', 'central region']))
+      .toEqual(['saudi', 'arabia', 'riyadh', 'الرياض', 'central region'])
+  })
+  it('puts items about the market first', () => {
+    const items = [{ title: 'DAMAC Capri Towers in Dubai', snippet: '' }, { title: 'Seven schools', snippet: 'in Jeddah, Saudi Arabia' }]
+    expect(rankByMarket(items, ['saudi']).map(i => i.title)).toEqual(['Seven schools', 'DAMAC Capri Towers in Dubai'])
+    const feed = [{ title: 'DAMAC towers in Dubai', snippet: 'appeared first on SaudiGulf Projects' }, { title: 'مشروع بالرياض', snippet: '' }]
+    expect(rankByMarket(feed, ['saudi', 'الرياض']).map(i => i.title)).toEqual(['مشروع بالرياض', 'DAMAC towers in Dubai'])
+  })
+  it('hands the lens only new items, dated, and says which sources had nothing new', () => {
+    const b = sweepBlock([
+      { status: 'done', source: src('linkedin', 'linkedin.com/company/saudi-projects', 1), results: [
+        { title: 'Ritz-Carlton Residences', url: 'https://l/1', snippet: 'Ritz-Carlton Residences', published_at: '2026-10-18T12:35:27Z', is_new: true },
+        { title: 'Old post', url: 'https://l/2', is_new: false },
+      ] },
+      { status: 'done', source: src('news', 'zawya.com', 3), results: [{ title: 'Seen', url: 'https://z/1', is_new: false }] },
+    ])
+    expect(b).toContain('· 18 Oct — Ritz-Carlton Residences — https://l/1')
+    expect(b).not.toContain('Old post')
+    expect(b).toContain('Read, nothing new since last week: zawya.com.')
   })
 })

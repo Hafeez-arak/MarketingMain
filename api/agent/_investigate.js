@@ -18,7 +18,7 @@ import { silentLensNote } from '../../src/lib/agent/runHealth.js'
 import { partitionRepeats } from '../../src/lib/agent/memory.js'
 import { freshQuestions, dedupeQuestions } from '../../src/lib/agent/agendaDedup.js'
 import { suggestSources } from '../../src/lib/agent/sourceSuggest.js'
-import { findingsBySource } from '../../src/lib/agent/sourceSweep.js'
+import { findingsBySource, marketWords } from '../../src/lib/agent/sourceSweep.js'
 import { ensureSweep, recordSweepFindings } from './_sweep.js'
 import { parseLines, stampLines } from '../../src/lib/agent/lines.js'
 import { applyNovelty, priorFindingsFrom, repetitionNote } from '../../src/lib/agent/novelty.js'
@@ -513,7 +513,10 @@ export async function runSingleLens({ workspaceId, runId, lensKey, cadence = 'we
       // of the two starts first does the work; the other reuses it.
       const sweepStart = Date.now()
       const sweep = ['openings', 'targets'].includes(base)
-        ? await ensureSweep({ workspaceId, runId, sources: ctxBundle.sources, geography: ctxBundle.brandFacts?.geography })
+        ? await ensureSweep({
+          workspaceId, runId, sources: ctxBundle.sources, geography: ctxBundle.brandFacts?.geography,
+          words: marketWords(ctxBundle.brandFacts?.geography, normaliseIcp(ctxBundle.icp).regions),
+        })
         : []
       // The sweep has its own clock (SWEEP_MS); the lens's starts after it,
       // never past what the platform allows from the request's start.

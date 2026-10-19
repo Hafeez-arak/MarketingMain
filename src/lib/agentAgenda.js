@@ -37,7 +37,7 @@ async function call(url, accessToken, init = {}) {
 async function fetchSourceRecords(workspaceId, accessToken) {
   const { data } = await call(
     `${SUPABASE_URL}/rest/v1/research_source_checks?workspace_id=eq.${workspaceId}` +
-    '&select=source_id,status,result_count,findings,error,checked_at&order=checked_at.desc&limit=2000',
+    '&select=source_id,status,result_count,new_count,findings,error,checked_at&order=checked_at.desc&limit=2000',
     accessToken,
   )
   const bySource = new Map()

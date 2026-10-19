@@ -10,7 +10,12 @@ Written 2026-10-17. This is the starting list now loaded on **Research → Where
   - **read**: one search, 5 results
   - **skim**: one search, 3 results
 - Each source on the page shows when it was last checked, how many results came back, and when it last led to a project. A source that never leads anywhere can be paused on that evidence.
-- What the searches can reach: news sites and project sites come back well. Instagram and LinkedIn are only partly indexed by search engines, so those accounts return some recent posts, not all. Paywalled sites (MEED) give headlines and the first lines; that usually names the project and the contractor.
+- **Each source is read where it publishes** (since 2026-10-19, second pass). Search engines hold only scraps of social accounts: the first sweep found 0 posts on the Saudi Projects LinkedIn page and 1 on @addadruh, though both had posted that day.
+  - **Instagram accounts**: their recent posts, full captions and dates, through the same Meta access the competitor numbers use. That access must be renewed by **2026-12-09**; if it lapses, these fall back to search.
+  - **LinkedIn company pages**: the public page, read logged out, gives the latest ~10 posts. A source must be the page link (`linkedin.com/company/…`), not a name. Personal profiles are blocked to logged-out readers, so a person stays on search. LinkedIn's terms do not allow automated reading; it is a handful of public pages once a week, and a blocked page falls back to search.
+  - **Sites with a feed** (saudigulfprojects, Construction Week, EnterpriseAM, Commercial Interior Design, ME Construction News): every new article, dated.
+  - **Everything else** (MEED, Argaam, Zawya, Etimad, …): a search engine, plus the front page for "read closely". Paywalled sites give headlines and first lines.
+- Only what is **new since the source's last check** goes to the lenses, items about our market first (the geography and the ICP regions decide what counts).
 - If the check cannot run at all (no search provider), the lenses fall back to the old way: the list as names, tier 1 first.
 - The agent also builds its own hashtags and keywords each run from our segments, region and project stages, in Arabic and English, and searches Instagram and LinkedIn with them. None of those are written into the system.
 - After every run, Instagram or LinkedIn accounts and sites that led to a real project finding are **suggested** for the list. They wait for someone to accept them on the page.
@@ -55,8 +60,8 @@ Written 2026-10-17. This is the starting list now loaded on **Research → Where
 | Instagram | @riyadh_today | Posts projects under construction in Riyadh. |
 | LinkedIn | linkedin.com/company/mep-middle-east-itp | MEP and building contract awards. |
 | LinkedIn | linkedin.com/company/incsolutionsgroup | INC Solutions: Riyadh office fit-outs. A fit-out buyer that posts its jobs. |
-| LinkedIn | Havelock One Interiors | Fit-out contractor that posts Saudi wins. |
-| LinkedIn | ALEC FITOUT | Fit-out contractor for hotels and offices in Riyadh. |
+| LinkedIn | linkedin.com/company/havelock-one | Fit-out contractor that posts Saudi wins. |
+| LinkedIn | linkedin.com/company/alec-fitout | Fit-out contractor for hotels and offices in Riyadh. |
 | Search phrase | "awarded" fit-out contract Riyadh | Finds contractor and fit-out company posts about new jobs. |
 | Hashtag | #مشاريع_السعودية | "Saudi projects": wider than Riyadh. |
 | Government | muqawil.org | Saudi Contractors Authority: monthly award reports, contractor classifications. |
@@ -69,7 +74,7 @@ Written 2026-10-17. This is the starting list now loaded on **Research → Where
 | News | aleqt.com | Al Eqtisadiah, Arabic business daily. |
 | Government | rcrc.gov.sa | Royal Commission for Riyadh City programmes. |
 | LinkedIn | Khaled AlOjyan | Architect who posts often about Riyadh projects and milestones. |
-| LinkedIn | Depa Interiors | Fit-out contractor that posts Saudi awards. |
+| LinkedIn | linkedin.com/company/depainteriors | Fit-out contractor that posts Saudi awards. |
 
 ## Worth knowing, not on the list
 
