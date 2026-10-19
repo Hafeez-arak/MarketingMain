@@ -273,7 +273,7 @@ const ADMIN_WRITE_TOOLS = [
       'Add or change a research agenda row directly, as ACTIVE: a standing question ' +
       '(kind "question"), a competitor to watch ("competitor"), or a SOURCE the research reads ' +
       'first ("source": subject = the domain, @handle, #hashtag or phrase; source_type says what ' +
-      'it is; why = what it carries; tier 1 = every run, 2 = most runs, 3 = when searches allow). ' +
+      'it is; why = what it carries; every source is checked every run; tier 1 = read closely, 2 = read, 3 = skim). ' +
       'Retire rather than delete. Call get_agenda first.',
     input_schema: {
       type: 'object',
