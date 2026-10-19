@@ -396,6 +396,34 @@ function devLeadsApi(env) {
 // browser's and the in-process /api handlers', is on this machine. A stray
 // .env or an exported shell variable pointing at the live project stops the
 // server here instead of quietly writing to production.
+//
+// Variables already in the environment beat .env files in Vite, and the
+// preview launcher's environment carries the PRODUCTION SUPABASE_URL (the
+// guard caught it on its first run, 2026-10-19). So v2 mode does not trust
+// the environment at all: the database settings come from .env.v2 alone,
+// overwriting whatever was there, and every key for an outside service that
+// could post, email, publish or spend (Zernio, Meta, Resend, n8n,
+// OpenRouter, Anthropic, Google, Firecrawl, Tavily) is removed unless .env.v2
+// sets it on purpose.
+const V2_OUTSIDE_KEYS = [
+  'ZERNIO_API_KEY', 'META_IG_TOKEN', 'META_IG_USER_ID', 'RESEND_API_KEY', 'RESEND_WEBHOOK_SECRET',
+  'VITE_N8N_BASE_URL', 'N8N_WEBHOOK_SECRET', 'OPENROUTER_API_KEY', 'OPENROUTER_MANAGEMENT_KEY',
+  'ANTHROPIC_API_KEY', 'GOOGLE_SA_KEY', 'GOOGLE_SC_SITE', 'GOOGLE_GA4_PROPERTY', 'FIRECRAWL_API_KEY',
+  'TAVILY_API_KEY', 'AGENT_RUN_SECRET', 'CRON_SECRET',
+]
+function isolateV2() {
+  const file = path.join(process.cwd(), '.env.v2')
+  if (!fs.existsSync(file)) throw new Error('v2 mode needs .env.v2 (see dev/v2db/README.md).')
+  const v2 = {}
+  for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+    const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/.exec(line)
+    if (m) v2[m[1]] = m[2].replace(/^['"]|['"]$/g, '')
+  }
+  for (const key of V2_OUTSIDE_KEYS) if (!(key in v2)) delete process.env[key]
+  for (const [key, value] of Object.entries(v2)) process.env[key] = value
+  return v2
+}
+
 function guardLocalDatabase(env) {
   const local = u => /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(String(u || ''))
   const urls = {
@@ -412,7 +440,7 @@ function guardLocalDatabase(env) {
 // A config function, not a plain object, so loadEnv can read .env here in
 // Node — the dev proxy needs VITE_N8N_BASE_URL before any client code exists.
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), '')
+  const env = mode === 'v2' ? isolateV2() : loadEnv(mode, process.cwd(), '')
   if (mode === 'v2') guardLocalDatabase(env)
   return {
     plugins: [

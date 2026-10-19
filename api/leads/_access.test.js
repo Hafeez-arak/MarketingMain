@@ -20,6 +20,12 @@ function fakeFetch(url, init = {}) {
   if (u.includes('/rpc/is_access_admin')) return json(who.admin)
   if (u.includes('/rpc/is_sales_member')) return json(who.sales)
   if (u.includes('/rpc/can_approve_leads')) return json(Boolean(who.approver))
+  // v2 (20261101_section_access): the caller's grant, as has_section answers.
+  if (u.includes('/rpc/has_section')) {
+    const { sec, min_level } = JSON.parse(init.body)
+    const rank = { view: 1, work: 2, manage: 3 }
+    return json(Boolean(who.sections?.[sec] && rank[who.sections[sec]] >= rank[min_level]))
+  }
   if (u.includes('/rest/v1/workspaces?id=eq.')) return json(who.member ? [{ id: WS }] : [])
   // A sales person asking for the lead with their own token: the leads
   // policy (can_see_lead) answers. `hidden` = it is someone else's.
@@ -175,7 +181,27 @@ describe('everyone else', () => {
     who = { member: true, admin: false, sales: false }
     const res = await call(handler, 'review', { lead_id: LEAD, verdict: 'qualified' })
     expect(res.statusCode).toBe(403)
-    expect(res.body.error).toMatch(/admin only/)
+    expect(res.body.error).toMatch(/Sales or CEO section/)
+  })
+
+  it('v2: a member granted Sales at work may do a salesperson\'s action, on any lead', async () => {
+    who = { member: true, admin: false, sales: false, hidden: true, sections: { sales: 'work' } }
+    const res = await call(handler, 'review', { lead_id: LEAD, verdict: 'qualified' })
+    expect(res.statusCode).toBe(200)
+    expect(calls.some((c) => c.includes('is_sales_member'))).toBe(false)
+  })
+
+  it('v2: Sales at view is not enough to act, and work is not enough for agent settings', async () => {
+    who = { member: true, admin: false, sales: false, sections: { sales: 'view' } }
+    expect((await call(handler, 'review', { lead_id: LEAD, verdict: 'qualified' })).statusCode).toBe(403)
+    who = { member: true, admin: false, sales: false, sections: { sales: 'work' } }
+    expect((await call(handler, 'set_enabled', { enabled: false })).statusCode).toBe(403)
+    expect(writes()).toEqual([])
+  })
+
+  it('v2: a grant counts only for a member of the company', async () => {
+    who = { member: false, admin: false, sales: false, sections: { sales: 'manage' } }
+    expect((await call(handler, 'review', { lead_id: LEAD, verdict: 'qualified' })).statusCode).toBe(403)
   })
 
   it('the admin is let through without a seat lookup', async () => {

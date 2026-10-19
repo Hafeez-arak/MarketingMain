@@ -33,3 +33,7 @@ public/dev-clip*.mp4
 *.sw?
 .vercel
 .env*
+
+# Supabase CLI scratch (v2 runs its stack from dev/v2db)
+supabase/.temp/
+dev/v2db/supabase/.branches/
