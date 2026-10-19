@@ -4,6 +4,7 @@ import { msConfig, createGraphMail } from '../email/_graph.js'
 import { checkMail } from './_mail.js'
 import { runHealth } from './_health.js'
 import { routeWaiting } from './_control.js'
+import { runTaskReminders } from './_tasks.js'
 import { supabaseStorage } from './_files.js'
 import { checkWebsite } from './_website.js'
 
@@ -135,5 +136,6 @@ export function leadDeps() {
   deps.website = (domain) => checkWebsite(deps, domain)
   deps.health = (args) => runHealth(deps, { pageUrl: `${APP_URL}/leads`, ...args })
   deps.route = (args) => routeWaiting(deps, { appUrl: APP_URL, ...args })
+  deps.tasks = (args) => runTaskReminders(deps, args)
   return deps
 }

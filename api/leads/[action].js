@@ -479,6 +479,11 @@ const actions = {
     return out.error ? fail(out.status, out.error) : out
   },
 
+  /** Task reminders for this company now (they otherwise run every 5 minutes). */
+  async tasks_tick({ workspaceId }) {
+    return leadDeps().tasks({ workspaceId })
+  },
+
   /** The daily alert now, for testing the email (it is otherwise once a day). */
   async alerts_now({ workspaceId }) {
     return runDailyAlerts(leadDeps(), { workspaceId, force: true, pageUrl: `${baseUrlOf(this.req)}/ceo` })

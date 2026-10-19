@@ -144,6 +144,11 @@ export async function intakeWebsite(deps, { key, rows = [] }) {
   if (deps.route && (deps.clock || Date.now)() < started + TOTAL_BUDGET_MS - 15_000) {
     await deps.route({ workspaceId }).catch(() => {})
   }
+  // Task reminders (_tasks.js): due soon, overdue, and the 08:00 digest.
+  // Every company's, since this five-minute call is the only clock there is.
+  if (deps.tasks && (deps.clock || Date.now)() < started + TOTAL_BUDGET_MS - 10_000) {
+    await deps.tasks({}).catch(() => {})
+  }
   return { status: 200, results, mail }
 }
 

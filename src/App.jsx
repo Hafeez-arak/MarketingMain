@@ -45,6 +45,7 @@ import { Access } from './pages/settings/Access'
 import { BrandBrain } from './pages/settings/BrandBrain'
 import { CreativeStudio } from './pages/studio/index'
 import { HomePage } from './pages/home/index'
+import { TasksPage } from './pages/tasks/index'
 import { fromLegacy, canVisit } from './lib/modules'
 
 // Loads the account's saved webhook URLs into state.webhooks on startup, so
@@ -201,6 +202,7 @@ function ProtectedApp() {
             {/* ── Everywhere (no section) ── */}
             <Route path="/agent"                 element={<AgentPage />} />
             <Route path="/requests"              element={<Requests />} />
+            <Route path="/tasks"                 element={<TasksPage />} />
             <Route path="/settings"              element={<Settings />} />
 
             {/* The Integrations page was removed; old links land on Home. */}

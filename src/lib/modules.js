@@ -94,6 +94,7 @@ export const SECTIONS = [
  * light a section in the rail and never appear on Home as a tile.
  */
 export const GLOBAL_PAGES = [
+  { to: '/tasks', label: 'Tasks', icon: 'check-circle', badge: 'openTasks' },
   { to: '/agent', label: 'Assistant', icon: 'chat' },
   { to: '/requests', label: 'Requests', icon: 'check-square', badge: 'waitingRequests' },
   { to: '/settings', label: 'Settings', icon: 'gear' },

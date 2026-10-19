@@ -1,8 +1,11 @@
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../store/auth'
 import { sectionsFor, GLOBAL_PAGES } from '../../lib/modules'
 import { NavIcon } from '../../components/layout/icons'
 import { useBadges, sectionBadge } from '../../components/layout/useNavBadges'
+import { useTaskBoard } from '../tasks/useTaskBoard'
+import { TaskList } from '../tasks/parts'
+import { bucketOf } from '../../lib/tasks/logic'
 
 // ─── Home (v2) ─────────────────────────────────────────────────────────────
 // 2026-10-19. The first screen: one tile per section this person can open,
@@ -29,6 +32,8 @@ export function HomePage() {
         </h1>
         <p className="text-xs text-text-secondary mt-2">{activeWorkspace?.name || 'Arak'} · pick where to work.</p>
       </header>
+
+      <Today />
 
       <ul className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
         {sections.map(s => {
@@ -69,5 +74,27 @@ export function HomePage() {
         </ul>
       </section>
     </div>
+  )
+}
+
+/**
+ * Today: my tasks that are late or due today, above everything else (v2,
+ * docs/TASKS-PLAN.md). Hidden when there are none, so a clear day shows a
+ * clean Home; quiet where the tasks table does not exist yet.
+ */
+function Today() {
+  const navigate = useNavigate()
+  const { tasks, people, now, toggle, busyId } = useTaskBoard('mine')
+  const due = (tasks || []).filter(t => ['overdue', 'today'].includes(bucketOf(t, now)))
+  if (!due.length) return null
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="text-sm font-semibold text-text">Today</h2>
+        <Link to="/tasks" className="text-xs text-text-secondary hover:text-text">All my tasks →</Link>
+      </div>
+      <TaskList tasks={due} people={people} now={now} showSetter hideDone busyId={busyId}
+        onOpen={t => navigate(`/tasks?id=${t.id}`)} onToggle={toggle} />
+    </section>
   )
 }
