@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Button, Spinner } from '../../components/ui/index'
 import { leadsApi } from '../../lib/leads/client'
-import { VERDICT_LABEL, VERDICT_TONE, CRM_LABEL, criteriaLabels, modelName, money, phonesOf, channelLabel, outlookLink, when, FOLDER_LABEL } from '../../lib/leads/view'
+import { VERDICT_LABEL, VERDICT_TONE, CRM_LABEL, criteriaLabels, phonesOf, channelLabel, outlookLink, when, FOLDER_LABEL } from '../../lib/leads/view'
 import { emailSegments, emailLinks, isFileLink, fileSize } from '../../lib/leads/emailText'
 
 // ─── Pieces shared by the leads list and the agent settings ────────────────
@@ -291,7 +291,7 @@ export function LeadDetail({ lead, onReview, workspaceId, mailboxes = [], wide =
       )}
       <div className="flex flex-wrap items-center gap-3">
         {lead.source === 'email' && <OpenInOutlook lead={lead} workspaceId={workspaceId} fallback={href} />}
-        <p className="text-[10px] text-text-tertiary">{lead.mailbox ? `${lead.mailbox} · ` : ''}{lead.model ? `${modelName(lead.model)} · ${money(lead.cost_usd)}` : ''}{lead.confidence ? ` · ${lead.confidence} confidence` : ''}</p>
+        <p className="text-[10px] text-text-tertiary">{[lead.mailbox, lead.confidence ? `${lead.confidence} confidence` : ''].filter(Boolean).join(' · ')}</p>
       </div>
     </div>
   )
