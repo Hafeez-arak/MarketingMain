@@ -17,14 +17,26 @@ import { useBadges } from './useNavBadges'
 export function Sidebar({ onNavigate, collapsed = false }) {
   const { pathname } = useLocation()
   const { isAccessAdmin } = useAuth()
-  const badges = useBadges()
   const section = sectionOf(pathname)
   const pages = menuPages(pathname, { isAccessAdmin })
   if (!pages.length) return null
-
   return (
-    <aside aria-label={section.label} data-print-hide
-      className={`w-52 flex-shrink-0 flex flex-col h-full overflow-hidden bg-surface-muted border-r border-border ${collapsed ? 'md:hidden' : ''}`}>
+    <SectionPanel section={section} pages={pages} onNavigate={onNavigate}
+      className={`w-52 flex-shrink-0 h-full border-r border-border ${collapsed ? 'md:hidden' : ''}`} />
+  )
+}
+
+/**
+ * One section's name and pages. The sidebar above is the open section's;
+ * the rail also shows one as a floating panel while a section's icon is
+ * hovered (Rail.jsx), so both draw the same thing.
+ */
+export function SectionPanel({ section, pages, onNavigate, className = '', ...rest }) {
+  const { pathname } = useLocation()
+  const badges = useBadges()
+  return (
+    <aside aria-label={section.label} data-print-hide {...rest}
+      className={`flex flex-col overflow-hidden bg-surface-muted ${className}`}>
       {/* The section's name, level with the top bar's title. */}
       <div className="h-14 flex-shrink-0 px-4 flex items-center">
         <div className="flex-1 min-w-0">

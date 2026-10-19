@@ -1,9 +1,11 @@
+import { useEffect, useRef, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { useAuth } from '../../store/auth'
-import { HOME, GLOBAL_PAGES, sectionsFor, sectionOf } from '../../lib/modules'
+import { HOME, GLOBAL_PAGES, sectionsFor, sectionOf, sectionMenu } from '../../lib/modules'
 import { NavIcon } from './icons'
 import { useBadges, sectionBadge } from './useNavBadges'
 import { ArakMark } from './ArakMark'
+import { SectionPanel } from './Sidebar'
 
 // ─── The rail: one icon per section (v2) ───────────────────────────────────
 // 2026-10-19. The far-left column: the logo, Home, the sections this person
@@ -27,17 +29,57 @@ function Dot({ n }) {
   )
 }
 
-export function Rail({ onNavigate }) {
+// Hovering a section's icon shows its pages in a floating panel (2026-10-19,
+// the owner's ask: "like the general hovering in websites"), so a page in
+// another section is one move and one click away. Clicking the icon still
+// opens the section. Only where there is a real mouse: on touch there is no
+// hover, and the drawer already shows the menu.
+const OPEN_MS = 120   // a pass across the rail on the way elsewhere does not flash panels
+const CLOSE_MS = 200  // time to travel from the icon into the panel
+const canHover = () => typeof window !== 'undefined'
+  && window.matchMedia?.('(hover: hover) and (pointer: fine) and (min-width: 768px)').matches
+
+export function Rail({ onNavigate, menuHidden = false }) {
   const { pathname } = useLocation()
   const { isAccessAdmin } = useAuth()
   const badges = useBadges()
   const sections = sectionsFor({ isAccessAdmin })
   const here = sectionOf(pathname)?.key || null
 
-  const link = (to, label, icon, active, n) => (
-    <NavLink key={to} to={to} aria-current={active ? 'page' : undefined} onClick={onNavigate}
+  // ── The hover panel ──
+  const [peek, setPeek] = useState(null) // a section key, or null
+  const openT = useRef(null)
+  const closeT = useRef(null)
+  const clear = () => { clearTimeout(openT.current); clearTimeout(closeT.current) }
+  useEffect(() => clear, [])
+  useEffect(() => {
+    if (!peek) return
+    const onKey = e => { if (e.key === 'Escape') setPeek(null) }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [peek])
+  const hoverIn = key => {
+    if (!canHover()) return
+    clear()
+    // The open section's own menu is already on screen, unless it is hidden.
+    const s = sections.find(x => x.key === key)
+    const wanted = s && sectionMenu(s, { isAccessAdmin }).length && (key !== here || menuHidden) ? key : null
+    openT.current = setTimeout(() => setPeek(wanted), peek ? 0 : OPEN_MS)
+  }
+  const hoverOut = () => {
+    clear()
+    closeT.current = setTimeout(() => setPeek(null), CLOSE_MS)
+  }
+  const keep = () => clearTimeout(closeT.current)
+  const done = () => { clear(); setPeek(null); onNavigate?.() }
+  const peeked = peek && sections.find(x => x.key === peek)
+
+  const link = (to, label, icon, active, n, key = null) => (
+    <NavLink key={to} to={to} aria-current={active ? 'page' : undefined} onClick={done}
+      onMouseEnter={key ? () => hoverIn(key) : () => { clear(); setPeek(null) }}
+      onMouseLeave={key ? hoverOut : undefined}
       className="group w-full flex flex-col items-center gap-1 py-1 focus:outline-none focus-visible:[&>span:first-child]:ring-2 focus-visible:[&>span:first-child]:ring-stone-300">
-      <span className={box(active)}>
+      <span className={box(active || key === peek)}>
         <NavIcon name={icon} className="w-[18px] h-[18px]" />
         <Dot n={n} />
       </span>
@@ -46,17 +88,24 @@ export function Rail({ onNavigate }) {
   )
 
   return (
-    <nav aria-label="Sections" data-print-hide
-      className="w-[72px] flex-shrink-0 h-full bg-surface-muted border-r border-border flex flex-col items-center py-2 overflow-y-auto scrollbar-thin">
-      {/* Arak's mark, at the top bar's height so the two line up. */}
-      <div className="h-12 flex items-center justify-center mb-1 flex-shrink-0">
-        <ArakMark />
-      </div>
-      {link(HOME.to, HOME.label, HOME.icon, pathname === '/', 0)}
-      <span className="w-8 border-t border-border my-1.5 flex-shrink-0" aria-hidden="true" />
-      {sections.map(s => link(s.pages[0].to, s.label, s.icon, here === s.key, sectionBadge(s, badges)))}
-      <div className="flex-1 min-h-4" />
-      {GLOBAL_PAGES.map(g => link(g.to, g.label, g.icon, pathname === g.to || pathname.startsWith(`${g.to}/`), g.badge ? badges[g.badge] : 0))}
-    </nav>
+    <div className="relative h-full flex-shrink-0 flex">
+      <nav aria-label="Sections" data-print-hide
+        className="w-[72px] flex-shrink-0 h-full bg-surface-muted border-r border-border flex flex-col items-center py-2 overflow-y-auto scrollbar-thin">
+        {/* Arak's mark, at the top bar's height so the two line up. */}
+        <div className="h-12 flex items-center justify-center mb-1 flex-shrink-0">
+          <ArakMark />
+        </div>
+        {link(HOME.to, HOME.label, HOME.icon, pathname === '/', 0)}
+        <span className="w-8 border-t border-border my-1.5 flex-shrink-0" aria-hidden="true" />
+        {sections.map(s => link(s.pages[0].to, s.label, s.icon, here === s.key, sectionBadge(s, badges), s.key))}
+        <div className="flex-1 min-h-4" />
+        {GLOBAL_PAGES.map(g => link(g.to, g.label, g.icon, pathname === g.to || pathname.startsWith(`${g.to}/`), g.badge ? badges[g.badge] : 0))}
+      </nav>
+      {peeked && (
+        <SectionPanel section={peeked} pages={sectionMenu(peeked, { isAccessAdmin })} onNavigate={done}
+          onMouseEnter={keep} onMouseLeave={hoverOut}
+          className="absolute left-full top-0 bottom-0 w-52 z-40 border-r border-border shadow-dropdown animate-fade-scale" />
+      )}
+    </div>
   )
 }

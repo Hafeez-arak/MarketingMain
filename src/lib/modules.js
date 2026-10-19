@@ -166,7 +166,11 @@ export function sectionsFor(who = {}) {
  * opened it, and a column holding one link is space taken for nothing).
  */
 export function menuPages(pathname, who = {}) {
-  const section = sectionOf(pathname)
+  return sectionMenu(sectionOf(pathname), who)
+}
+
+/** A section's menu for this person: its listed pages, or none for a one-page section. */
+export function sectionMenu(section, who = {}) {
   if (!section) return []
   const pages = section.pages.filter(pg => !pg.hidden && canOpen(pg, who))
   return pages.length < 2 ? [] : pages

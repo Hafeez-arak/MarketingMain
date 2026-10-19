@@ -76,7 +76,7 @@ export function AppLayout({ children }) {
           max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:shadow-dropdown
           max-md:transition-[transform,visibility] max-md:duration-200
           ${navOpen ? '' : 'max-md:-translate-x-full max-md:invisible'}`}>
-        <Rail onNavigate={closeNav} />
+        <Rail onNavigate={closeNav} menuHidden={menuHidden} />
         <Sidebar onNavigate={closeNav} collapsed={menuHidden} />
       </div>
       {navOpen && (
