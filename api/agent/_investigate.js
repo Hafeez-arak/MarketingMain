@@ -571,6 +571,9 @@ export async function runSingleLens({ workspaceId, runId, lensKey, cadence = 'we
  * already committed — AGENT.md §6, and not negotiable: a failed investigation
  * must never cost the user their numbers.
  */
+/** Output ceiling for the brief, thinking included. See synthArgs below. */
+export const SYNTH_MAX_TOKENS = 32_000
+
 export async function synthesiseRun({ workspaceId, runId, cadence = 'weekly', deadline }) {
   const limit = deadline || deadlineFor('synthesise')
   const allowedUrls = new Set()
@@ -712,7 +715,14 @@ export async function synthesiseRun({ workspaceId, runId, cadence = 'weekly', de
         },
         { role: 'user', content: SYNTHESISE_PROMPT },
       ],
-      maxTokens: 16_000, effort: 'high',
+      // ── 16,000 WAS NOT ENOUGH ──
+      // Adaptive thinking spends from the same max_tokens as the brief. The
+      // synthesis used 12,672 then 15,959 output tokens on 10-13 and 10-17,
+      // and on 10-19 (run e6441391) it hit exactly 16,000 and stopped mid-
+      // string, so the brief failed to parse and the run lost its report
+      // after paying $1.92 for lenses. At ~100 tokens/s this ceiling is about
+      // 320s, inside AGENT_SYNTHESISE_BUDGET_MS on the box.
+      maxTokens: SYNTH_MAX_TOKENS, effort: 'high',
       outputFormat: BRIEF_SCHEMA,
       deadline: limit,
     }
@@ -733,6 +743,19 @@ export async function synthesiseRun({ workspaceId, runId, cadence = 'weekly', de
 
       if (!synth.ok) return bail(gathered, synth.error, cost, summary)
       if (refusalOf(synth.response)) return bail(gathered, refusalOf(synth.response), cost, summary)
+
+      // A brief cut off by the token ceiling is unfinished JSON. Said as that,
+      // not as "Unterminated string at position 12352", which sends a reader
+      // looking for a bug in the parser.
+      if (synth.response?.stop_reason === 'max_tokens') {
+        return bail(
+          gathered,
+          `The brief was cut off at the ${SYNTH_MAX_TOKENS.toLocaleString('en-US')}-token output limit before it ` +
+          `finished (${textIn(synth.response).length} characters written). The lens findings are kept, so the ` +
+          'run can be synthesised again without searching again.',
+          cost, summary,
+        )
+      }
 
       try {
         brief = JSON.parse(textIn(synth.response))
