@@ -108,10 +108,10 @@ export function healthIssues({ settings = {}, mailboxes = [], failed = [], spent
       detail: 'No enquiry can be checked by the AI until a working key is saved.',
       fix: 'Lead Agent page → Connection → Replace the OpenRouter key.',
     })
-  } else if (key && key.limitRemaining != null && key.limitRemaining < LOW_CREDIT_USD) {
+  } else if (key && (key.creditLeft ?? key.limitRemaining) != null && (key.creditLeft ?? key.limitRemaining) < LOW_CREDIT_USD) {
     issues.push({
       key: 'ai_credit_low',
-      title: `OpenRouter credit is down to $${Number(key.limitRemaining).toFixed(2)}`,
+      title: `OpenRouter credit is down to $${Number(key.creditLeft ?? key.limitRemaining).toFixed(2)}`,
       detail: 'When it reaches zero the AI stops checking enquiries.',
       fix: 'Add credit at openrouter.ai → Credits.',
     })

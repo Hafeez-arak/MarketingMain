@@ -15,6 +15,10 @@ const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''
 // A deployment-wide key, used when a company has not saved its own.
 const ENV_OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || ''
+// Read-only use: a normal key sees only its own spend limit, never the
+// account's balance. Only a management key may ask /credits. It reads the
+// account it belongs to, so it assumes every company's key is on that account.
+const OPENROUTER_MANAGEMENT_KEY = process.env.OPENROUTER_MANAGEMENT_KEY || ''
 const APP_URL = (process.env.PUBLIC_APP_URL || 'https://marketing-main-ten.vercel.app').replace(/\/$/, '')
 
 /** The company's own key if it saved one, else the deployment's. */
@@ -28,13 +32,33 @@ export async function openRouterKey(workspaceId) {
 
 export const hasDeploymentKey = Boolean(ENV_OPENROUTER_KEY)
 
-/** What OpenRouter says about a key: valid, its label, credit left. Free. */
+/** The account's credit: bought minus used. Null without a management key or on any failure. */
+async function accountCredit() {
+  if (!OPENROUTER_MANAGEMENT_KEY) return null
+  try {
+    const r = await fetch('https://openrouter.ai/api/v1/credits', { headers: { Authorization: `Bearer ${OPENROUTER_MANAGEMENT_KEY}` } })
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok || j.data?.total_credits == null) return null
+    return Number(j.data.total_credits) - Number(j.data.total_usage || 0)
+  } catch { return null }
+}
+
+/**
+ * What OpenRouter says about a key: valid, its label, credit left. Free.
+ * creditLeft is the account's balance when it can be read, else the key's own
+ * limit: a key with a $50 limit on a $10 account would otherwise say $50.
+ */
 export async function describeKey(key) {
   try {
-    const r = await fetch('https://openrouter.ai/api/v1/key', { headers: { Authorization: `Bearer ${key}` } })
+    const [r, credit] = await Promise.all([
+      fetch('https://openrouter.ai/api/v1/key', { headers: { Authorization: `Bearer ${key}` } }),
+      accountCredit(),
+    ])
     const j = await r.json().catch(() => ({}))
     if (!r.ok || !j.data) return { valid: false }
-    return { valid: true, label: j.data.label || '', limitRemaining: j.data.limit_remaining ?? null, usage: j.data.usage ?? null }
+    const limitRemaining = j.data.limit_remaining ?? null
+    const creditLeft = credit != null && limitRemaining != null ? Math.min(credit, limitRemaining) : (credit ?? limitRemaining)
+    return { valid: true, label: j.data.label || '', limitRemaining, creditLeft, usage: j.data.usage ?? null }
   } catch { return { valid: null } } // unreachable: neither good nor bad
 }
 
