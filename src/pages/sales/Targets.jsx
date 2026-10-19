@@ -8,8 +8,10 @@ import {
   normaliseIcp, hasIcp, rankTargets, formatAmount, buyerLabel, playLabel, icpToForm, formToIcp,
   ACCOUNT_STATUSES, BUYERS,
 } from '../../lib/sales/icp'
-import { eventsAhead, isOpenTarget, whenLabel, targetStats } from '../../lib/sales/view'
+import { eventsAhead, isOpenTarget, targetStats } from '../../lib/sales/view'
 import { OPPORTUNITY_STATUSES, EVENT_DECISIONS } from '../../lib/agent/intel'
+import { useT, fmtDay } from '../../lib/i18n'
+import { SW } from './words'
 
 // ─── Sales → Targets ───────────────────────────────────────────────────────
 // Who to go after, in one place, built on the company's own won and lost
@@ -29,18 +31,8 @@ import { OPPORTUNITY_STATUSES, EVENT_DECISIONS } from '../../lib/agent/intel'
 //
 // Admin only, like the Lead Agent: client names and order values.
 
-const TABS = [
-  { key: 'accounts', label: 'Accounts to work' },
-  { key: 'targets', label: 'New targets' },
-  { key: 'events', label: 'Events' },
-  { key: 'icp', label: 'Ideal customer' },
-]
-
-const TRACK_TABS = [
-  { key: 'core', label: 'Core — what we win' },
-  { key: 'broader', label: 'Broader — where we grow' },
-  { key: 'other', label: 'Other research leads' },
-]
+const TABS = ['accounts', 'targets', 'events', 'icp'].map(key => ({ key }))
+const TRACK_TABS = ['core', 'broader', 'other'].map(key => ({ key }))
 
 const BAND_TONE = {
   strong: 'bg-sage-50 text-sage-700 border-sage-200',
@@ -48,10 +40,8 @@ const BAND_TONE = {
   weak: 'bg-surface-subtle text-text-tertiary border-border',
 }
 
-const STATUS_LABEL = { new: 'New', assigned: 'Assigned', pursued: 'Pursuing', won: 'Won', lost: 'Lost', dropped: 'Dropped' }
-const DECISION_LABEL = { undecided: 'Undecided', visiting: 'Visiting', exhibiting: 'Exhibiting', sponsoring: 'Sponsoring', skipping: 'Skipping' }
-
-const dateLabel = d => (d ? new Date(`${String(d).slice(0, 10)}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }) : '')
+const dateLabel = (d, lang = 'en') => (d ? fmtDay(String(d).slice(0, 10), lang, { day: 'numeric', month: 'short', year: 'numeric' }) : '')
+const amount = (n, lang) => formatAmount(n, lang === 'ar' ? 'ر.س' : 'SAR')
 
 function Tag({ children, tone = 'bg-surface-subtle text-text-secondary border-border' }) {
   return <span className={`inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold border whitespace-nowrap ${tone}`}>{children}</span>
@@ -59,6 +49,7 @@ function Tag({ children, tone = 'bg-surface-subtle text-text-secondary border-bo
 
 export default function Targets() {
   const { canSection, activeWorkspaceId } = useAuth()
+  const { t, lang, dir } = useT(SW)
   // v2: Sales section access (was: the access admin only).
   const canUse = canSection('sales', 'view')
   const [params, setParams] = useSearchParams()
@@ -116,31 +107,31 @@ export default function Targets() {
   const errs = data?.errors || {}
 
   return (
-    <div className="max-w-7xl space-y-4">
-      <PageHeader title="Targets" subtitle="Who sales should go after: existing customers to work, new projects that fit our ideal customer, and the events where they gather. Built from our own won and lost deals. Admin only.">
+    <div className="max-w-7xl space-y-4" dir={dir} lang={lang}>
+      <PageHeader title={t.title} subtitle={t.subtitle}>
         <Button variant="secondary" size="sm" onClick={reload} disabled={refreshing || !activeWorkspaceId}>
           {refreshing ? <Spinner size="sm" /> : null}
-          Refresh
+          {t.refresh}
         </Button>
       </PageHeader>
 
-      {error && <Notice tone="red" title="Something went wrong">{error}</Notice>}
+      {error && <Notice tone="red" title={t.somethingWrong}>{error}</Notice>}
       {!loading && !hasIcp(data.icp) && !errs.icp && (
-        <Notice title="No ideal customer written yet">
-          The weekly research only looks for targets once an ideal customer is written. Open the Ideal customer tab to write one.
+        <Notice title={t.noIcp}>
+          {t.noIcpBody}
         </Notice>
       )}
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-px bg-border border border-border">
-        <Stat label="Accounts to work" value={stats.accounts} hint={`${stats.accountsUntouched} not contacted yet`} loading={loading} tone="text-sage-700" />
-        <Stat label="Core targets" value={stats.core} hint="Look like what we usually win" loading={loading} />
-        <Stat label="Broader targets" value={stats.broader} hint="Bigger or newer kinds of work" loading={loading} />
-        <Stat label="Strong fit" value={stats.strong} hint="Score 60 or more against the ICP" loading={loading} tone="text-amber-800" />
-        <Stat label="Events, next 90 days" value={stats.events90} hint={data?.lastRunAt ? `Research last ran ${dateLabel(data.lastRunAt)}` : 'No research run yet'} loading={loading} />
+        <Stat label={t.stat.accounts} value={stats.accounts} hint={t.stat.untouched(stats.accountsUntouched)} loading={loading} tone="text-sage-700" />
+        <Stat label={t.stat.core} value={stats.core} hint={t.stat.coreHint} loading={loading} />
+        <Stat label={t.stat.broader} value={stats.broader} hint={t.stat.broaderHint} loading={loading} />
+        <Stat label={t.stat.strong} value={stats.strong} hint={t.stat.strongHint} loading={loading} tone="text-amber-800" />
+        <Stat label={t.stat.events} value={stats.events90} hint={data?.lastRunAt ? t.stat.lastRan(dateLabel(data.lastRunAt, lang)) : t.stat.noRun} loading={loading} />
       </div>
 
       <div className="bg-white border border-border min-w-0">
-        <div className="px-4 pt-3"><SubTabs items={TABS} value={tab} onChange={setTab} /></div>
+        <div className="px-4 pt-3"><SubTabs items={TABS.map(x => ({ ...x, label: t.tabs[x.key] }))} value={tab} onChange={setTab} /></div>
         {loading ? (
           <div className="p-4 space-y-3">{[0, 1, 2, 3].map(i => <Skeleton key={i} className="h-14 w-full" />)}</div>
         ) : tab === 'accounts' ? (
@@ -153,12 +144,16 @@ export default function Targets() {
           <EventsTab rows={eventsAhead(data.events, now)} error={errs.events}
             onChange={(id, decision) => act('events', id, { decision }, () => updateEvent(activeWorkspaceId, id, decision))} />
         ) : (
+          // The ideal customer: the sales manager's configuration, in English for now.
+          <div dir="ltr" lang="en">
+          {lang === 'ar' && <p className="px-4 pt-3 text-[11px] text-text-tertiary" dir="rtl" lang="ar">{t.icpEnglish}</p>}
           <IcpTab icp={data.icp} updatedAt={data.icpUpdatedAt} error={errs.icp}
             onSave={async config => {
               const r = await saveIcp(activeWorkspaceId, config)
               if (r.ok) setData(d => ({ ...d, icp: config, icpUpdatedAt: new Date().toISOString() }))
               return r
             }} />
+          </div>
         )}
       </div>
     </div>
@@ -168,16 +163,17 @@ export default function Targets() {
 // ─── Accounts to work ──────────────────────────────────────────────────────
 
 function AccountsTab({ rows = [], error, onChange }) {
+  const { t } = useT(SW)
   const [showParked, setShowParked] = useState(false)
-  if (error) return <p className="px-4 py-10 text-sm text-red-600 text-center">Could not load the accounts: {error}</p>
+  if (error) return <p className="px-4 py-10 text-sm text-red-600 text-center">{t.accountsFailed(error)}</p>
   const shown = rows.filter(r => showParked || !['won', 'parked'].includes(r.status))
-  if (!rows.length) return <p className="px-4 py-10 text-sm text-text-tertiary text-center">No accounts loaded yet.</p>
+  if (!rows.length) return <p className="px-4 py-10 text-sm text-text-tertiary text-center">{t.noAccounts}</p>
   return (
     <div>
       <div className="px-4 py-2 flex items-center justify-between gap-3 text-[11px] text-text-tertiary">
-        <span>Existing customers win about three times as often as new ones. Priority 1 first, largest first.</span>
+        <span>{t.accountsIntro}</span>
         <label className="flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
-          <input type="checkbox" checked={showParked} onChange={e => setShowParked(e.target.checked)} /> Show won and parked
+          <input type="checkbox" checked={showParked} onChange={e => setShowParked(e.target.checked)} /> {t.showParked}
         </label>
       </div>
       <ul className="divide-y divide-border border-t border-border">
@@ -188,6 +184,7 @@ function AccountsTab({ rows = [], error, onChange }) {
 }
 
 function AccountRow({ a, onChange }) {
+  const { t, lang } = useT(SW)
   const [note, setNote] = useState(a.owner_note || '')
   const [owner, setOwner] = useState(a.owner || '')
   return (
@@ -198,24 +195,24 @@ function AccountRow({ a, onChange }) {
           <p className="text-sm font-semibold text-text" dir="auto">{a.name}</p>
         </div>
         <p className="text-[11px] text-text-tertiary mt-1 tabular-nums">
-          {[a.orders != null && `${a.orders} order${a.orders === 1 ? '' : 's'}`, formatAmount(a.value_sar),
-            a.last_order && `last ${dateLabel(a.last_order)}`, a.bought && `bought ${a.bought}`,
-            a.open_deals ? `${a.open_deals} open CRM deal${a.open_deals === 1 ? '' : 's'} (${formatAmount(a.open_value_sar)})` : '']
+          {[a.orders != null && t.orders(a.orders), amount(a.value_sar, lang),
+            a.last_order && t.lastOrder(dateLabel(a.last_order, lang)), a.bought && t.bought(a.bought),
+            a.open_deals ? t.openDeals(a.open_deals, amount(a.open_value_sar, lang)) : '']
             .filter(Boolean).join(' · ')}
         </p>
-        <div className="flex gap-1 flex-wrap mt-1.5">{(a.plays || []).map(p => <Tag key={p} tone="bg-sky-50 text-sky-800 border-sky-200">{playLabel(p)}</Tag>)}</div>
-        {a.why && <p className="text-xs text-text-secondary mt-1.5 leading-relaxed">{a.why}</p>}
+        <div className="flex gap-1 flex-wrap mt-1.5">{(a.plays || []).map(p => <Tag key={p} tone="bg-sky-50 text-sky-800 border-sky-200">{t.plays[p] || playLabel(p)}</Tag>)}</div>
+        {a.why && <p className="text-xs text-text-secondary mt-1.5 leading-relaxed" dir="auto">{a.why}</p>}
       </div>
       <div className="lg:col-span-5 grid grid-cols-2 gap-2 content-start">
         <PillSelect value={a.status} onChange={e => onChange(a.id, { status: e.target.value })}>
-          {ACCOUNT_STATUSES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+          {ACCOUNT_STATUSES.map(([k, l]) => <option key={k} value={k}>{t.accountStatus[k] || l}</option>)}
         </PillSelect>
-        <Input placeholder="Owner" value={owner} onChange={e => setOwner(e.target.value)}
+        <Input placeholder={t.owner} dir="auto" value={owner} onChange={e => setOwner(e.target.value)}
           onBlur={() => owner !== (a.owner || '') && onChange(a.id, { owner })} />
         <Input type="date" value={a.next_step_on || ''} onChange={e => onChange(a.id, { next_step_on: e.target.value || null })} />
-        <span className="text-[10px] text-text-tertiary self-center">Next step date</span>
+        <span className="text-[10px] text-text-tertiary self-center">{t.nextStepDate}</span>
         <div className="col-span-2">
-          <Textarea rows={2} placeholder="What happened, what is next" value={note} onChange={e => setNote(e.target.value)}
+          <Textarea rows={2} placeholder={t.notePh} dir="auto" value={note} onChange={e => setNote(e.target.value)}
             onBlur={() => note !== (a.owner_note || '') && onChange(a.id, { owner_note: note })} />
         </div>
       </div>
@@ -226,27 +223,28 @@ function AccountRow({ a, onChange }) {
 // ─── New targets ───────────────────────────────────────────────────────────
 
 function TargetsTab({ ranked, closed = [], icp, error, onChange }) {
+  const { t } = useT(SW)
   const [track, setTrack] = useState('core')
   const [showClosed, setShowClosed] = useState(false)
-  if (error) return <p className="px-4 py-10 text-sm text-red-600 text-center">Could not load the targets: {error}</p>
+  if (error) return <p className="px-4 py-10 text-sm text-red-600 text-center">{t.targetsFailed(error)}</p>
   const rows = showClosed ? closed.map(r => ({ ...r, fit: { score: 0, band: 'weak', reasons: [], flags: [] } })) : ranked[track]
   return (
     <div>
       <div className="px-4 py-2 flex items-center justify-between gap-3 flex-wrap">
-        <SubTabs items={TRACK_TABS.map(t => ({ ...t, label: `${t.label} (${ranked[t.key].length})` }))} value={showClosed ? '' : track}
+        <SubTabs items={TRACK_TABS.map(x => ({ ...x, label: `${t.tracks[x.key]} (${ranked[x.key].length})` }))} value={showClosed ? '' : track}
           onChange={k => { setShowClosed(false); setTrack(k) }} />
         <label className="flex items-center gap-1.5 cursor-pointer text-[11px] text-text-tertiary">
-          <input type="checkbox" checked={showClosed} onChange={e => setShowClosed(e.target.checked)} /> Won, lost and dropped ({closed.length})
+          <input type="checkbox" checked={showClosed} onChange={e => setShowClosed(e.target.checked)} /> {t.closedN(closed.length)}
         </label>
       </div>
       <p className="px-4 pb-2 text-[11px] text-text-tertiary">
-        {track === 'core' && !showClosed && `About ${icp.mix.core}% of the weekly search goes here: targets that look like the work we usually win.`}
-        {track === 'broader' && !showClosed && `About ${icp.mix.broader}% goes here: larger packages and kinds of buyer we want to grow into. Judged on fit, never on being unlike the past.`}
-        {track === 'other' && !showClosed && 'Projects the other research questions found. Scored on their name and scope alone.'}
+        {track === 'core' && !showClosed && t.coreIntro(icp.mix.core)}
+        {track === 'broader' && !showClosed && t.broaderIntro(icp.mix.broader)}
+        {track === 'other' && !showClosed && t.otherIntro}
       </p>
       {!rows.length ? (
         <p className="px-4 py-10 text-sm text-text-tertiary text-center border-t border-border">
-          Nothing here yet. Targets appear after the weekly research runs with an ideal customer written.
+          {t.noTargets}
         </p>
       ) : (
         <ul className="divide-y divide-border border-t border-border">
@@ -258,52 +256,53 @@ function TargetsTab({ ranked, closed = [], icp, error, onChange }) {
 }
 
 function TargetRow({ r, onChange }) {
+  const { t, lang } = useT(SW)
   const [note, setNote] = useState(r.owner_note || '')
   const fit = r.fit || {}
   const facts = [
-    r.segment && fit.segment, r.buyer && buyerLabel(r.buyer),
+    r.segment && fit.segment, r.buyer && (t.buyers[r.buyer] || buyerLabel(r.buyer)),
     // The value is labelled for what it is. A bare "2.7B SAR" next to a
     // package-sized company read as a deal size; the fit line below carries
     // our estimated share of it.
-    r.value_sar && `${formatAmount(r.value_sar)}${r.value_kind === 'package' ? ' package' : r.value_kind === 'project' ? ' project' : ''}`,
+    r.value_sar && `${amount(r.value_sar, lang)}${r.value_kind === 'package' ? t.package : r.value_kind === 'project' ? t.project : ''}`,
     r.stage, r.location,
-    r.contractor && `contractor ${r.contractor}`, r.consultant && `consultant ${r.consultant}`, r.client && `client ${r.client}`,
+    r.contractor && t.contractor(r.contractor), r.consultant && t.consultant(r.consultant), r.client && t.client(r.client),
   ].filter(Boolean)
   return (
     <li className="px-4 py-3 grid grid-cols-1 lg:grid-cols-12 gap-3">
       <div className="lg:col-span-8 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <Tag tone={BAND_TONE[fit.band]}>{fit.band === 'strong' ? 'Strong fit' : fit.band === 'possible' ? 'Possible' : 'Weak fit'} · {fit.score}</Tag>
+          <Tag tone={BAND_TONE[fit.band]}>{t.band[fit.band] || t.band.weak} · {fit.score}</Tag>
           <p className="text-sm font-semibold text-text" dir="auto">{r.name}</p>
-          {r.type === 'tender' && <Tag>Tender</Tag>}
-          {r.type === 'lead' && <Tag>Company</Tag>}
+          {r.type === 'tender' && <Tag>{t.tender}</Tag>}
+          {r.type === 'lead' && <Tag>{t.company}</Tag>}
         </div>
         {r.headline && <p className="text-xs text-text-secondary mt-1" dir="auto">{r.headline}</p>}
         {facts.length > 0 && <p className="text-[11px] text-text-tertiary mt-1" dir="auto">{facts.join(' · ')}</p>}
         {r.package && (
           <p className="text-xs text-text mt-1.5" dir="auto">
-            <span className="font-semibold">Our piece: </span>{r.package}
-            {r.package_value_sar ? ` (${formatAmount(r.package_value_sar)})` : ''}
+            <span className="font-semibold">{t.ourPiece}</span>{r.package}
+            {r.package_value_sar ? ` (${amount(r.package_value_sar, lang)})` : ''}
           </p>
         )}
         {(fit.reasons || []).length > 0 && (
-          <p className="text-[11px] text-sage-700 mt-1.5">Fits: {fit.reasons.join(' · ')}</p>
+          <p className="text-[11px] text-sage-700 mt-1.5" dir="auto">{t.fits}{fit.reasons.join(' · ')}</p>
         )}
-        {(fit.flags || []).map(f => <p key={f} className="text-[11px] text-amber-800 mt-0.5">Ask first: {f}</p>)}
-        {r.suggested_action && <p className="text-xs text-text mt-1.5"><span className="font-semibold">Next: </span>{r.suggested_action}</p>}
-        {r.contact && <p className="text-[11px] text-text-secondary mt-1" dir="auto"><span className="font-semibold">Contact: </span>{r.contact}</p>}
+        {(fit.flags || []).map(f => <p key={f} className="text-[11px] text-amber-800 mt-0.5" dir="auto">{t.askFirst}{f}</p>)}
+        {r.suggested_action && <p className="text-xs text-text mt-1.5" dir="auto"><span className="font-semibold">{t.next}</span>{r.suggested_action}</p>}
+        {r.contact && <p className="text-[11px] text-text-secondary mt-1" dir="auto"><span className="font-semibold">{t.contact}</span>{r.contact}</p>}
         <p className="text-[10px] text-text-tertiary mt-1.5">
-          {r.first_seen_at && `Found ${dateLabel(r.first_seen_at)}`}
-          {r.times_seen > 1 && ` · seen ${r.times_seen} weeks`}
-          {r.last_change && ` · changed: ${r.last_change}`}
-          {r.source_url && <> · <a href={r.source_url} target="_blank" rel="noreferrer" className="underline">source</a></>}
+          {r.first_seen_at && t.found(dateLabel(r.first_seen_at, lang))}
+          {r.times_seen > 1 && t.seenWeeks(r.times_seen)}
+          {r.last_change && t.changed(r.last_change)}
+          {r.source_url && <> · <a href={r.source_url} target="_blank" rel="noreferrer" className="underline">{t.source}</a></>}
         </p>
       </div>
       <div className="lg:col-span-4 space-y-2">
         <PillSelect value={r.status || 'new'} onChange={e => onChange(r.id, { status: e.target.value })}>
-          {OPPORTUNITY_STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s] || s}</option>)}
+          {OPPORTUNITY_STATUSES.map(s => <option key={s} value={s}>{t.oppStatus[s] || s}</option>)}
         </PillSelect>
-        <Textarea rows={2} placeholder="Who has it, what happened" value={note} onChange={e => setNote(e.target.value)}
+        <Textarea rows={2} placeholder={t.whoHasIt} dir="auto" value={note} onChange={e => setNote(e.target.value)}
           onBlur={() => note !== (r.owner_note || '') && onChange(r.id, { owner_note: note })} />
       </div>
     </li>
@@ -313,33 +312,34 @@ function TargetRow({ r, onChange }) {
 // ─── Events ────────────────────────────────────────────────────────────────
 
 function EventsTab({ rows = [], error, onChange }) {
-  if (error) return <p className="px-4 py-10 text-sm text-red-600 text-center">Could not load the events: {error}</p>
-  if (!rows.length) return <p className="px-4 py-10 text-sm text-text-tertiary text-center">No upcoming events found yet.</p>
+  const { t, lang } = useT(SW)
+  if (error) return <p className="px-4 py-10 text-sm text-red-600 text-center">{t.eventsFailed(error)}</p>
+  if (!rows.length) return <p className="px-4 py-10 text-sm text-text-tertiary text-center">{t.noEvents}</p>
   return (
     <ul className="divide-y divide-border border-t border-border mt-2">
       {rows.map(e => (
         <li key={e.id} className="px-4 py-3 grid grid-cols-1 lg:grid-cols-12 gap-3">
           <div className="lg:col-span-2">
-            <p className="text-xs font-semibold text-text tabular-nums">{e.start_date ? dateLabel(e.start_date) : 'Date to confirm'}</p>
-            <p className="text-[11px] text-text-tertiary">{whenLabel(e.days)}</p>
+            <p className="text-xs font-semibold text-text tabular-nums">{e.start_date ? dateLabel(e.start_date, lang) : t.dateToConfirm}</p>
+            <p className="text-[11px] text-text-tertiary">{t.when(e.days)}</p>
           </div>
           <div className="lg:col-span-7 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              {e.relevance === 'high' && <Tag tone="bg-amber-50 text-amber-800 border-amber-200">High</Tag>}
+              {e.relevance === 'high' && <Tag tone="bg-amber-50 text-amber-800 border-amber-200">{t.high}</Tag>}
               <p className="text-sm font-semibold text-text" dir="auto">{e.url ? <a href={e.url} target="_blank" rel="noreferrer" className="hover:underline">{e.name}</a> : e.name}</p>
             </div>
             <p className="text-[11px] text-text-tertiary mt-0.5">{[e.venue, e.city, e.organizer].filter(Boolean).join(' · ')}</p>
             {e.exhibitor_deadline && (
               <p className={`text-[11px] mt-1 ${e.deadlineDays !== null && e.deadlineDays >= 0 && e.deadlineDays <= 30 ? 'text-red-600 font-semibold' : 'text-text-secondary'}`}>
-                Exhibitor deadline {dateLabel(e.exhibitor_deadline)} ({whenLabel(e.deadlineDays)})
+                {t.deadline(dateLabel(e.exhibitor_deadline, lang), t.when(e.deadlineDays))}
               </p>
             )}
-            {(e.competitors_exhibiting || []).length > 0 && <p className="text-[11px] text-text-secondary mt-0.5">Competitors there: {e.competitors_exhibiting.join(', ')}</p>}
-            {e.recommendation && <p className="text-xs text-text mt-1">{e.recommendation}</p>}
+            {(e.competitors_exhibiting || []).length > 0 && <p className="text-[11px] text-text-secondary mt-0.5">{t.competitorsThere(e.competitors_exhibiting.join(', '))}</p>}
+            {e.recommendation && <p className="text-xs text-text mt-1" dir="auto">{e.recommendation}</p>}
           </div>
           <div className="lg:col-span-3">
             <PillSelect value={e.decision || 'undecided'} onChange={ev => onChange(e.id, ev.target.value)}>
-              {EVENT_DECISIONS.map(d => <option key={d} value={d}>{DECISION_LABEL[d] || d}</option>)}
+              {EVENT_DECISIONS.map(d => <option key={d} value={d}>{t.decisions[d] || d}</option>)}
             </PillSelect>
           </div>
         </li>

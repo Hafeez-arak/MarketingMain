@@ -46,7 +46,7 @@ export const SECTIONS = [
     blurbAr: 'العملاء المحتملون، ومسار الصفقات، والحسابات المستهدفة، وكيف يقرر وكيل العملاء.',
     pages: [
       { to: '/sales/leads', label: 'Leads', ar: 'العملاء المحتملون', icon: 'funnel', translated: true },
-      { to: '/sales/targets', label: 'Target accounts', ar: 'الحسابات المستهدفة', icon: 'target' },
+      { to: '/sales/targets', label: 'Target accounts', ar: 'الحسابات المستهدفة', icon: 'target', translated: true },
       // How the lead agent decides: changing it is managing Sales.
       { to: '/sales/agent-brief', label: 'Agent Brief', ar: 'موجز الوكيل', icon: 'search', min: 'manage' },
     ],

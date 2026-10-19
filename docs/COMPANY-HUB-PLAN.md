@@ -279,13 +279,20 @@ So every v1 page takes the look without edits.
   keeps English left-to-right inside the Arabic shell (`translated: true`
   in `lib/modules.js` marks the ones that are).
 
+  **Added later the same day:** the sign-in pages (their own switch),
+  Requests, the Assistant (page and drawer), Settings, and Sales: the
+  sales team's own app (Inbox, Pipeline, an opened lead, battle card,
+  tasks), the main Leads page and Target accounts. `src/lib/i18n.test.js`
+  fails if any English key has no Arabic.
+
   **Still English:** Marketing (Dashboard, Content Planning, Studio,
   Schedule, Social, Post Queue, Auto-replies, Email, Media, Brand Brain),
-  Insights (Research, Analytics, reports), Sales (Leads, Target accounts,
-  Agent Brief), the sales team's own app, Admin → Team & Access, Requests,
-  the Assistant, Settings, and the sign-in pages. Each is translated the
-  same way: a `{ en, ar }` dictionary per page through `useT`, start/end
-  classes instead of left/right, then `translated: true`.
+  Insights (Research, Analytics, reports), and three configuration screens:
+  Leads → Agent settings, Target accounts → Ideal customer, Agent Brief,
+  plus Admin → Team & Access. The battle card's content and the reminder
+  task titles are written by the server in English. Each screen is
+  translated the same way: a `{ en, ar }` dictionary per page through
+  `useT`, start/end classes instead of left/right, then `translated: true`.
 - **Blocked, not built:** WhatsApp (needs a dedicated number, Meta business
   verification, approved templates, a provider and a budget) and website
   conversion tracking (needs Google Tag Manager on the website).
