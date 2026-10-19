@@ -8,6 +8,7 @@ import {
 import { LeadDetail, LeadTabs, LeadName, MarkUnread } from './parts'
 import { useLeadReads } from './useLeadReads'
 import LeadOverview from './LeadOverview'
+import AssignDialog from './AssignDialog'
 import BattleCard from './BattleCard'
 
 // ─── The Pipeline (2026-10-18) ─────────────────────────────────────────────
@@ -127,7 +128,7 @@ function StageSelect({ lead, onPick, busy }) {
   )
 }
 
-function Row({ lead, open, onToggle, onPick, busy, team, me, workspaceId, mailboxes, onReview, onChange, today, canAll, onDeleted, unread, onMarkUnread }) {
+function Row({ lead, open, onToggle, onPick, busy, team, me, workspaceId, mailboxes, onReview, onChange, today, canAll, onDeleted, unread, onMarkUnread, onAssign }) {
   const [tab, setTab] = useState('lead')
   const f = followUpState(lead.follow_up, today)
   return (
@@ -152,7 +153,14 @@ function Row({ lead, open, onToggle, onPick, busy, team, me, workspaceId, mailbo
         </div>
         <div className="min-w-0">
           <span className="md:hidden text-[10px] text-text-tertiary uppercase tracking-wide mr-1.5">Owner</span>
-          <span className={`text-xs ${lead.assigned_to ? (lead.assigned_to === me ? 'font-semibold text-text' : 'text-text') : 'text-text-tertiary'}`}>{ownerLabel(lead, team, me)}</span>
+          {onAssign ? (
+            <button type="button" onClick={(e) => { stop(e); onAssign(lead) }} title={lead.assigned_to ? 'Reassign to someone else' : 'Assign'}
+              className={`text-xs hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400 ${lead.assigned_to ? (lead.assigned_to === me ? 'font-semibold text-text' : 'text-text') : 'text-amber-800 font-semibold'}`}>
+              {lead.assigned_to ? ownerLabel(lead, team, me) : 'Assign'}
+            </button>
+          ) : (
+            <span className={`text-xs ${lead.assigned_to ? (lead.assigned_to === me ? 'font-semibold text-text' : 'text-text') : 'text-text-tertiary'}`}>{ownerLabel(lead, team, me)}</span>
+          )}
           {lead.crm_status && <span className="block text-[10px] text-text-tertiary">{CRM_LABEL[lead.crm_status]}</span>}
         </div>
         <div className="min-w-0">
@@ -173,7 +181,7 @@ function Row({ lead, open, onToggle, onPick, busy, team, me, workspaceId, mailbo
             <DeleteLead lead={lead} workspaceId={workspaceId} me={me} canAll={canAll} onDeleted={onDeleted} />
           </LeadTabs>
           {tab === 'lead'
-            ? <LeadOverview lead={lead} workspaceId={workspaceId} team={team} me={me} onChange={onChange} />
+            ? <LeadOverview lead={lead} workspaceId={workspaceId} team={team} me={me} onChange={onChange} onReassign={onAssign ? () => onAssign(lead) : undefined} />
             : tab === 'card'
               ? <BattleCard lead={lead} workspaceId={workspaceId} onLeadChange={onChange} />
               : <LeadDetail lead={lead} onReview={onReview} workspaceId={workspaceId} mailboxes={mailboxes} wide />}
@@ -205,6 +213,24 @@ export default function Pipeline({ workspaceId, refreshKey = 0, canApprove = fal
   useEffect(() => { queueMicrotask(load) }, [load])
 
   const reads = useLeadReads(workspaceId, me, data.rows)
+
+  // Assign or reassign, at any stage (2026-10-19): the lead keeps its stage.
+  const [assigning, setAssigning] = useState(null)
+  const [assignState, setAssignState] = useState({ busy: false, error: '' })
+  const [assignNote, setAssignNote] = useState('')
+  async function assign(userId) {
+    setAssignState({ busy: true, error: '' })
+    const r = await leadsApi('assign', workspaceId, { lead_id: assigning.id, user_id: userId })
+    if (r.error) return setAssignState({ busy: false, error: r.error })
+    if (r.lead && !r.lead.stage) {
+      // Taken back before anyone worked it: it leaves the Pipeline.
+      setOpen(null)
+      setData((d) => ({ ...d, rows: d.rows.filter((x) => x.id !== r.lead.id) }))
+    } else if (r.lead) replace(r.lead)
+    setAssignNote(r.odooError ? `Moved here, but the salesperson in Odoo was not changed: ${r.odooError}` : '')
+    setAssignState({ busy: false, error: '' })
+    setAssigning(null)
+  }
 
   // Opened from a notification (?lead=…): open that lead once it is loaded,
   // show it whoever's it is, and scroll to it.
@@ -253,6 +279,7 @@ export default function Pipeline({ workspaceId, refreshKey = 0, canApprove = fal
         </p>
       </div>
       {stageError && <p className="px-4 py-2 text-xs text-red-600 border-b border-border">{stageError}</p>}
+      {assignNote && <p className="px-4 py-2 text-xs text-amber-800 border-b border-border">{assignNote}</p>}
 
       <div className={`hidden ${GRID} px-4 py-2 border-b border-border text-[10px] font-semibold text-text-tertiary uppercase tracking-wide`}>
         <span>Customer</span><span>Wants</span><span>Came in</span><span>Owner</span><span>Stage</span><span>Follow-up · next step</span>
@@ -279,6 +306,7 @@ export default function Pipeline({ workspaceId, refreshKey = 0, canApprove = fal
                   <Row key={l.id} lead={l} open={open === l.id} unread={reads.unread(l)} onPick={change} busy={busy}
                     onToggle={() => { if (open !== l.id) reads.mark(l, true); setOpen(open === l.id ? null : l.id) }}
                     onMarkUnread={() => { reads.mark(l, false); setOpen(null) }}
+                    onAssign={canApprove ? (lead) => { setAssignState({ busy: false, error: '' }); setAssigning(lead) } : undefined}
                     team={team} me={me} workspaceId={workspaceId} mailboxes={mailboxes} onReview={onReview} onChange={replace} today={today}
                     canAll={canApprove} onDeleted={(gone) => { setOpen(null); setData((d) => ({ ...d, rows: d.rows.filter((x) => x.id !== gone.id) })) }} />
                 ))}
@@ -288,6 +316,7 @@ export default function Pipeline({ workspaceId, refreshKey = 0, canApprove = fal
         ))
       )}
       {dialog}
+      {assigning && <AssignDialog lead={assigning} team={team} busy={assignState.busy} error={assignState.error} onCancel={() => setAssigning(null)} onConfirm={assign} />}
     </div>
   )
 }
