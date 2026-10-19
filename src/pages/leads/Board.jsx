@@ -5,11 +5,12 @@ import { fetchLeadsPage, leadsApi } from '../../lib/leads/client'
 import {
   SHOW_OPTIONS, EMPTY_FILTERS, activeFilterCount, effectiveVerdict, PAGE_SIZE, pageLabel, pageCount, when,
   SENDER_LABEL, PROJECT_LABEL, REQUEST_LABEL, FOLDER_LABEL, PHILIPS_LABEL, CRM_LABEL, channelLabel, brandOf, phonesOf, projectOf,
-  ownerLabel, shortName, FORWARD_LABEL, assignable,
+  ownerLabel, shortName, FORWARD_LABEL, assignable, leadTabs,
 } from '../../lib/leads/view'
 import { VerdictTag, LeadDetail, LeadTabs } from './parts'
 import BattleCard from './BattleCard'
 import { StageBar, DeleteLead } from './Pipeline'
+import LeadOverview from './LeadOverview'
 
 // ─── The leads list ────────────────────────────────────────────────────────
 // What the sales team asked for (2026-10-11): one clean row per lead with
@@ -25,7 +26,7 @@ import { StageBar, DeleteLead } from './Pipeline'
 //
 // A lead someone has opens on its battle card (BattleCard.jsx; made at
 // approval from 2026-10-12, at assignment since 2026-10-19), with the email
-// one tab away.
+// one tab away. Since 2026-10-19 it opens on the Lead tab (LeadOverview.jsx).
 //
 // The Owner column (2026-10-13): a sales admin assigns a lead to one person
 // on the sales team at any time, which forwards the customer's email to them
@@ -186,7 +187,8 @@ function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailbo
   const v2 = (lead.criteria_version || 1) >= 2
   const junk = lead.folder === 'junk'
   // A lead someone has opens on its card; any other on its email.
-  const [tab, setTab] = useState(lead.approved_at || lead.stage || lead.assigned_to ? 'card' : 'email')
+  // Someone has it: it opens on the Lead tab (2026-10-19); any other on its email.
+  const [tab, setTab] = useState(lead.approved_at || lead.stage || lead.assigned_to || lead.source === 'manual' ? 'lead' : 'email')
   const hasTabs = lead.verdict !== 'duplicate'
   return (
     <li className={open ? 'bg-surface-subtle' : ''}>
@@ -243,13 +245,15 @@ function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailbo
           <StageBar lead={lead} workspaceId={workspaceId} onChange={onChange} />
           {hasTabs ? (
             <>
-              <LeadTabs tabs={[['card', 'Battle card'], ['email', lead.source === 'manual' ? 'Details' : 'Email and evidence']]} value={tab} onChange={setTab}>
+              <LeadTabs tabs={leadTabs(lead)} value={tab} onChange={setTab}>
                 <AskAboutLead lead={lead} />
                 <DeleteLead lead={lead} workspaceId={workspaceId} me={me} canAll={canApprove} onDeleted={onDeleted} />
               </LeadTabs>
-              {tab === 'card'
-                ? (lead.approved_at || lead.stage || lead.assigned_to ? <BattleCard lead={lead} workspaceId={workspaceId} onLeadChange={onChange} /> : <CardWaiting lead={lead} canApprove={canApprove} onAssign={onAssign} />)
-                : <LeadDetail lead={lead} onReview={onReview} workspaceId={workspaceId} mailboxes={mailboxes} wide />}
+              {tab === 'lead'
+                ? <LeadOverview lead={lead} workspaceId={workspaceId} team={team} me={me} onChange={onChange} />
+                : tab === 'card'
+                  ? (lead.approved_at || lead.stage || lead.assigned_to ? <BattleCard lead={lead} workspaceId={workspaceId} onLeadChange={onChange} /> : <CardWaiting lead={lead} canApprove={canApprove} onAssign={onAssign} />)
+                  : <LeadDetail lead={lead} onReview={onReview} workspaceId={workspaceId} mailboxes={mailboxes} wide />}
             </>
           ) : (
             <>

@@ -7,6 +7,7 @@ import { emailSegments, emailLinks, isFileLink, fileSize } from '../../lib/leads
 // ─── Pieces shared by the leads list and the agent settings ────────────────
 
 const TAB_ICON = {
+  lead: <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 20c1.5-3.5 4.5-5 8-5s6.5 1.5 8 5" />,
   card: <path d="M4 5h16v14H4zM8 9h8M8 13h5" />,
   email: <path d="M3 6h18v12H3zM3 7l9 6 9-6" />,
 }
@@ -181,7 +182,7 @@ async function download(workspaceId, lead, a) {
  * shared files (SharePoint, WeTransfer…) written in the text. A salesperson
  * has no access to the info@ mailbox, so this is where they get the BOQ.
  */
-function Attachments({ lead, workspaceId }) {
+export function Attachments({ lead, workspaceId }) {
   const [list, setList] = useState({ for: null, items: [], error: '' })
   const [busy, setBusy] = useState('')
   const [fail, setFail] = useState('')

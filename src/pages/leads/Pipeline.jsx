@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Input, Select, Skeleton, Spinner, Textarea } from '../../components/ui/index'
 import { fetchPipeline, leadsApi } from '../../lib/leads/client'
-import { SENDER_LABEL, PROJECT_LABEL, channelLabel, ownerLabel, phonesOf, when, CRM_LABEL, assignable } from '../../lib/leads/view'
+import { SENDER_LABEL, PROJECT_LABEL, channelLabel, ownerLabel, phonesOf, when, CRM_LABEL, assignable, leadTabs } from '../../lib/leads/view'
 import {
   STAGES, STAGE_LABEL, OPEN_STAGES, LOST_REASON_LABEL, CHANNEL_LABEL, groupByStage, pipelineStats, followUpState, shortDate, riyadhToday,
 } from '../../lib/leads/pipeline'
 import { LeadDetail, LeadTabs } from './parts'
+import LeadOverview from './LeadOverview'
 import BattleCard from './BattleCard'
 
 // ─── The Pipeline (2026-10-18) ─────────────────────────────────────────────
@@ -126,9 +127,8 @@ function StageSelect({ lead, onPick, busy }) {
 }
 
 function Row({ lead, open, onToggle, onPick, busy, team, me, workspaceId, mailboxes, onReview, onChange, today, canAll, onDeleted }) {
-  const [tab, setTab] = useState('card')
+  const [tab, setTab] = useState('lead')
   const f = followUpState(lead.follow_up, today)
-  const manual = lead.source === 'manual'
   return (
     <li className={open ? 'bg-surface-subtle' : ''}>
       <div role="button" tabIndex={0} onClick={onToggle} aria-expanded={open}
@@ -167,12 +167,14 @@ function Row({ lead, open, onToggle, onPick, busy, team, me, workspaceId, mailbo
       {open && (
         <div className="border-t border-border bg-white">
           <StageBar lead={lead} workspaceId={workspaceId} onChange={onChange} />
-          <LeadTabs tabs={[['card', 'Battle card'], ['email', manual ? 'Details' : 'Email and evidence']]} value={tab} onChange={setTab}>
+          <LeadTabs tabs={leadTabs(lead)} value={tab} onChange={setTab}>
             <DeleteLead lead={lead} workspaceId={workspaceId} me={me} canAll={canAll} onDeleted={onDeleted} />
           </LeadTabs>
-          {tab === 'card'
-            ? <BattleCard lead={lead} workspaceId={workspaceId} onLeadChange={onChange} />
-            : <LeadDetail lead={lead} onReview={onReview} workspaceId={workspaceId} mailboxes={mailboxes} wide />}
+          {tab === 'lead'
+            ? <LeadOverview lead={lead} workspaceId={workspaceId} team={team} me={me} onChange={onChange} />
+            : tab === 'card'
+              ? <BattleCard lead={lead} workspaceId={workspaceId} onLeadChange={onChange} />
+              : <LeadDetail lead={lead} onReview={onReview} workspaceId={workspaceId} mailboxes={mailboxes} wide />}
         </div>
       )}
     </li>

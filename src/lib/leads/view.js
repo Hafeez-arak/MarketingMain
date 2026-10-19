@@ -242,6 +242,17 @@ export function channelLabel(lead = {}, { websiteBrand = 'Arak' } = {}) {
   return brand ? `${brand} email` : 'Email'
 }
 
+/**
+ * A WhatsApp link for a Saudi number as people write it (05…, 9665…,
+ * +966 5…, 00966…), or '' when it is not a mobile we can tell.
+ */
+export function whatsappLink(phone = '') {
+  let d = String(phone).replace(/[^\d+]/g, '').replace(/^\+/, '').replace(/^00/, '')
+  if (/^05\d{8}$/.test(d)) d = `966${d.slice(1)}`
+  else if (/^5\d{8}$/.test(d)) d = `966${d}`
+  return /^9665\d{8}$/.test(d) ? `https://wa.me/${d}` : ''
+}
+
 /** Every number a lead gave, the stored list first, else the form's own field. */
 export const phonesOf = (lead = {}) => (Array.isArray(lead.phones) && lead.phones.length ? lead.phones : [lead.phone].filter(Boolean))
 
@@ -303,3 +314,14 @@ export const assignable = (team = []) => team.filter((m) => !m.approver)
 
 /** Where the forward of the customer's email to the owner stands. */
 export const FORWARD_LABEL = { sending: 'Forwarding…', sent: 'Email forwarded', failed: 'Email not forwarded' }
+
+/**
+ * Which tabs an opened lead has: Lead (contact, where it stands, files),
+ * Battle card, and the email as it arrived. A lead added by hand has no
+ * email; its notes are on the Lead tab.
+ */
+export const leadTabs = (lead = {}) => [
+  ['lead', 'Lead'],
+  ['card', 'Battle card'],
+  ...(lead.source === 'manual' ? [] : [['email', 'Email and evidence']]),
+]
