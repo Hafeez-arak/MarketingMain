@@ -188,10 +188,16 @@ function pgError(err) {
 async function rpc(pg, fn, body = {}) {
   if (!IDENT.test(fn)) return { status: 404, body: { message: 'no function' } }
   try {
-    const args = Object.entries(body || {}).map(([k, v]) => `${ident(k)} => ${lit(v)}`).join(', ')
+    // A JSON array argument is a Postgres array, as PostgREST passes it.
+    const arg = v => (Array.isArray(v) ? `array[${v.map(lit).join(', ')}]::text[]` : lit(v))
+    const args = Object.entries(body || {}).map(([k, v]) => `${ident(k)} => ${arg(v)}`).join(', ')
     const r = await pg.query(`select to_json(public.${ident(fn)}(${args}))::text as j`)
     return { status: 200, body: JSON.parse(r.rows[0].j) }
   } catch (err) {
+    // A function that does not exist is PostgREST's 404 PGRST202, as in
+    // production: v2's section gate (has_any_section) reads that as "a
+    // database before v2" and keeps v1's membership rule.
+    if (err.code === '42883') return { status: 404, body: { message: err.message, code: 'PGRST202' } }
     const e = err.status ? err : pgError(err)
     return { status: e.status, body: { message: e.message, code: e.code } }
   }

@@ -26,6 +26,7 @@ import {
 } from '../../src/lib/email/cold.js'
 import { finishConnect as finishLeadMailConnect, checkAllMail as checkAllLeadMail } from '../leads/_mail.js'
 import { leadDeps } from '../leads/_deps.js'
+import { sectionGate } from '../leads/_sectionAccess.js'
 import { runDailyAlerts, weeklyIfDue } from '../leads/_control.js'
 
 // Where the CEO panel lives, for the link in its daily alert.
@@ -200,6 +201,9 @@ function needResend() {
 const isUuid = v => /^[0-9a-f-]{36}$/i.test(String(v || ''))
 
 // ─── Signed-in actions ─────────────────────────────────────────────────────
+
+/** Actions that only read (v2: open to Marketing at view). */
+const EMAIL_READS = new Set(['status', 'check', 'cold_preview'])
 
 const actions = {
   /** Everything the Overview and Settings need to know about sending. */
@@ -896,6 +900,12 @@ export default async function handler(req, res) {
   const [user, member] = await Promise.all([authenticate(token), token ? isMember(workspaceId, token) : false])
   if (!user) return res.status(401).json({ ok: false, error: 'Sign in to do this. If you are signed in, reload the page.' })
   if (!member) return res.status(403).json({ ok: false, error: 'You do not have access to that workspace.' })
+  // v2: Email is Marketing's. Reading where things stand needs Marketing at
+  // view; lists, mailboxes and sending need it at work.
+  const min = EMAIL_READS.has(action) ? 'view' : 'work'
+  if (!(await sectionGate({ url: SUPABASE_URL, apikey: ANON_KEY || SERVICE_KEY, token, workspaceId, sections: ['marketing'], min }))) {
+    return res.status(403).json({ ok: false, error: 'Email is part of Marketing, which you have not been given.' })
+  }
 
   try {
     const out = await actions[action].call({ req, res }, { workspaceId, body, user })

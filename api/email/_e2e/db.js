@@ -49,6 +49,11 @@ create or replace function public.is_access_admin() returns boolean language sql
 create or replace function public.is_workspace_member(ws_id uuid) returns boolean language sql stable as $$
   select exists (select 1 from public.workspace_members m where m.workspace_id = ws_id and m.user_id = auth.uid())
 $$;
+-- v2's section gate (20261104). The harness's caller is the access admin
+-- (above), who has every section.
+create or replace function public.has_any_section(ws uuid, secs text[], min_level text default 'view') returns boolean language sql stable as $$
+  select public.is_access_admin()
+$$;
 
 create table public.research_runs (id uuid primary key default gen_random_uuid(), workspace_id uuid references public.workspaces(id));
 create table public.research_opportunities (

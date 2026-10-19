@@ -1,5 +1,26 @@
 import { describe, it, expect, vi } from 'vitest'
-import { sectionFor, hasSection } from './_sectionAccess.js'
+import { sectionFor, hasSection, sectionGate } from './_sectionAccess.js'
+
+describe('sectionGate', () => {
+  const call = (f) => sectionGate({ url: 'http://db', apikey: 'k', token: 't', workspaceId: 'w', sections: ['marketing'], min: 'work', fetch: f })
+  it('asks has_any_section with the caller\'s token', async () => {
+    const f = vi.fn(async () => ({ ok: true, status: 200, json: async () => true }))
+    expect(await call(f)).toBe(true)
+    const [url, init] = f.mock.calls[0]
+    expect(url).toBe('http://db/rest/v1/rpc/has_any_section')
+    expect(init.headers.Authorization).toBe('Bearer t')
+    expect(JSON.parse(init.body)).toEqual({ ws: 'w', secs: ['marketing'], min_level: 'work' })
+  })
+  it('a false is no', async () => {
+    expect(await call(async () => ({ ok: true, status: 200, json: async () => false }))).toBe(false)
+  })
+  it('lets v1 through only when the function does not exist yet', async () => {
+    expect(await call(async () => ({ ok: false, status: 404, json: async () => ({ code: 'PGRST202' }) }))).toBe(true)
+    expect(await call(async () => ({ ok: false, status: 401, json: async () => ({ code: 'PGRST301' }) }))).toBe(false)
+    expect(await call(async () => ({ ok: false, status: 500, json: async () => ({}) }))).toBe(false)
+    expect(await call(async () => { throw new Error('down') })).toBe(false)
+  })
+})
 
 const SALES = new Set(['review', 'assign', 'lead_mark'])
 

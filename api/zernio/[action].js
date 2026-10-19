@@ -4,6 +4,7 @@ import {
   syncAccountPosts, feedPlan, mergeFeedPages, FEED_MAX_PAGES,
 } from './_zernio.js'
 import { mayDisconnect, protectionReason } from '../../src/lib/platformSafety.js'
+import { sectionGate } from '../leads/_sectionAccess.js'
 
 // ─── Per-workspace OAuth ───────────────────────────────────────────────────
 //
@@ -300,6 +301,9 @@ function samePlanShape(hint, actual) {
 }
 
 // ─── Actions ───────────────────────────────────────────────────────────────
+
+/** Actions that only read Zernio's numbers (v2: open to Insights as well). */
+const READ_ONLY = new Set(['accounts', 'analytics', 'feed', 'followers', 'sync'])
 
 const handlers = {
   async accounts(z, { ws, profileId }) {
@@ -1007,6 +1011,14 @@ export default async function handler(req, res) {
     if (!ws) {
       return res.status(403).json({ ok: false, error: 'You do not have access to that workspace.' })
     }
+    // v2: connecting, posting and auto-replies are Marketing's (work);
+    // reading the numbers is Insights' too (its Analytics page).
+    const readOnly = READ_ONLY.has(action)
+    const allowed = await sectionGate({
+      url: SUPABASE_URL, apikey: ANON_KEY || SERVICE_KEY, token, workspaceId,
+      sections: readOnly ? ['marketing', 'insights'] : ['marketing'], min: readOnly ? 'view' : 'work',
+    })
+    if (!allowed) return res.status(403).json({ ok: false, error: 'This is part of Marketing, which you have not been given.' })
 
     const z = createZernio({ apiKey: ZERNIO_KEY })
     const profileId = await ensureProfile(z, ws)

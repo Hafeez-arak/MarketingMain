@@ -35,3 +35,25 @@ export async function hasSection({ url, apikey, token, workspaceId, section, min
     return r.ok && (await r.json()) === true
   } catch { return false }
 }
+
+/**
+ * May the caller use any of these sections at this level? For routes that
+ * act with the service key after their own membership check (Email, Zernio),
+ * so the section rules RLS applies to the browser apply to them too.
+ *
+ * Fails open in ONE case only: the database has no has_any_section() yet
+ * (production before v2 ships, PostgREST's PGRST202), where v1's membership
+ * check alone decides, as it always did. Anything else that goes wrong is no.
+ */
+export async function sectionGate({ url, apikey, token, workspaceId, sections, min = 'view', fetch: f = fetch }) {
+  try {
+    const r = await f(`${url}/rest/v1/rpc/has_any_section`, {
+      method: 'POST',
+      headers: { apikey, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ws: workspaceId, secs: sections, min_level: min }),
+    })
+    if (r.ok) return (await r.json()) === true
+    const err = await r.json().catch(() => ({}))
+    return r.status === 404 && err?.code === 'PGRST202'
+  } catch { return false }
+}
