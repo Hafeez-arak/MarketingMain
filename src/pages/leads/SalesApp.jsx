@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../store/auth'
 import { supabase } from '../../lib/supabaseClient'
 import { Button, Spinner } from '../../components/ui/index'
@@ -8,6 +9,7 @@ import { monthStats } from '../../lib/leads/view'
 import LeadsBoard from './Board'
 import Pipeline, { AddLeadDialog } from './Pipeline'
 import SalesShell from './SalesShell'
+import SalesTasks from './SalesTasks'
 
 // ─── The sales team's app: Leads ──────────────────────────────────────────
 // What a 'sales' account sees instead of the marketing app (2026-10-11): one
@@ -23,8 +25,16 @@ import SalesShell from './SalesShell'
 // the agent) and Pipeline (approved and hand-added leads, by stage). A
 // salesperson opens on the Pipeline, a sales admin on the Inbox. "Add lead"
 // is on both.
+//
+// v2 (2026-10-19): ?view=tasks is the Tasks page (SalesTasks.jsx), on this
+// address because App.jsx gives the sales team /leads and /research only.
 
 export default function SalesApp() {
+  const [params] = useSearchParams()
+  return params.get('view') === 'tasks' ? <SalesTasks /> : <SalesLeads />
+}
+
+function SalesLeads() {
   const { user, workspaces, activeWorkspaceId, switchWorkspace, canApproveLeads } = useAuth()
   const [monthLeads, setMonthLeads] = useState([])
   const [mailboxes, setMailboxes] = useState([])

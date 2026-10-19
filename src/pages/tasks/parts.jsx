@@ -163,7 +163,8 @@ const EVENT_WORDS = {
  * One task, opened: change its status, edit it, comment, see its history,
  * add a follow-up. Changes go through `onUpdate`, which returns the saved row.
  */
-export function TaskPanel({ task, people = [], me, now, canEdit, canDelete, onUpdate, onDelete, onFollowUp, onClose }) {
+/** `leadHref(task)`: where "Open the lead" goes, which differs by app (sales or marketing shell). */
+export function TaskPanel({ task, people = [], me, now, canEdit, canDelete, onUpdate, onDelete, onFollowUp, onClose, leadHref = null }) {
   const [editing, setEditing] = useState(false)
   const [events, setEvents] = useState(null)
   const [comment, setComment] = useState('')
@@ -244,6 +245,7 @@ export function TaskPanel({ task, people = [], me, now, canEdit, canDelete, onUp
               <div className="flex flex-wrap gap-2 pt-1">
                 {canEdit && <Button size="xs" variant="secondary" onClick={() => setEditing(true)}>Edit</Button>}
                 <Button size="xs" variant="secondary" onClick={() => onFollowUp(task)}>Add a follow-up</Button>
+                {task.lead_id && leadHref && <a href={leadHref(task)} className="inline-flex items-center rounded-md border border-border px-2.5 py-1 text-[11px] text-text hover:bg-stone-50">Open the lead</a>}
                 {canDelete && <Button size="xs" variant="ghost" onClick={() => { if (window.confirm('Delete this task?')) onDelete(task) }}>Delete</Button>}
               </div>
             </div>

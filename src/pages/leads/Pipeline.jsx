@@ -10,6 +10,7 @@ import { useLeadReads } from './useLeadReads'
 import LeadOverview from './LeadOverview'
 import AssignDialog from './AssignDialog'
 import BattleCard from './BattleCard'
+import LeadTasks from './LeadTasks'
 
 // ─── The Pipeline (2026-10-18) ─────────────────────────────────────────────
 // The owner: assigned and approved leads, and leads the team adds by hand,
@@ -176,6 +177,7 @@ function Row({ lead, open, onToggle, onPick, busy, team, me, workspaceId, mailbo
       {open && (
         <div className="border-t border-border bg-white">
           <StageBar lead={lead} workspaceId={workspaceId} onChange={onChange} />
+          <LeadTasks lead={lead} workspaceId={workspaceId} me={me} />
           <LeadTabs tabs={leadTabs(lead)} value={tab} onChange={setTab}>
             <MarkUnread onClick={onMarkUnread} />
             <DeleteLead lead={lead} workspaceId={workspaceId} me={me} canAll={canAll} onDeleted={onDeleted} />

@@ -13,6 +13,7 @@ import BattleCard from './BattleCard'
 import { StageBar, DeleteLead } from './Pipeline'
 import AssignDialog, { PersonOptions } from './AssignDialog'
 import LeadOverview from './LeadOverview'
+import LeadTasks from './LeadTasks'
 
 // ─── The leads list ────────────────────────────────────────────────────────
 // What the sales team asked for (2026-10-11): one clean row per lead with
@@ -329,6 +330,7 @@ function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailbo
           <OwnerLine lead={lead} team={team} me={me} canApprove={canApprove} onForward={onForward} />
           <StageBar lead={lead} workspaceId={workspaceId} onChange={onChange} />
           <ProgressLine lead={lead} me={me} canApprove={canApprove} onMark={onMark} />
+          <LeadTasks lead={lead} workspaceId={workspaceId} me={me} />
           {hasTabs ? (
             <>
               <LeadTabs tabs={leadTabs(lead)} value={tab} onChange={setTab}>

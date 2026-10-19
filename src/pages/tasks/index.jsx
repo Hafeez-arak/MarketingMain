@@ -124,6 +124,7 @@ export function TasksPage() {
           onClose={() => { setParam('id', ''); setOpened(null) }}
           onUpdate={async patch => { const out = await updateTask(ws, me, current.id, patch); if (!out.error) { setOpened(out.task); board.replace(out.task) } return out }}
           onDelete={async t => { const out = await deleteTask(ws, t.id); if (out.error) board.setError(out.error); else { setParam('id', ''); board.load() } }}
+          leadHref={t => `/sales/leads?view=pipeline&lead=${t.lead_id}`}
           onFollowUp={t => setCreating({ follow_up_of: t.id, title: `Follow up: ${t.title}`, assigned_to: t.assigned_to, lead_id: t.lead_id, account_id: t.account_id, meeting_id: t.meeting_id, section: t.section })} />
       )}
     </div>

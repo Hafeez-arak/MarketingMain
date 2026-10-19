@@ -46,6 +46,7 @@ import { BrandBrain } from './pages/settings/BrandBrain'
 import { CreativeStudio } from './pages/studio/index'
 import { HomePage } from './pages/home/index'
 import { TasksPage } from './pages/tasks/index'
+import { SalesTasksRedirect } from './pages/leads/SalesTasks'
 import { fromLegacy, canVisit } from './lib/modules'
 
 // Loads the account's saved webhook URLs into state.webhooks on startup, so
@@ -117,6 +118,9 @@ function ProtectedApp() {
           <Routes>
             <Route path="/leads" element={<SalesApp key={activeWorkspaceId || 'none'} />} />
             <Route path="/research" element={<SalesResearch key={activeWorkspaceId || 'none'} />} />
+            {/* A task link from the morning email or the bell (/tasks?id=…)
+                opens it in the sales app's own Tasks view. */}
+            <Route path="/tasks"    element={<SalesTasksRedirect />} />
             <Route path="*"      element={<Navigate to="/leads" replace />} />
           </Routes>
         </ErrorBoundary>
