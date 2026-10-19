@@ -18,6 +18,8 @@
 // Pure. No timestamps, no ids — a prompt builder is exactly where a "today is"
 // line gets added without thinking, and that silently invalidates the cache.
 
+import { sweepBlock } from './sourceSweep.js'
+
 /**
  * The two or three lines every lens needs about who it is researching for.
  *
@@ -148,16 +150,22 @@ function standing(agenda = []) {
  * engine ranked first — and search engines rank giga-project headlines first.
  *
  * The list is data (research_agenda rows, kind='source'), never written here:
- * localLanguage() above explains why this file names no website. Tier 1 is
- * read every run; the rest as searches allow. Hashtags and keywords on the
- * list are searched as written; the lens also builds its own (see social()).
+ * localLanguage() above explains why this file names no website. Hashtags and
+ * keywords on the list are searched as written; the lens also builds its own
+ * (see social()).
+ *
+ * Since 2026-10-19 the list normally arrives SEARCHED: the code checks every
+ * source before the lens starts (sourceSweep.js) and the lens gets the
+ * results. This block is the fallback for a run where the sweep could not
+ * run at all — no web provider, or the check table unreadable.
  */
 const SOURCE_LABEL = {
   website: 'site', news: 'news site', tender_portal: 'tender portal', exchange: 'stock-exchange announcements',
   government: 'government site', instagram: 'Instagram account', linkedin: 'LinkedIn page', x: 'X account',
   hashtag: 'hashtag', keyword: 'search phrase',
 }
-export function sourcesBlock(sources = [], { share = 40 } = {}) {
+export function sourcesBlock(sources = [], { share = 40, sweep = [] } = {}) {
+  if ((sweep || []).length) return sweepBlock(sweep)
   const rows = (sources || []).filter(r => r && r.subject)
   if (!rows.length) return ''
   const sorted = [...rows].sort((a, b) => (a.tier ?? 9) - (b.tier ?? 9))
@@ -169,7 +177,7 @@ export function sourcesBlock(sources = [], { share = 40 } = {}) {
     '- an Instagram or LinkedIn account → search site:instagram.com/<handle> or',
     '  site:linkedin.com <name> for its recent posts, and read the posts that name a project;',
     '- a hashtag or phrase → search it as written, on the open web and on instagram.com / linkedin.com.',
-    'Tier 1 every run; tier 2 and 3 when searches allow. If a source turned up nothing useful,',
+    'Tier 1 first, then tier 2, then tier 3 as searches allow. If a source turned up nothing useful,',
     'say so in one line in the detail of your closest finding — that is how the list gets pruned.',
     ...sorted.slice(0, 30).map(r =>
       `- [tier ${r.tier ?? 2}] ${SOURCE_LABEL[r.source_type] || 'source'}: ${r.subject}${r.why ? ` — ${r.why}` : ''}`),
@@ -335,7 +343,7 @@ const CLOSING = [
  * that is a tender; for a local service it is a new neighbourhood, a rival
  * closing, or an event needing suppliers. Same question, different target.
  */
-export function openingsPrompt(brand, { motion, agenda = [], language = '', intel = '', sources = [], fit = '' }) {
+export function openingsPrompt(brand, { motion, agenda = [], language = '', intel = '', sources = [], sweep = [], fit = '' }) {
   // Ranked, not listed. The previous version gave three equal bullets and the
   // model spread its searches evenly across them; design-stage projects are
   // worth more than everything else here combined, because they are the only
@@ -418,7 +426,7 @@ export function openingsPrompt(brand, { motion, agenda = [], language = '', inte
     'them with its own searches. Spend yours on projects, and on the procurement or budget',
     'cycles that decide when buyers can commit.',
     sizing(fit),
-    sourcesBlock(sources),
+    sourcesBlock(sources, { sweep }),
     social(language),
     SOURCE_QUALITY,
     known(intel),
@@ -529,7 +537,7 @@ export function eventsPrompt(brand, { motion, competitors = [], agenda = [], lan
  * packages" would quietly stop looking at anything large, and the company asked
  * for the opposite.
  */
-export function targetsPrompt(brand, { icp = '', mix = { core: 50, broader: 50 }, searches = 8, agenda = [], language = '', intel = '', sources = [] }) {
+export function targetsPrompt(brand, { icp = '', mix = { core: 50, broader: 50 }, searches = 8, agenda = [], language = '', intel = '', sources = [], sweep = [] }) {
   const coreSearches = Math.max(1, Math.round((searches * (mix.core ?? 50)) / 100))
   const broaderSearches = Math.max(0, searches - coreSearches)
   return [
@@ -596,7 +604,7 @@ export function targetsPrompt(brand, { icp = '', mix = { core: 50, broader: 50 }
     '- Never invent a date, a value or a contact.',
     '- Plan your searches before you spend them and never repeat one. If you run out, report what you',
     '  already confirmed.',
-    sourcesBlock(sources),
+    sourcesBlock(sources, { sweep }),
     social(language),
     SOURCE_QUALITY,
     known(intel),

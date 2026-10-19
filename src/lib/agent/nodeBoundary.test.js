@@ -80,6 +80,8 @@ describe('the agent runs in Node, not in a bundle', () => {
     'src/lib/agent/lensPrompts.js',
     'src/lib/agent/web.js',
     'src/lib/agent/intel.js',
+    // The source sweep (2026-10-19): pure planning, and the half that calls out.
+    'src/lib/agent/sourceSweep.js',
     // Reached by ownChannels.js and _investigate.js for LIVE_PLATFORMS. It is a
     // browser-utility module by location and a pure one by content — zero
     // imports — so it loads under Node, and this line is what keeps it that
@@ -97,6 +99,7 @@ describe('the agent runs in Node, not in a bundle', () => {
     'api/agent/_lenses.js',
     'api/agent/_web.js',
     'api/agent/_intel.js',
+    'api/agent/_sweep.js',
     'src/lib/brandTime.js',
     'src/lib/email/contacts.js',
     'src/lib/email/render.js',

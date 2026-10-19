@@ -1,11 +1,17 @@
 # Where the research looks for projects (Arak)
 
-Written 2026-10-17. This is the starting list now loaded on **Research → Where to look**. The list on that page is the real one: add, pause, delete or change how often a source is read there. This file only records why each one was chosen.
+Written 2026-10-17. This is the starting list now loaded on **Research → Where to look**. The list on that page is the real one: add, pause, delete or change how closely a source is read there. This file only records why each one was chosen.
 
 ## How the agent uses the list
 
-- The two lenses that hunt projects (Projects and Sales targets) spend about 40% of their searches on this list before searching openly.
-- "Every run" sources are read every week. "Most runs" and "when there is room" are read as searches allow.
+- **Since 2026-10-19 every active source is checked every run, in code, before the two project lenses (Projects and Sales targets) start.** The results are handed to both lenses as leads to open and confirm; they then search openly for what the list does not reach.
+- The setting on each source is how closely it is read, not how often:
+  - **read closely**: its front page is read (for a site) and it is searched twice, 8 results kept
+  - **read**: one search, 5 results
+  - **skim**: one search, 3 results
+- Each source on the page shows when it was last checked, how many results came back, and when it last led to a project. A source that never leads anywhere can be paused on that evidence.
+- What the searches can reach: news sites and project sites come back well. Instagram and LinkedIn are only partly indexed by search engines, so those accounts return some recent posts, not all. Paywalled sites (MEED) give headlines and the first lines; that usually names the project and the contractor.
+- If the check cannot run at all (no search provider), the lenses fall back to the old way: the list as names, tier 1 first.
 - The agent also builds its own hashtags and keywords each run from our segments, region and project stages, in Arabic and English, and searches Instagram and LinkedIn with them. None of those are written into the system.
 - After every run, Instagram or LinkedIn accounts and sites that led to a real project finding are **suggested** for the list. They wait for someone to accept them on the page.
 
@@ -18,7 +24,7 @@ Written 2026-10-17. This is the starting list now loaded on **Research → Where
 
 ## The list
 
-### Every run (tier 1)
+### Read closely (tier 1)
 
 | Type | Source | Why it's here |
 |---|---|---|
@@ -30,8 +36,10 @@ Written 2026-10-17. This is the starting list now loaded on **Research → Where
 | Instagram | @saudiprojects | مشاريع السعودية: project progress across the Kingdom, many in Riyadh. |
 | Search phrase | ترسية عقد تشطيب الرياض | "Contract award, finishing works, Riyadh". Finds fit-out jobs that never reach the English press. |
 | Hashtag | #مشاريع_الرياض | "Riyadh projects": used by trackers, developers and contractors. |
+| News | meed.com | Moved up 2026-10-19 at the owner's request. Contract awards by name; paywalled, but the headline and first lines are public. |
+| LinkedIn | linkedin.com/company/saudi-projects | Added 2026-10-19 at the owner's request. مشاريع السعودية: ~898k followers, Saudi project news. LinkedIn posts are only partly searchable. |
 
-### Most runs (tier 2)
+### Read (tier 2)
 
 | Type | Source | Why it's here |
 |---|---|---|
@@ -53,11 +61,10 @@ Written 2026-10-17. This is the starting list now loaded on **Research → Where
 | Hashtag | #مشاريع_السعودية | "Saudi projects": wider than Riyadh. |
 | Government | muqawil.org | Saudi Contractors Authority: monthly award reports, contractor classifications. |
 
-### When there is room (tier 3)
+### Skim (tier 3)
 
 | Type | Source | Why it's here |
 |---|---|---|
-| News | meed.com | Big programmes and their packages. Mostly paywalled, so context only. |
 | News | zawya.com | Projects and company filings. |
 | News | aleqt.com | Al Eqtisadiah, Arabic business daily. |
 | Government | rcrc.gov.sa | Royal Commission for Riyadh City programmes. |

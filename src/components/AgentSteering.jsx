@@ -197,7 +197,29 @@ const PLACEHOLDER = {
   keyword: 'e.g. ترسية عقد تشطيب الرياض',
 }
 
-/** One source: what it is, what it carries, how often it is read. */
+const shortDate = iso => new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'Asia/Riyadh' })
+
+/**
+ * What the sweep made of a source: when it was last checked, what came back,
+ * and when it last led to a project finding. Says "not checked yet" rather
+ * than nothing, so a source the run never reached can be told apart from one
+ * that came back empty — the exact thing nobody could tell before.
+ */
+function SourceRecordLine({ record }) {
+  if (!record?.checkedAt) {
+    return <div className="mt-0.5 text-xs text-text-tertiary">Not checked yet. The next run checks it.</div>
+  }
+  if (record.status === 'failed') {
+    return <div className="mt-0.5 text-xs text-amber-700">Could not be checked on {shortDate(record.checkedAt)}.</div>
+  }
+  const parts = [`Checked ${shortDate(record.checkedAt)}`,
+    record.results ? `${record.results} result${record.results === 1 ? '' : 's'}` : 'nothing came back']
+  if (record.lastHitAt) parts.push(`led to a project ${shortDate(record.lastHitAt)}`)
+  else if (record.runs >= 3) parts.push(`no project from it in ${record.runs} checks`)
+  return <div className="mt-0.5 text-xs text-text-tertiary">{parts.join(' · ')}</div>
+}
+
+/** One source: what it is, what it carries, how closely it is read, and what it has given. */
 function SourceRow({ row, accessToken, onChanged }) {
   const [editing, setEditing] = useState(false)
   const [why, setWhy] = useState(row.why || '')
@@ -222,13 +244,16 @@ function SourceRow({ row, accessToken, onChanged }) {
         ) : row.why ? (
           <div className="mt-0.5 text-xs text-text-secondary" dir="auto">{row.why}</div>
         ) : null}
+        {row.status === 'active' ? <SourceRecordLine record={row.record} /> : null}
         <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-text-tertiary">
-          <select value={row.tier || 2} aria-label="How often it is read"
+          {/* Every active source is checked every run (sourceSweep.js); the
+              tier is how closely, no longer how often. */}
+          <select value={row.tier || 2} aria-label="How closely it is read"
                   onChange={e => act(() => updateAgendaRow(accessToken, row.id, { tier: e.target.value }))}
                   className="bg-transparent text-xs text-text-tertiary hover:text-text">
-            <option value={1}>every run</option>
-            <option value={2}>most runs</option>
-            <option value={3}>when there is room</option>
+            <option value={1}>read closely</option>
+            <option value={2}>read</option>
+            <option value={3}>skim</option>
           </select>
           <span>{row.status === 'retired' ? 'paused' : row.status}</span>
           {row.created_by === 'agent' ? <span className="text-text-secondary">suggested by the agent</span> : null}
@@ -250,7 +275,8 @@ function SourceRow({ row, accessToken, onChanged }) {
 
 /**
  * "Where to look" — the sites, accounts, hashtags and phrases the project
- * lenses read before searching openly (2026-10-17). Same table, same RLS and
+ * lenses read before searching openly (2026-10-17). Since 2026-10-19 the code
+ * checks every active one each run, before the lenses start (sourceSweep.js). Same table, same RLS and
  * the same accept/pause/delete as the standing questions beside it; see
  * sourcesBlock() in src/lib/agent/lensPrompts.js for how a run uses them.
  */
@@ -280,7 +306,7 @@ function SourcesCard({ sources, loaded, error, accessToken, workspaceId, onChang
         title={<FoldTitle open={open} onToggle={toggle} count={loaded ? active : null}>Where to look</FoldTitle>}
         subtitle={!loaded ? 'Loading the sources…'
           : error ? 'The sources could not be loaded. Nothing has been lost.'
-            : `${active} source${active === 1 ? '' : 's'} read before the agent searches openly for projects. It also builds its own hashtags and keywords each run.`}
+            : `${active} source${active === 1 ? '' : 's'}, all checked every run before the agent searches openly for projects. It also builds its own hashtags and keywords each run.`}
       />
       {open ? (
       <div className="px-5 py-4 [&>*:first-child]:mt-0">

@@ -1,5 +1,6 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
 import { defaultWebhookUrl } from './n8nWebhooks'
+import { sourceRecord } from './agent/sourceSweep.js'
 
 // ─── The steering wheel ────────────────────────────────────────────────────
 // AGENT.md §5b: "everything it watches, asks and believes is editable by a
@@ -27,20 +28,43 @@ async function call(url, accessToken, init = {}) {
   }
 }
 
-/** Everything on the agenda for one workspace — questions and competitors. */
-export async function fetchAgenda(workspaceId, accessToken) {
-  const { data, error } = await call(
-    `${SUPABASE_URL}/rest/v1/research_agenda?workspace_id=eq.${workspaceId}` +
-    `&order=kind.asc,subject.asc&select=*`,
+/**
+ * Each source's record from the sweep (research_source_checks), by source id.
+ * The results themselves stay behind: the panel needs counts and dates. A
+ * failed read gives an empty map, so the list still shows and each source
+ * reads "not checked yet" rather than the panel failing.
+ */
+async function fetchSourceRecords(workspaceId, accessToken) {
+  const { data } = await call(
+    `${SUPABASE_URL}/rest/v1/research_source_checks?workspace_id=eq.${workspaceId}` +
+    '&select=source_id,status,result_count,findings,error,checked_at&order=checked_at.desc&limit=2000',
     accessToken,
   )
+  const bySource = new Map()
+  for (const r of data || []) {
+    if (!bySource.has(r.source_id)) bySource.set(r.source_id, [])
+    bySource.get(r.source_id).push(r)
+  }
+  return new Map([...bySource].map(([id, rows]) => [id, sourceRecord(rows)]))
+}
+
+/** Everything on the agenda for one workspace — questions and competitors. */
+export async function fetchAgenda(workspaceId, accessToken) {
+  const [{ data, error }, records] = await Promise.all([
+    call(
+      `${SUPABASE_URL}/rest/v1/research_agenda?workspace_id=eq.${workspaceId}` +
+      `&order=kind.asc,subject.asc&select=*`,
+      accessToken,
+    ),
+    fetchSourceRecords(workspaceId, accessToken),
+  ])
   const rows = data || []
   return {
     questions: rows.filter(r => r.kind === 'question'),
     competitors: rows.filter(r => r.kind === 'competitor'),
     // The "Where to look" list (2026-10-17): sites, accounts, hashtags and
     // phrases the project lenses read before searching openly.
-    sources: rows.filter(r => r.kind === 'source'),
+    sources: rows.filter(r => r.kind === 'source').map(r => ({ ...r, record: records.get(r.id) || null })),
     // Set when the read failed, so "nothing is being watched" is only ever
     // said about an agenda that was actually read.
     error: error || '',
