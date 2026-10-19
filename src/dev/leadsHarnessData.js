@@ -5,8 +5,10 @@
 
 import { buildLeadCard, normaliseLeadCard, afterCallFields } from '../lib/sales/leadCard'
 import { manualLead, trackFields } from '../lib/leads/pipeline'
+import runsFixture from './runsFixture.json'
 
 export const WS = '00000000-0000-0000-0000-0000000000dd'
+
 const mode = new URLSearchParams(window.location.search).get('mode') || ''
 const iso = (d, h) => `2026-10-0${d}T${String(h).padStart(2, '0')}:00:00Z`
 const as = new URLSearchParams(window.location.search).get('as') || 'admin'
@@ -127,6 +129,10 @@ window.fetch = async (input, init = {}) => {
   if (mode === 'hang') return new Promise(() => {})
   if (mode === 'fail') return Promise.reject(new TypeError('Failed to fetch'))
   if (url.includes('/rest/v1/leads')) return restLeads(url)
+  // The sales app's Research page: the committed research fixture, and an
+  // empty tracker (the page then shows this run's own openings and events).
+  if (url.includes('/rest/v1/research_runs')) return json(runsFixture)
+  if (url.includes('/rest/v1/research_')) return json([])
   // Read and unread (2026-10-19): everything before 6 Oct counts as read.
   if (url.includes('/rest/v1/rpc/lead_read_before')) return json('2026-10-06T00:00:00Z')
   if (url.includes('/rest/v1/lead_reads')) {

@@ -28,6 +28,7 @@ import { BusinessView }            from './pages/insights/BusinessView'
 import AgentPage                  from './pages/agent/index'
 import LeadAgent                  from './pages/leads/index'
 import SalesApp                   from './pages/leads/SalesApp'
+import SalesResearch              from './pages/leads/SalesResearch'
 import Targets                    from './pages/sales/Targets'
 import AgentBrief                 from './pages/admin/AgentBrief'
 import { MediaLibrary }            from './pages/media/index'
@@ -91,15 +92,16 @@ function NotFound() {
 function ProtectedApp() {
   const { activeWorkspaceId, isSales } = useAuth()
   const { pathname } = useLocation()
-  // The sales team: Leads and nothing else, whatever address they open. The
-  // marketing shell (and its webhook loader, assistant and publish watch)
-  // never mounts for them. See pages/leads/SalesApp.jsx.
+  // The sales team: Leads and Research (read only), and any other address
+  // lands on Leads. The marketing shell (and its webhook loader, assistant
+  // and publish watch) never mounts for them. See pages/leads/SalesShell.jsx.
   if (isSales) {
     return (
       <RequireAuth>
         <ErrorBoundary key={pathname}>
           <Routes>
             <Route path="/leads" element={<SalesApp key={activeWorkspaceId || 'none'} />} />
+            <Route path="/research" element={<SalesResearch key={activeWorkspaceId || 'none'} />} />
             <Route path="*"      element={<Navigate to="/leads" replace />} />
           </Routes>
         </ErrorBoundary>
