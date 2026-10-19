@@ -24,7 +24,7 @@
 import {
   targetsOf, controlKpis, controlDecisions, repRows, keyAccounts, topOpportunities,
   marketingNumbers, leadsToRoute, routeLead, dailyAlertItems, dailyAlertEmail, weeklyLines, weeklyEmail,
-  leadWho, LOOKBACK_DAYS,
+  leadWho, LOOKBACK_DAYS, redWhy,
 } from '../../src/lib/control/panel.js'
 import { REGIONS } from '../../src/lib/control/region.js'
 import { assignLead } from './_assign.js'
@@ -109,6 +109,9 @@ export async function gatherControl(deps, workspaceId, now = deps.now()) {
   // "projects at risk" is the projects Technical shows red, so the CEO's
   // number, his daily alert and the Technical page agree.
   const projectFlags = await deps.db(`project_flags?${ws(workspaceId)}&select=odoo_project_id,name,level,reasons,red_since,alerted_at`).catch(() => null)
+  const projectManagers = Array.isArray(projectFlags) && projectFlags.some(p => p.level === 'red')
+    ? await deps.db('rpc/project_managers', { method: 'POST', body: { ws: workspaceId } }).catch(() => []) || []
+    : []
   if (odoo && Array.isArray(projectFlags) && odoo.projects_at_risk !== null) odoo.projects_at_risk = projectFlags.filter(p => p.level === 'red').length
 
   let planned = 0
@@ -117,7 +120,7 @@ export async function gatherControl(deps, workspaceId, now = deps.now()) {
     planned = ideas.length
   }
   return {
-    now, targets: targets || null, rules, leads, team, opportunities, outcomes, odoo, odooStatus: mirror.status || null, projectFlags: projectFlags || [],
+    now, targets: targets || null, rules, leads, team, opportunities, outcomes, odoo, odooStatus: mirror.status || null, projectFlags: projectFlags || [], projectManagers,
     // Key accounts with Odoo's live last order and open deals where the
     // customer's name matches; the October analysis's figures otherwise.
     accounts: odoo ? accounts.map(a => withOdoo(a, odoo)) : accounts,
@@ -275,6 +278,34 @@ export async function remind(deps, { workspaceId, body, user }) {
     link: '/leads',
   }])
   return { reminded: lead.assigned_to }
+}
+
+/**
+ * The CEO's "Remind" on a red project: a task for its project manager (the
+ * Tasks system then reminds and chases), due tomorrow, at most one a day.
+ */
+export async function remindProject(deps, { workspaceId, body, user }) {
+  const pid = Number(body.project_id)
+  if (!Number.isInteger(pid) || pid <= 0) return { status: 400, error: 'Which project?' }
+  const [flag] = await deps.db(`project_flags?${ws(workspaceId)}&odoo_project_id=eq.${pid}&select=name,level,reasons`) || []
+  if (!flag) return { status: 404, error: 'That project is not watched here.' }
+  const managers = await deps.db('rpc/project_managers', { method: 'POST', body: { ws: workspaceId } }) || []
+  const pm = managers.find(m => Number(m.odoo_project_id) === pid)
+  if (!pm?.user_id) return { status: 400, error: 'Its project manager in Odoo has no login here yet.' }
+  const why = redWhy(flag.reasons || [])
+  const now = deps.now()
+  const day = new Date(now.getTime() + 3 * 3_600_000).toISOString().slice(0, 10)
+  const [made] = await deps.db('tasks?on_conflict=workspace_id,auto_key', {
+    method: 'POST', prefer: 'resolution=ignore-duplicates,return=representation',
+    body: [{
+      workspace_id: workspaceId, title: `Get ${flag.name} back on track: ${why.en}`,
+      details: `Asked from the CEO page. ${why.ar}\nSay what is being done in this week's update on the project.`,
+      assigned_to: pm.user_id, created_by: isUuid(user?.id) ? user.id : null, updated_by: isUuid(user?.id) ? user.id : null,
+      due_at: new Date(now.getTime() + DAY).toISOString(), priority: 'high', section: 'technical', status: 'todo',
+      odoo_project_id: pid, auto_key: `ceo_remind:${pid}:${day}`,
+    }],
+  }) || []
+  return { reminded: pm.user_id, task: made?.id || null, already: !made }
 }
 
 /** A key account was spoken to today. */

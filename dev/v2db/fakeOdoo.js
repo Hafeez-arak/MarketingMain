@@ -134,7 +134,7 @@ export function fakeOdooData() {
     'Delivery to site', 'Installation & commissioning', 'Handover', 'Collection & maintenance',
   ].map((name, i) => ({ id: 11 + i, name, sequence: i + 1, fold: false, write_date: at(300) }))
   const stage = i => [st[i].id, st[i].name]
-  return {
+  const data = {
     'res.users': [
       { id: 2, name: 'Lead Agent', login: FAKE.login, email: FAKE.login, active: true, write_date: at(300) },
       { id: 7, name: 'Omar Rep', login: 'rep.omar@arak.test', email: 'rep.omar@arak.test', active: true, write_date: at(300) },
@@ -216,7 +216,26 @@ export function fakeOdooData() {
       { id: 901, name: 'Week 41', project_id: [401, 'Najd clinic lighting'], status: 'on_track', date: day(3), user_id: sara, progress: 55, write_date: at(3) },
       { id: 902, name: 'Week 40', project_id: [402, 'Crescent tower phase 1'], status: 'at_risk', date: day(9), user_id: khalid, progress: 30, write_date: at(9) },
     ],
+    // Each stage's planned date, as a milestone named after the stage.
+    'project.milestone': [
+      { id: 1001, name: 'Awarded', project_id: [401, 'Najd clinic lighting'], deadline: day(28), is_reached: true, reached_date: day(29), write_date: at(29) },
+      { id: 1002, name: 'Production & shipping', project_id: [401, 'Najd clinic lighting'], deadline: day(-25), is_reached: false, reached_date: false, write_date: at(20) },
+      { id: 1003, name: 'Handover', project_id: [401, 'Najd clinic lighting'], deadline: day(-40), is_reached: false, reached_date: false, write_date: at(20) },
+      // Crescent: client review was planned to end six days ago.
+      { id: 1004, name: 'Client review', project_id: [402, 'Crescent tower phase 1'], deadline: day(6), is_reached: false, reached_date: false, write_date: at(25) },
+      // Palm: the technical submittal is due in two days.
+      { id: 1005, name: 'Technical submittal', project_id: [403, 'Palm Tower parking'], deadline: day(-2), is_reached: false, reached_date: false, write_date: at(5) },
+    ],
+    'ir.attachment': [
+      { id: 1101, name: 'Lighting layout rev C.pdf', mimetype: 'application/pdf', res_model: 'project.project', res_id: 402, create_date: at(30), write_date: at(30) },
+      { id: 1102, name: 'Consultant comments round 1.pdf', mimetype: 'application/pdf', res_model: 'project.task', res_id: 802, create_date: at(4), write_date: at(4) },
+      { id: 1103, name: 'Fixture schedule.xlsx', mimetype: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', res_model: 'project.project', res_id: 401, create_date: at(20), write_date: at(20) },
+    ],
   }
+  // The consultant, as a field Arak would add in Odoo Studio (Odoo has none).
+  const consultant = { 401: 'Example Health Engineering', 402: 'Example Design Consultants', 403: 'Example MEP Partners', 404: 'Example Hospitality Design' }
+  data['project.project'] = data['project.project'].map(pr => ({ ...pr, x_studio_consultant: consultant[pr.id] || false }))
+  return data
 }
 
 // ── As a server: node dev/v2db/fakeOdoo.js [port] ──

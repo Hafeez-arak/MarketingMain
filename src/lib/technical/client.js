@@ -1,6 +1,7 @@
 import { supabase } from '../supabaseClient'
 import { readModels, readSyncState } from '../odooMirror'
-import { projectBoard, settingsOf, STAGE_KEYS } from './projects'
+import { projectBoard, settingsOf, STAGE_KEYS, PROJECT_MODELS } from './projects'
+import { financeFacts } from '../finance/finance'
 
 // ─── Technical: reads and writes from the browser (v2) ─────────────────────
 // 2026-10-19. The database decides who sees which project (can_see_project)
@@ -8,14 +9,17 @@ import { projectBoard, settingsOf, STAGE_KEYS } from './projects'
 // read throws on failure, so the screens say "could not load", never "no
 // projects".
 
-const MODELS = ['project.project', 'project.project.stage', 'project.task', 'project.update', 'res.users']
+const MODELS = [...PROJECT_MODELS, 'res.users']
+// Contract value, % collected and margin on the project page: the database
+// returns these only to the CEO and Finance, so others simply get none.
+const MONEY = ['sale.order', 'account.move', 'account.analytic.line']
 
 const must = ({ data, error }) => { if (error) throw new Error(error.message); return data }
 
 /** Everything the projects board needs, and the board itself. */
 export async function loadTechnical(workspaceId) {
   const [records, sync, log, submittals, updates, settingsRow, people, myOdooUid] = await Promise.all([
-    readModels(workspaceId, MODELS),
+    readModels(workspaceId, [...MODELS, ...MONEY]),
     readSyncState(workspaceId),
     supabase.from('project_stage_log').select('*').eq('workspace_id', workspaceId).order('entered_at').then(must),
     supabase.from('project_submittals').select('*').eq('workspace_id', workspaceId).order('round').then(must),
@@ -30,7 +34,11 @@ export async function loadTechnical(workspaceId) {
   const named = (updates || []).map(u => ({ ...u, written_by_name: names[u.written_by] || '' }))
   const now = Date.now()
   const board = projectBoard({ records, log: log || [], submittals: submittals || [], updates: named, settings, now })
-  return { records, sync, log: log || [], submittals: submittals || [], updates: named, settings, settingsRow, board, names, now, myOdooUid: myOdooUid ?? null }
+  const moneyKnown = MONEY.some(m => (records[m] || []).length)
+  const money = moneyKnown
+    ? Object.fromEntries(financeFacts(records, { now, models: sync?.models || [], url: sync?.odoo_url || '' }).projects.map(p => [p.id, p]))
+    : {}
+  return { records, sync, log: log || [], submittals: submittals || [], updates: named, settings, settingsRow, board, names, now, myOdooUid: myOdooUid ?? null, money, moneyKnown }
 }
 
 /** The Campai follow-up tasks on one project (the database shows only the ones you may see). */
@@ -63,9 +71,10 @@ export async function deleteSubmittal(workspaceId, id) {
 }
 
 /** The project manager's weekly update. */
-export async function writeUpdate(workspaceId, me, { projectId, status, done = '', next = '', blockers = '' }) {
+export async function writeUpdate(workspaceId, me, { projectId, status, done = '', next = '', blockers = '', expected_delivery = '' }) {
   const { error } = await supabase.from('project_updates').insert({
     workspace_id: workspaceId, odoo_project_id: projectId, status, done, next, blockers, written_by: me,
+    expected_delivery: expected_delivery || null,
   })
   return { error: error ? friendly(error) : null }
 }

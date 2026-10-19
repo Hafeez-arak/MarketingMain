@@ -25,6 +25,7 @@ export const saveTargets = (ws, token, targets) => call('targets_save', ws, toke
 export const saveRouting = (ws, token, rules) => call('routing_save', ws, token, { rules })
 export const assignLead = (ws, token, leadId, userId) => call('assign', ws, token, { lead_id: leadId, user_id: userId })
 export const remindOwner = (ws, token, leadId) => call('remind', ws, token, { lead_id: leadId })
+export const remindProject = (ws, token, projectId) => call('remind_project', ws, token, { project_id: projectId })
 export const accountContacted = (ws, token, accountId) => call('account_contacted', ws, token, { account_id: accountId })
 export const sendToSales = (ws, token, opportunityId, userId) => call('send_to_sales', ws, token, { opportunity_id: opportunityId, user_id: userId })
 export const markLead = (ws, token, leadId, what, extra = {}) => call('lead_mark', ws, token, { lead_id: leadId, what, ...extra })

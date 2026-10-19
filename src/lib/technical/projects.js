@@ -34,6 +34,13 @@ export const STAGES = [
   { key: 'collection',     days: 60, en: 'Collection & maintenance',     ar: 'التحصيل والصيانة' },
 ]
 export const STAGE_KEYS = STAGES.map(s => s.key)
+
+/**
+ * The mirrored Odoo models the board is built from. The monitor round
+ * (api/leads/_technical.js) and the pages (client.js) both read exactly
+ * these, so the server and the screen never judge a project differently.
+ */
+export const PROJECT_MODELS = ['project.project', 'project.project.stage', 'project.task', 'project.update', 'project.milestone', 'ir.attachment']
 export const stageIndex = key => STAGE_KEYS.indexOf(key)
 export const stageLabel = (key, lang = 'en') => STAGES.find(s => s.key === key)?.[lang] || ''
 
@@ -89,18 +96,43 @@ const STAGE_WORDS = [
  * by their order. A stage that matches nothing is left out (the project
  * shows "stage not one of the nine").
  */
+/** Which of the nine a name says (an Odoo stage, a milestone), or null. */
+export function stageOfName(name) {
+  const n = String(name || '').toLowerCase()
+  return STAGE_WORDS.find(([, re]) => re.test(n))?.[0] || null
+}
+
 export function stageMap(odooStages = []) {
   const map = {}
   const sorted = [...odooStages].sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0) || a.id - b.id)
   for (const s of sorted) {
-    const name = String(s.name || '').toLowerCase()
-    const hit = STAGE_WORDS.find(([, re]) => re.test(name))
-    if (hit) map[s.id] = hit[0]
+    const hit = stageOfName(s.name)
+    if (hit) map[s.id] = hit
   }
   if (!Object.keys(map).length && sorted.length === STAGES.length) {
     sorted.forEach((s, i) => { map[s.id] = STAGE_KEYS[i] })
   }
   return map
+}
+
+/**
+ * The CEO's requirement 13: each stage has a PLANNED DATE. In Odoo that is a
+ * project milestone (project.milestone) named after the stage, with its
+ * deadline. Returns { stageKey: { deadline, reached, name } }; when a stage
+ * has more than one milestone, the earliest open one counts.
+ */
+export function stagePlan(milestones = []) {
+  const plan = {}
+  for (const m of milestones) {
+    const key = stageOfName(m.name)
+    if (!key || !m.deadline) continue
+    const cur = plan[key]
+    const reached = Boolean(m.is_reached)
+    if (!cur || (cur.reached && !reached) || (cur.reached === reached && m.deadline < cur.deadline)) {
+      plan[key] = { deadline: m.deadline, reached, reachedOn: m.reached_date || null, name: m.name }
+    }
+  }
+  return plan
 }
 
 const m2oId = v => (Array.isArray(v) ? v[0] : null)
@@ -168,15 +200,23 @@ export function latestUpdate(campai = [], odoo = []) {
  *   stageKey  one of STAGE_KEYS, or null
  *   enteredAt when it entered that stage (ms or ISO)
  */
-export function projectHealth({ project = {}, stageKey = null, enteredAt = null, update = null, submittals = [], settings = DEFAULT_SETTINGS, now = Date.now() }) {
+export function projectHealth({ project = {}, stageKey = null, enteredAt = null, update = null, submittals = [], settings = DEFAULT_SETTINGS, plan = {}, expected = null, now = Date.now() }) {
   const s = settings.stage_days ? settings : settingsOf(settings)
   const reasons = []
   const entered = ms(enteredAt)
   const inStage = entered == null ? null : days(entered, now)
   const allowed = stageKey ? s.stage_days[stageKey] : null
+  const planned = stageKey ? plan[stageKey] : null
 
   if (!stageKey) reasons.push({ kind: 'no_stage', level: 'amber' })
-  else if (inStage != null && allowed) {
+  else if (planned && !planned.reached) {
+    // The stage's planned date (an Odoo milestone) decides; the days limit
+    // is only for stages Odoo gives no date.
+    const due = odooTime(planned.deadline)
+    const over = days(due, now)
+    if (over >= 1) reasons.push({ kind: 'stage_late', level: 'red', days: over, stage: stageKey, planned: planned.deadline })
+    else if (over >= -3) reasons.push({ kind: 'stage_near', level: 'amber', days: Math.max(0, -over), planned: planned.deadline })
+  } else if (inStage != null && allowed) {
     if (inStage > allowed) reasons.push({ kind: 'stage_late', level: 'red', days: inStage - allowed, stage: stageKey })
     else if (inStage >= Math.ceil(allowed * 0.75)) reasons.push({ kind: 'stage_near', level: 'amber', days: allowed - inStage })
   }
@@ -185,6 +225,10 @@ export function projectHealth({ project = {}, stageKey = null, enteredAt = null,
   if (end != null && now - end >= DAY && (!stageKey || stageIndex(stageKey) < stageIndex('handover'))) {
     reasons.push({ kind: 'past_end', level: 'red', days: days(end, now) })
   }
+
+  // The project manager expects to deliver later than Odoo's planned date.
+  const exp = odooTime(expected)
+  if (exp != null && end != null && exp - end >= DAY) reasons.push({ kind: 'delivery_slip', level: 'amber', days: days(end, exp) })
 
   const status = update?.status || project.last_update_status || null
   if (status === 'off_track') reasons.push({ kind: 'off_track', level: 'red' })
@@ -214,6 +258,9 @@ export function projectBoard({ records = {}, log = [], submittals = [], updates 
   const campaiUpdates = groupBy(updates, u => Number(u.odoo_project_id))
   const subs = groupBy(submittals, r => Number(r.odoo_project_id))
   const tasks = groupBy((records['project.task'] || []).filter(t => t.active !== false), t => m2oId(t.project_id))
+  const milestones = groupBy(records['project.milestone'] || [], m => m2oId(m.project_id))
+  const taskProject = new Map((records['project.task'] || []).map(t => [t.id, m2oId(t.project_id)]))
+  const files = groupBy(records['ir.attachment'] || [], a => (a.res_model === 'project.project' ? a.res_id : a.res_model === 'project.task' ? taskProject.get(a.res_id) : null))
 
   return (records['project.project'] || [])
     .filter(p => p.active !== false)
@@ -223,13 +270,21 @@ export function projectBoard({ records = {}, log = [], submittals = [], updates 
       const entry = openLog.get(p.id)
       const enteredAt = entry && entry.odoo_stage_id === stageId ? entry.entered_at : (odooTime(p.date_last_stage_update) ?? null)
       const update = latestUpdate(campaiUpdates.get(p.id) || [], odooUpdates.get(p.id) || [])
+      // The newest update written in Campai carries the issue, the next step
+      // and the expected delivery (Odoo's own updates have no such fields).
+      const mine = (campaiUpdates.get(p.id) || []).slice().sort((a, b) => String(b.written_at).localeCompare(String(a.written_at)))[0] || null
+      const plan = stagePlan(milestones.get(p.id) || [])
       const items = submittalItems(subs.get(p.id) || [], now)
-      const health = projectHealth({ project: p, stageKey, enteredAt, update, submittals: items, settings: s, now })
+      const health = projectHealth({ project: p, stageKey, enteredAt, update, submittals: items, settings: s, plan, expected: mine?.expected_delivery || null, now })
       const open = (tasks.get(p.id) || []).filter(t => !['1_done', '1_canceled'].includes(t.state))
       return {
         id: p.id, name: p.name, customer: m2oName(p.partner_id), pmOdooId: m2oId(p.user_id), pm: m2oName(p.user_id),
         stageKey, stageName: m2oName(p.stage_id), enteredAt, endDate: p.date || null, startDate: p.date_start || null,
-        update, submittals: items, health,
+        update, submittals: items, health, plan,
+        consultant: consultantOf(p),
+        expectedDelivery: mine?.expected_delivery || null,
+        issue: mine?.blockers || '', nextStep: mine?.next || '',
+        attachments: (files.get(p.id) || []).map(a => ({ id: a.id, name: a.name, mimetype: a.mimetype || '', on: a.res_model })),
         tasksOpen: open.length,
         tasksLate: open.filter(t => (odooTime(t.date_deadline) ?? Infinity) < now - DAY).length,
       }
@@ -237,6 +292,17 @@ export function projectBoard({ records = {}, log = [], submittals = [], updates 
     .sort((a, b) => LEVEL_ORDER[a.health.level] - LEVEL_ORDER[b.health.level] || stageIndex(a.stageKey) - stageIndex(b.stageKey) || a.name.localeCompare(b.name))
 }
 const LEVEL_ORDER = { red: 0, amber: 1, green: 2 }
+
+/**
+ * The consultant, from whichever field Arak adds for it in Odoo (Odoo has
+ * none of its own): the mirror reads any project field named *consultant*.
+ */
+export function consultantOf(project = {}) {
+  const key = Object.keys(project).find(k => /consultant/i.test(k) && project[k])
+  if (!key) return ''
+  const v = project[key]
+  return Array.isArray(v) ? String(v[1] || '') : typeof v === 'string' ? v : ''
+}
 
 function groupBy(rows, key) {
   const m = new Map()
@@ -301,7 +367,7 @@ export function plannedReminders(board = [], { pmUsers = {}, logIds = {}, settin
     if (late && logIds[p.id]) {
       const key = `stage_late:${p.id}:${logIds[p.id]}`
       keep.add(key)
-      make.push({ ...base, auto_key: key, priority: 'high', due_at: due(1), title: t.stageLate(p, late), details: t.stageLateWhy(p, s) })
+      make.push({ ...base, auto_key: key, priority: 'high', due_at: due(1), title: t.stageLate(p, late), details: t.stageLateWhy(p, s, late) })
     }
     const missing = p.health.reasons.find(r => r.kind === 'update_missing')
     if (missing) {
@@ -321,8 +387,8 @@ export function plannedReminders(board = [], { pmUsers = {}, logIds = {}, settin
 
 const REMIND = {
   en: {
-    stageLate: (p, r) => `${p.name}: ${r.days} day${r.days === 1 ? '' : 's'} over in ${stageLabel(p.stageKey)}`,
-    stageLateWhy: (p, s) => `${stageLabel(p.stageKey)} is allowed ${s.stage_days[p.stageKey]} days. Move it on in Odoo, or say in this week's update what is holding it.`,
+    stageLate: (p, r) => `${p.name}: ${r.days} day${r.days === 1 ? '' : 's'} ${r.planned ? 'past the planned date' : 'over'} in ${stageLabel(p.stageKey)}`,
+    stageLateWhy: (p, s, r) => `${r.planned ? `${stageLabel(p.stageKey)} was planned to finish on ${r.planned} (its milestone in Odoo).` : `${stageLabel(p.stageKey)} is allowed ${s.stage_days[p.stageKey]} days.`} Move it on in Odoo, or say in this week's update what is holding it.`,
     update: p => `Weekly update for ${p.name}`,
     updateWhy: (p, s) => (p.update ? `The last update was ${p.health.updateDays} days ago; one is due every ${s.update_every_days} days.` : `No update has been written yet; one is due every ${s.update_every_days} days.`) + ' Write it on the project in Technical.',
     chase: (p, r) => `Chase the client: ${r.title} (round ${r.round}) on ${p.name}`,

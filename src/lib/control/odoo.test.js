@@ -92,3 +92,30 @@ describe('helpers', () => {
     expect(looseName('Crescent Developments Co.')).toBe(looseName('crescent developments'))
   })
 })
+
+describe('per salesperson (requirement 7, v2)', () => {
+  const now = new Date('2026-10-19T09:00:00Z')
+  const records = {
+    'res.users': [{ id: 7, login: 'omar@example.com', email: 'omar@example.com' }, { id: 9, login: 'sara', email: 'Sara@Example.com' }],
+    'crm.stage': [{ id: 4, is_won: true }],
+    'crm.lead': [
+      { id: 1, type: 'opportunity', active: true, stage_id: [4, 'Won'], user_id: [7, 'Omar'], expected_revenue: 380000, date_closed: '2026-10-05 10:00:00' },
+      { id: 2, type: 'opportunity', active: true, stage_id: [4, 'Won'], user_id: [7, 'Omar'], expected_revenue: 999999, date_closed: '2026-09-28 10:00:00' },
+    ],
+    'sale.order': [
+      { id: 10, state: 'sent', user_id: [7, 'Omar'], create_date: '2026-10-02 08:00:00' },
+      { id: 11, state: 'draft', user_id: [7, 'Omar'], create_date: '2026-10-03 08:00:00' },
+      { id: 12, state: 'sale', user_id: [9, 'Sara'], create_date: '2026-10-10 08:00:00' },
+    ],
+  }
+  const f = odooFacts(records, { now, models: ['crm.lead', 'sale.order'] })
+  it('won this month and quotes sent this month, by the Odoo user\'s login and email', () => {
+    expect(f.byUser['omar@example.com']).toEqual({ wonMonth: 1, wonValueMonth: 380000, quotesMonth: 1 })
+    // A username login is skipped; the email still finds her.
+    expect(f.byUser['sara@example.com']).toEqual({ wonMonth: 0, wonValueMonth: 0, quotesMonth: 1 })
+    expect(f.byUser.sara).toBeUndefined()
+  })
+  it('is null when Odoo\'s users were not read', () => {
+    expect(odooFacts({}, { now }).byUser).toBeNull()
+  })
+})

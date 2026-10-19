@@ -263,7 +263,7 @@ const agoText = (ms, now) => {
  *
  * Each: { key, kind, title, why, owner, action: { type, … } }.
  */
-export function controlDecisions({ leads = [], accounts = [], opportunities = [], team = [], rules = [], targets: tRow = null, now = new Date() } = {}) {
+export function controlDecisions({ leads = [], accounts = [], opportunities = [], team = [], rules = [], targets: tRow = null, projectFlags = [], projectManagers = [], now = new Date() } = {}) {
   const targets = targetsOf(tRow)
   const nameOf = id => team.find(p => p.id === id)?.name || ''
   const open = leads.filter(l => isOpenQualified(l) && recent(l, now))
@@ -284,6 +284,26 @@ export function controlDecisions({ leads = [], accounts = [], opportunities = []
       }
     })
   kinds.push(lateQuotes)
+
+  // A project Technical shows red (requirement 8's "project turned red" as a
+  // decision with an owner and a button, design rule 4): Remind gives its
+  // project manager a task. Longest red first.
+  const pmOf = id => projectManagers.find(m => Number(m.odoo_project_id) === Number(id))
+  const redProjects = projectFlags
+    .filter(p => p.level === 'red')
+    .sort((a, b) => String(a.red_since || '').localeCompare(String(b.red_since || '')))
+    .map(p => {
+      const why = redWhy(p.reasons || [])
+      const pm = pmOf(p.odoo_project_id)
+      return {
+        key: `project:${p.odoo_project_id}`, kind: 'project_red',
+        title: { en: `${p.name} is red`, ar: `${p.name} متأخر` },
+        why: { en: why.en, ar: why.ar },
+        owner: pm?.name || '',
+        action: { type: 'remind_project', projectId: p.odoo_project_id, userId: pm?.user_id || null },
+      }
+    })
+  kinds.push(redProjects)
 
   const unowned = open
     .filter(l => !l.assigned_to)
@@ -364,9 +384,13 @@ const sameMonth = (iso, now) => {
  * this month. Won value needs a won stage and a deal value: until the
  * Pipeline (#244) or Odoo provides them it is null, shown as "—".
  */
-export function repRows({ leads = [], team = [], targets: tRow = null, now = new Date() } = {}) {
+export function repRows({ leads = [], team = [], targets: tRow = null, odoo = null, now = new Date() } = {}) {
   const targets = targetsOf(tRow)
   const stagesKnown = leads.some(l => l.stage !== undefined)
+  // Odoo is the source once it is read (rule 7): a rep whose email is their
+  // Odoo user's login or email takes quotes and won value from there.
+  // A rep with no Odoo user keeps Campai's own count.
+  const fromOdoo = p => (odoo?.byUser && p.email ? odoo.byUser[String(p.email).toLowerCase()] || null : null)
   return team.map(p => {
     const mine = leads.filter(l => l.assigned_to === p.id && effectiveVerdict(l) === 'qualified' && !l.duplicate_of)
     const open = mine.filter(l => !isClosed(l))
@@ -375,13 +399,15 @@ export function repRows({ leads = [], team = [], targets: tRow = null, now = new
       return d.quote.late || (d.reply.late && !l.quote_sent_at)
     })
     const won = mine.filter(l => l.stage === 'won' && sameMonth(l.stage_at, now))
+    const o = fromOdoo(p)
     return {
       id: p.id, name: p.name, email: p.email,
       open: open.length,
-      quotes: mine.filter(l => sameMonth(l.quote_sent_at, now)).length,
+      quotes: o ? o.quotesMonth : mine.filter(l => sameMonth(l.quote_sent_at, now)).length,
       late: late.length,
       lateLeads: late.map(l => ({ id: l.id, who: leadWho(l) })),
-      wonValue: stagesKnown ? won.reduce((s, l) => s + (Number(l.deal_value_sar) || 0), 0) : null,
+      wonValue: o ? o.wonValueMonth : stagesKnown ? won.reduce((s, l) => s + (Number(l.deal_value_sar) || 0), 0) : null,
+      source: o ? 'odoo' : 'campai',
       tone: late.length ? 'bad' : open.length ? 'good' : 'none',
     }
   }).sort((a, b) => b.late - a.late || b.open - a.open || a.name.localeCompare(b.name))
@@ -561,11 +587,14 @@ export function dailyAlertItems({ leads = [], accounts = [], team = [], odoo = n
 }
 
 /** Why a project is red, worst first, in both languages. */
-function redWhy(reasons) {
+export function redWhy(reasons) {
   const r = reasons.filter(x => x.level === 'red')
   const en = [], ar = []
   for (const x of r) {
-    if (x.kind === 'stage_late') { en.push(`${x.days} day${x.days === 1 ? '' : 's'} over in ${stageLabel(x.stage) || 'its stage'}`); ar.push(`متأخر ${x.days} يومًا في ${stageLabel(x.stage, 'ar') || 'مرحلته'}`) }
+    if (x.kind === 'stage_late') {
+      en.push(`${x.days} day${x.days === 1 ? '' : 's'} ${x.planned ? 'past the planned date' : 'over'} in ${stageLabel(x.stage) || 'its stage'}`)
+      ar.push(`متأخر ${x.days} يومًا ${x.planned ? 'عن التاريخ المخطط ' : ''}في ${stageLabel(x.stage, 'ar') || 'مرحلته'}`)
+    }
     if (x.kind === 'past_end') { en.push(`delivery date passed ${x.days} days ago`); ar.push(`مضى تاريخ التسليم منذ ${x.days} يومًا`) }
     if (x.kind === 'off_track') { en.push('the project manager says off track'); ar.push('مدير المشروع يقول إنه خارج المسار') }
     if (x.kind === 'resubmit_due') { en.push(`${x.title} not resubmitted (code ${x.code})`); ar.push(`${x.title} لم يُعد تقديمه (الرمز ${x.code})`) }

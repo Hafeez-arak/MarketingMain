@@ -10,7 +10,7 @@ import { approveLead, crmStatus, saveCrm, sendWaiting, disconnectCrm } from './_
 import { openCard, saveCard, watchlist } from './_card.js'
 import { assignLead, teamList, teamSave, teamCheckOdoo } from './_assign.js'
 import { sectionFor, hasSection } from './_sectionAccess.js'
-import { controlPanel, saveTargets, saveRouting, markLead, remind, accountContacted, sendToSales, runDailyAlerts, MIGRATION_MISSING } from './_control.js'
+import { controlPanel, saveTargets, saveRouting, markLead, remind, remindProject, accountContacted, sendToSales, runDailyAlerts, MIGRATION_MISSING } from './_control.js'
 import { addLead, trackLead, deleteLead } from './_pipeline.js'
 import { leadDeps, openRouterKey, hasDeploymentKey, describeKey, sendAlert } from './_deps.js'
 import { previewLenses } from '../agent/_investigate.js'
@@ -464,6 +464,12 @@ const actions = {
   /** The CEO's "Remind" on a late lead: the owner's bell. */
   async remind({ workspaceId, body, user }) {
     const out = await remind(leadDeps(), { workspaceId, body, user })
+    return out.error ? fail(out.status, out.error) : out
+  },
+
+  /** The CEO's "Remind" on a red project: a task for its project manager. */
+  async remind_project({ workspaceId, body, user }) {
+    const out = await remindProject(leadDeps(), { workspaceId, body, user })
     return out.error ? fail(out.status, out.error) : out
   },
 

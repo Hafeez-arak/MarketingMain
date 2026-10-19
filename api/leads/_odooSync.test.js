@@ -46,13 +46,16 @@ describe('syncOdoo', () => {
     const { st, deps } = world()
     const out = await syncOdoo(deps, { workspaceId: WS, force: true })
     expect(out.error).toBeUndefined()
-    expect(out.models.sort()).toEqual(['account.analytic.line', 'account.move', 'account.payment', 'crm.lead', 'crm.stage',
-      'project.project', 'project.project.stage', 'project.task', 'project.update', 'res.users', 'sale.order'])
+    expect(out.models.sort()).toEqual(['account.analytic.line', 'account.move', 'account.payment', 'crm.lead', 'crm.stage', 'ir.attachment',
+      'project.milestone', 'project.project', 'project.project.stage', 'project.task', 'project.update', 'res.users', 'sale.order'])
     expect(out.synced['crm.lead'].changed).toBe(5) // the lost (archived) deal included
     expect(out.synced['project.project'].changed).toBe(6) // the archived project too
     // users 5, crm stages 3, deals 5, orders 6, invoices 7, payments 3,
-    // analytic lines 9, project stages 9, projects 6, tasks 6, updates 2
-    expect(st.records.size).toBe(5 + 3 + 5 + 6 + 7 + 3 + 9 + 9 + 6 + 6 + 2)
+    // analytic lines 9, project stages 9, projects 6, tasks 6, updates 2,
+    // milestones 5, attachments 3
+    expect(st.records.size).toBe(5 + 3 + 5 + 6 + 7 + 3 + 9 + 9 + 6 + 6 + 2 + 5 + 3)
+    // A field Arak adds in Odoo Studio is read by its name.
+    expect(st.records.get('project.project:402').data.x_studio_consultant).toBe('Example Design Consultants')
     expect(st.sync.cursors['crm.lead']).toMatch(/^\d{4}-\d{2}-\d{2} [\d:]+\|\d+$/)
     expect(st.sync.last_error).toBe('')
   })

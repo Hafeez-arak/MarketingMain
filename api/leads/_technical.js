@@ -17,10 +17,9 @@
 //
 //   deps: db (service key), now
 
-import { stageLogChanges, projectBoard, plannedReminders, settingsOf } from '../../src/lib/technical/projects.js'
+import { stageLogChanges, projectBoard, plannedReminders, settingsOf, PROJECT_MODELS } from '../../src/lib/technical/projects.js'
 
 const ws = id => `workspace_id=eq.${encodeURIComponent(id)}`
-const PROJECT_MODELS = ['project.project', 'project.project.stage', 'project.task', 'project.update']
 /** The reminder kinds this round owns (and may close). */
 const OWNED = ['stage_late:', 'update_due:', 'review_chase:']
 

@@ -239,3 +239,32 @@ describe('with Odoo\'s numbers (v2 mirror)', () => {
     expect(items.map(i => i.en)).toEqual(['1 deal with no salesperson: Hotel lobby', '1 project with no delivery date: Tower'])
   })
 })
+
+describe('projects on the CEO panel (v2)', () => {
+  const flags = [
+    { odoo_project_id: 402, name: 'Tower phase 1', level: 'red', red_since: hAgo(50), reasons: [{ kind: 'stage_late', level: 'red', days: 6, stage: 'client_review', planned: '2026-10-12' }] },
+    { odoo_project_id: 404, name: 'Hotel lobby', level: 'red', red_since: hAgo(10), reasons: [{ kind: 'off_track', level: 'red' }] },
+    { odoo_project_id: 401, name: 'Clinic', level: 'amber', red_since: null, reasons: [] },
+  ]
+  const managers = [{ odoo_project_id: 402, user_id: 'u-khalid', name: 'Khalid PM' }, { odoo_project_id: 404, user_id: null, name: 'Nadia (no login)' }]
+
+  it('a red project is a decision with its project manager and a Remind button, longest red first', () => {
+    const d = controlDecisions({ projectFlags: flags, projectManagers: managers, now: NOW })
+    expect(d.map(x => x.key)).toEqual(['project:402', 'project:404'])
+    expect(d[0]).toMatchObject({ kind: 'project_red', owner: 'Khalid PM', action: { type: 'remind_project', projectId: 402, userId: 'u-khalid' } })
+    expect(d[0].why.en).toBe('6 days past the planned date in Client review')
+    expect(d[0].why.ar).toContain('مراجعة العميل')
+    // A manager with no login: the button is there but has nobody to remind.
+    expect(d[1].action.userId).toBeNull()
+  })
+
+  it('reps take quotes and won value from Odoo when their email is an Odoo user', () => {
+    const team = [{ id: 'u-omar', name: 'Omar', email: 'Omar@Example.com' }, { id: 'u-new', name: 'New', email: 'new@example.com' }]
+    const leads = [lead({ assigned_to: 'u-new', quote_sent_at: hAgo(3) })]
+    const odoo = { byUser: { 'omar@example.com': { wonMonth: 1, wonValueMonth: 380000, quotesMonth: 2 } } }
+    const rows = repRows({ leads, team, odoo, now: NOW })
+    expect(rows.find(r => r.id === 'u-omar')).toMatchObject({ quotes: 2, wonValue: 380000, source: 'odoo' })
+    // Not in Odoo: Campai's own marks, not a made-up zero.
+    expect(rows.find(r => r.id === 'u-new')).toMatchObject({ quotes: 1, source: 'campai' })
+  })
+})

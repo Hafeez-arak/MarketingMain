@@ -87,9 +87,14 @@ export async function syncOdoo(deps, { workspaceId, force = false }) {
       // Optional fields only where this Odoo has them: asking for one it
       // lacks fails the whole read.
       let fields = spec.fields
-      if (spec.optional?.length) {
-        const have = new Set(await fieldNames(deps.fetch, cfg, model))
-        fields = [...spec.fields, ...spec.optional.filter(f => have.has(f))]
+      if (spec.optional?.length || spec.matching) {
+        const have = await fieldNames(deps.fetch, cfg, model)
+        const re = spec.matching ? new RegExp(spec.matching, 'i') : null
+        fields = [...new Set([
+          ...spec.fields,
+          ...(spec.optional || []).filter(f => have.includes(f)),
+          ...(re ? have.filter(f => re.test(f)) : []),
+        ])]
       }
       const { rows, done } = await readChanged(deps.fetch, cfg, model, { fields, domain: spec.domain || [], since, sinceId })
       for (let i = 0; i < rows.length; i += 500) {

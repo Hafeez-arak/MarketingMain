@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../store/auth'
-import { useT, fmtDay } from '../../lib/i18n'
+import { useT, fmtDay, fmtSar } from '../../lib/i18n'
 import { Button } from '../../components/ui/index'
 import { odooLink } from '../../lib/odooMirror'
-import { STAGES, CODES, stageIndex } from '../../lib/technical/projects'
+import { STAGES, CODES, stageIndex, stageLabel } from '../../lib/technical/projects'
 import { projectTasks, addSubmittal, setSubmittal, deleteSubmittal, writeUpdate } from '../../lib/technical/client'
 import { W } from './words'
 import { Frame, Dot, Box, Reasons, Note, field } from './parts'
@@ -48,6 +48,7 @@ export function TechnicalProject() {
                 <Reasons reasons={project.health.reasons} t={t} max={10} />
               </div>
             )}
+            <Summary project={project} money={data.moneyKnown ? data.money[id] || null : undefined} url={data.sync?.odoo_url || ''} t={t} lang={lang} />
             <Stages project={project} log={data.log.filter(l => Number(l.odoo_project_id) === id)} settings={data.settings} t={t} lang={lang} />
             <Submittals project={project} canWork={canWork(project)} ws={ws} reload={reload} t={t} lang={lang} />
             <Updates project={project} campai={data.updates.filter(u => Number(u.odoo_project_id) === id)}
@@ -58,6 +59,56 @@ export function TechnicalProject() {
         )}
       </Frame>
     </div>
+  )
+}
+
+// ── The CEO's ten fields (requirement 12) ──
+// Money (contract value, % collected, margin) shows only to those the
+// database lets read it (the CEO, Finance): `money` is undefined for others.
+function Summary({ project, money, url, t, lang }) {
+  const longDay = v => fmtDay(v, lang, { day: 'numeric', month: 'short', year: 'numeric' })
+  const files = project.attachments
+  const rows = [
+    [t.f.project, project.name],
+    [t.f.client, project.customer || t.none],
+    [t.f.consultant, project.consultant || <span className="text-text-tertiary">{t.noConsultant}</span>],
+    [t.f.owner, project.pm || t.none],
+    money !== undefined && [t.f.contract, money?.order ? <a href={money.order.url} target="_blank" rel="noreferrer" className="hover:underline">{fmtSar(money.order.total, lang)} <span className="text-text-tertiary" dir="ltr">({money.order.name})</span></a> : t.none],
+    [t.f.stage, project.stageKey ? stageLabel(project.stageKey, lang) : (project.stageName || t.noStage)],
+    [t.f.delivery, <>{project.endDate ? longDay(project.endDate) : t.none}{' / '}
+      <span className={project.health.reasons.some(r => r.kind === 'delivery_slip') ? 'text-yellow-800 font-medium' : ''}>
+        {project.expectedDelivery ? longDay(project.expectedDelivery) : t.sameAsPlanned}</span></>],
+    money !== undefined && [t.f.collected, money?.pctCollected != null
+      ? <>{money.pctCollected}%{money.pctInvoiced != null && <span className="text-text-tertiary"> · {t.pctOf(money.pctInvoiced, fmtSar(money.order?.total, lang, { short: true }))}</span>}</>
+      : t.none],
+    money !== undefined && [t.f.margin, money?.plannedMargin != null || money?.actualMargin != null
+      ? <span className={money.marginRed ? 'text-red-700 font-semibold' : ''}>
+          {money.plannedMargin != null ? `${money.plannedMargin}%` : t.none} / {money.actualMargin != null ? `${money.actualMargin}%` : t.none}
+          {money.marginRed && <span className="font-normal"> · {t.marginRed}</span>}
+        </span>
+      : t.none],
+    [t.f.issue, project.issue ? <span className="whitespace-pre-line" dir="auto">{project.issue}</span> : t.none],
+    [t.f.next, project.nextStep ? <span className="whitespace-pre-line" dir="auto">{project.nextStep}</span> : t.none],
+    [t.f.files, files.length ? (
+      <ul className="space-y-0.5">
+        {files.slice(0, 6).map(a => (
+          <li key={a.id}>{url ? <a href={`${url}/web/content/${a.id}?download=true`} target="_blank" rel="noreferrer" className="hover:underline" dir="auto">{a.name}</a> : <span dir="auto">{a.name}</span>}</li>
+        ))}
+        {files.length > 6 && <li className="text-text-tertiary">{t.moreFiles(files.length - 6)}</li>}
+      </ul>
+    ) : <span className="text-text-tertiary">{t.noFiles}</span>],
+  ].filter(Boolean)
+  return (
+    <Box title={t.summary}>
+      <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2.5">
+        {rows.map(([k, v]) => (
+          <div key={k} className="min-w-0">
+            <dt className="text-[11px] text-text-tertiary">{k}</dt>
+            <dd className="text-sm text-text mt-0.5 break-words">{v}</dd>
+          </div>
+        ))}
+      </dl>
+    </Box>
   )
 }
 
@@ -79,7 +130,12 @@ function Stages({ project, log, settings, t, lang }) {
               {entry && (i <= at) && (
                 <p className="text-[10px] text-text-tertiary mt-1">{t.entered} {entry.estimated ? `${t.estimated} ` : ''}{fmtDay(entry.entered_at, lang)}</p>
               )}
-              {current && project.health.inStage != null && (
+              {project.plan?.[s.key] && (
+                <p className={`text-[10px] mt-0.5 ${current && project.health.reasons.some(r => r.kind === 'stage_late') ? 'text-red-700 font-semibold' : 'text-text-secondary'}`}>
+                  {project.plan[s.key].reached ? t.reached : t.planned} {fmtDay(project.plan[s.key].deadline, lang)}
+                </p>
+              )}
+              {current && !project.plan?.[s.key] && project.health.inStage != null && (
                 <p className={`text-[10px] mt-0.5 tabular-nums ${project.health.inStage > settings.stage_days[s.key] ? 'text-red-700 font-semibold' : 'text-text-secondary'}`}>
                   {t.daysInStage(project.health.inStage, settings.stage_days[s.key])}
                 </p>
@@ -221,7 +277,7 @@ function RoundRow({ r, canWork, onChange, onRemove, t, lang }) {
 function Updates({ project, campai, odoo, every, canWork, ws, reload, t, lang }) {
   const { user } = useAuth()
   const [open, setOpen] = useState(false)
-  const [form, setForm] = useState({ status: 'on_track', done: '', next: '', blockers: '' })
+  const [form, setForm] = useState({ status: 'on_track', done: '', next: '', blockers: '', expected_delivery: '' })
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const all = useMemo(() => [
@@ -236,7 +292,7 @@ function Updates({ project, campai, odoo, every, canWork, ws, reload, t, lang })
     setBusy(false)
     if (out.error) return setErr(out.error)
     setOpen(false)
-    setForm({ status: 'on_track', done: '', next: '', blockers: '' })
+    setForm({ status: 'on_track', done: '', next: '', blockers: '', expected_delivery: '' })
     reload()
   }
 
@@ -254,6 +310,9 @@ function Updates({ project, campai, odoo, every, canWork, ws, reload, t, lang })
               </label>
             ))}
           </fieldset>
+          <label className="block text-[11px] text-text-secondary">{t.expectedDelivery}
+            <input type="date" className={`${field} mt-1 sm:max-w-[12rem]`} value={form.expected_delivery} onChange={e => setForm(f => ({ ...f, expected_delivery: e.target.value }))} />
+          </label>
           {['done', 'next', 'blockers'].map(k => (
             <label key={k} className="block text-[11px] text-text-secondary">{t[k]}
               <textarea rows={2} className={`${field} mt-1`} value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))} required={k === 'done'} dir="auto" />

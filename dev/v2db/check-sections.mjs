@@ -119,6 +119,9 @@ async function main() {
 const ALL = [401, 402, 403, 404, 405, 406]
 const MINE = { 'pm.sara@arak.test': [401, 403, 405], 'pm.khalid@arak.test': [402, 404, 406] }
 const TASKS = { 401: 1, 402: 2, 403: 1, 404: 2 }
+// Milestones and files on each project (a file on task 802 belongs to 402).
+const MILESTONES = { 401: 3, 402: 1, 403: 1 }
+const FILES = { 401: 1, 402: 2 }
 function expectFor(email, p) {
   const seesAll = p.admin || p.ceo || p.technical === 'manage'
   const own = seesAll ? ALL : (p.technical ? MINE[email] || [] : [])
@@ -126,6 +129,9 @@ function expectFor(email, p) {
   return {
     projects,
     tasks: own.reduce((s, id) => s + (TASKS[id] || 0), 0),
+    milestones: own.reduce((s, id) => s + (MILESTONES[id] || 0), 0),
+    files: own.reduce((s, id) => s + (FILES[id] || 0), 0),
+    orders: p.admin || p.ceo || p.finance || p.sales ? 6 : 0,
     invoices: p.admin || p.ceo || p.finance ? 7 : 0,
     deals: p.admin || p.ceo || p.sales ? 5 : 0,
     flags: own.filter(id => id !== 406).length, // the archived project has no flag
@@ -138,7 +144,8 @@ async function projectsAndMoney(tok) {
   const WS = '00000000-0000-0000-0000-000000000001'
   let bad = 0
   console.log('\nTechnical and Finance: what each person reads in the Odoo mirror and may record.\n')
-  console.log(`${'person'.padEnd(26)}${['projects', 'tasks', 'invoices', 'deals', 'flags', 'rec 403', 'rec 402'].map(s => s.padStart(10)).join('')}`)
+  const COLS = ['projects', 'tasks', 'milestones', 'files', 'orders', 'invoices', 'deals', 'flags', 'write403', 'write402']
+  console.log(`${'person'.padEnd(26)}${['projects', 'tasks', 'milestones', 'files', 'orders', 'invoices', 'deals', 'flags', 'rec 403', 'rec 402'].map(s => s.padStart(11)).join('')}`)
   for (const [email, p] of Object.entries(PEOPLE)) {
     const t = tok[email]
     if (!t) continue
@@ -147,6 +154,9 @@ async function projectsAndMoney(tok) {
     const got = {
       projects,
       tasks: (await ids('project.task')).length,
+      milestones: (await ids('project.milestone')).length,
+      files: (await ids('ir.attachment')).length,
+      orders: (await ids('sale.order')).length,
       invoices: (await ids('account.move')).length,
       deals: (await ids('crm.lead')).length,
       flags: (await asUser(t, 'project_flags?select=odoo_project_id').then(r => (Array.isArray(r.rows) ? r.rows : []))).length,
@@ -159,14 +169,14 @@ async function projectsAndMoney(tok) {
       if (w.ok) await asUser(tok['owner@arak.test'], `project_submittals?id=eq.${w.rows[0].id}`, { method: 'DELETE' })
     }
     const want = expectFor(email, p)
-    const cells = ['projects', 'tasks', 'invoices', 'deals', 'flags', 'write403', 'write402'].map(k => {
+    const cells = COLS.map(k => {
       const g = got[k], w = want[k]
       const ok = Array.isArray(w) ? JSON.stringify(g) === JSON.stringify(w) : g === w
       if (!ok) bad++
       const show = Array.isArray(g) ? (g.length === 6 ? 'all 6' : g.join(' ') || '-') : typeof g === 'boolean' ? (g ? 'yes' : 'no') : String(g)
       return `${ok ? '' : '✗'}${show}`
     })
-    console.log(`${email.padEnd(26)}${cells.map(c => c.padStart(10)).join('')}`)
+    console.log(`${email.padEnd(26)}${cells.map(c => c.padStart(11)).join('')}`)
   }
   return bad
 }

@@ -145,6 +145,7 @@ export function HomeTab({ data, lang, t, act, calls }) {
                             {a.type === 'assign' && <PersonPicker team={team} suggested={a.suggested} label={t.assign} t={t}
                               onPick={who => go(d.key, () => calls.assign(a.leadId, who))} />}
                             {a.type === 'remind' && <Button size="xs" onClick={() => go(d.key, () => calls.remind(a.leadId))}>{t.remind(d.owner)}</Button>}
+                            {a.type === 'remind_project' && <Button size="xs" disabled={!a.userId} onClick={() => go(d.key, () => calls.remindProject(a.projectId))}>{t.remind(d.owner)}</Button>}
                             {a.type === 'contacted' && <Button size="xs" onClick={() => go(d.key, () => calls.contacted(a.accountId))}>{t.contacted}</Button>}
                             {a.type === 'send_to_sales' && <PersonPicker team={team} label={t.sendToSales} t={t}
                               onPick={who => go(d.key, () => calls.sendToSales(a.opportunityId, who))} />}

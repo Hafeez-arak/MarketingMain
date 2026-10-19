@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  STAGES, stageMap, settingsOf, submittalItems, latestUpdate, projectHealth, projectBoard, stageLogChanges, plannedReminders,
+  STAGES, stageMap, settingsOf, submittalItems, latestUpdate, projectHealth, projectBoard, stageLogChanges, plannedReminders, stagePlan, consultantOf,
 } from './projects.js'
 import { fakeOdooData } from '../../../dev/v2db/fakeOdoo.js'
 
@@ -86,6 +86,39 @@ describe('projectHealth', () => {
   })
 })
 
+describe('planned dates (requirement 13)', () => {
+  const update = { at: NOW - DAY, status: 'on_track' }
+  it('a milestone named after a stage is its planned date; the earliest open one counts', () => {
+    const plan = stagePlan([
+      { name: 'Client review', deadline: '2026-10-25', is_reached: false },
+      { name: 'Client review (2nd)', deadline: '2026-10-20', is_reached: false },
+      { name: 'Awarded', deadline: '2026-09-01', is_reached: true },
+      { name: 'Kick-off', deadline: '2026-09-01', is_reached: false },
+    ])
+    expect(plan.client_review.deadline).toBe('2026-10-20')
+    expect(plan.awarded.reached).toBe(true)
+    expect(Object.keys(plan).sort()).toEqual(['awarded', 'client_review'])
+  })
+  it('red the day after its planned date, amber in the three days before, and the days limit no longer decides', () => {
+    const late = projectHealth({ stageKey: 'client_review', enteredAt: iso(2), update, plan: { client_review: { deadline: odooDay(4), reached: false } }, now: NOW })
+    expect(late.reasons[0]).toMatchObject({ kind: 'stage_late', days: 4, planned: odooDay(4) })
+    const near = projectHealth({ stageKey: 'client_review', enteredAt: iso(40), update, plan: { client_review: { deadline: odooDay(-2), reached: false } }, now: NOW })
+    expect(near.reasons.map(r => r.kind)).toEqual(['stage_near'])
+  })
+  it('a stage Odoo gives no date falls back to its days limit', () => {
+    expect(projectHealth({ stageKey: 'client_review', enteredAt: iso(20), update, plan: {}, now: NOW }).reasons[0]).toMatchObject({ kind: 'stage_late', days: 6 })
+  })
+  it('the project manager expecting to deliver after the planned date is amber', () => {
+    const h = projectHealth({ project: { date: odooDay(-10) }, stageKey: 'production', enteredAt: iso(1), update, expected: odooDay(-24), now: NOW })
+    expect(h.reasons).toEqual([expect.objectContaining({ kind: 'delivery_slip', level: 'amber', days: 14 })])
+  })
+  it('the consultant comes from any field named after it', () => {
+    expect(consultantOf({ x_studio_consultant: 'Example Co' })).toBe('Example Co')
+    expect(consultantOf({ x_consultant_id: [3, 'Example Partner'] })).toBe('Example Partner')
+    expect(consultantOf({ name: 'P' })).toBe('')
+  })
+})
+
 describe('latestUpdate', () => {
   it('takes the newest from Campai or Odoo', () => {
     const u = latestUpdate([{ written_at: iso(5), status: 'at_risk' }], [{ date: odooDay(2), status: 'on_track', user_id: [9, 'Sara PM'] }])
@@ -102,6 +135,13 @@ describe('the board from the fake Odoo', () => {
   it('leaves archived projects out and puts red first', () => {
     expect(board.map(p => p.id)).not.toContain(406)
     expect(board.slice(0, 2).map(p => p.health.level)).toEqual(['red', 'red'])
+  })
+  it('carries the CEO\'s project fields: consultant, planned dates, files on the project and its tasks', () => {
+    expect(by[402]).toMatchObject({ consultant: 'Example Design Consultants' })
+    expect(by[402].plan.client_review).toMatchObject({ reached: false })
+    expect(by[402].attachments.map(a => a.name).sort()).toEqual(['Consultant comments round 1.pdf', 'Lighting layout rev C.pdf'])
+    expect(by[402].health.reasons.find(r => r.kind === 'stage_late').planned).toBeTruthy()
+    expect(by[403].health.reasons.map(r => r.kind)).toContain('stage_near')
   })
   it('reads each project\'s stage, manager and Odoo tasks', () => {
     expect(by[402]).toMatchObject({ stageKey: 'client_review', pm: 'Khalid PM', tasksOpen: 2, tasksLate: 1 })
@@ -136,7 +176,8 @@ describe('plannedReminders', () => {
     const { make, keep } = plannedReminders(board, { pmUsers: { 402: 'u-khalid' }, logIds: { 402: 'log-1' }, now: NOW })
     const late = make.find(t => t.auto_key === 'stage_late:402:log-1')
     expect(late).toMatchObject({ assigned_to: 'u-khalid', priority: 'high', odoo_project_id: 402 })
-    expect(late.title).toMatch(/Crescent tower phase 1: \d+ days over in Client review/)
+    expect(late.title).toMatch(/Crescent tower phase 1: \d+ days past the planned date in Client review/)
+    expect(late.details).toMatch(/planned to finish on \d{4}-\d{2}-\d{2}/)
     expect(make.filter(t => t.auto_key.startsWith('update_due:'))).toHaveLength(4)
     expect(make.find(t => t.auto_key.startsWith('update_due:403:')).assigned_to).toBeNull()
     expect(keep.size).toBe(make.length)

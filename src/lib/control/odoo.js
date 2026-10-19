@@ -27,6 +27,8 @@ const RIYADH = 3 * 3_600_000
 //             with other apps (Sales margin, Sales↔Project) or other versions
 //             (17's analytic_account_id is 18's account_id), and asking for a
 //             field Odoo does not have fails the whole read
+//   matching  also every field whose name matches (a field Arak adds in Odoo
+//             Studio, e.g. the project's consultant: Odoo has none of its own)
 //   full      read whole every round (small lists, no cursor)
 export const SYNC_MODELS = {
   'crm.stage': { fields: ['name', 'is_won', 'sequence'], full: true },
@@ -53,6 +55,15 @@ export const SYNC_MODELS = {
   'project.project': {
     fields: ['name', 'active', 'partner_id', 'user_id', 'date_start', 'date', 'last_update_status', 'stage_id'],
     optional: ['date_last_stage_update', 'account_id', 'analytic_account_id', 'sale_order_id'],
+    matching: 'consultant',
+  },
+  // A stage's PLANNED DATE (the CEO's requirement 13): a milestone named
+  // after the stage, with its deadline.
+  'project.milestone': { fields: ['name', 'project_id', 'deadline', 'is_reached'], optional: ['reached_date'] },
+  // The files on a project and its tasks: names and links only, never the files.
+  'ir.attachment': {
+    fields: ['name', 'mimetype', 'res_model', 'res_id', 'create_date'],
+    domain: [['res_model', 'in', ['project.project', 'project.task']]],
   },
   // The project stages Arak names in Odoo; mapped onto the nine (src/lib/technical/projects.js).
   'project.project.stage': { fields: ['name', 'sequence'], optional: ['fold'], full: true },
@@ -152,6 +163,24 @@ export function odooFacts(records = {}, { now = new Date(), models = [], url = '
   }
   delete byPartner['']
 
+  // ── Per salesperson (requirement 7), keyed by their login and email in
+  // Odoo, lower case, so a Campai rep is found by their own email ──
+  const byUser = {}
+  const users = records['res.users'] || []
+  const userKeys = id => {
+    const u = users.find(x => x.id === id)
+    // Once each: the login and the email are often the same address.
+    return u ? [...new Set([u.login, u.email].filter(v => typeof v === 'string' && v.includes('@')).map(v => v.toLowerCase()))] : []
+  }
+  const add = (id, k, v) => { for (const key of userKeys(id)) { const b = (byUser[key] ||= { wonMonth: 0, wonValueMonth: 0, quotesMonth: 0 }); b[k] += v } }
+  for (const d of deals.filter(d => dealState(d, wonStages) === 'won' && (odooTime(d.date_closed) ?? 0) >= mStart)) {
+    add(m2oId(d.user_id), 'wonMonth', 1)
+    add(m2oId(d.user_id), 'wonValueMonth', Number(d.expected_revenue) || 0)
+  }
+  if (has('sale.order')) {
+    for (const o of orders.filter(o => o.state !== 'cancel' && o.state !== 'draft' && (odooTime(o.create_date) ?? 0) >= mStart)) add(m2oId(o.user_id), 'quotesMonth', 1)
+  }
+
   // ── What is missing in Odoo (requirement 33) ──
   const link = (model, id) => (url ? `${url}/web#id=${id}&model=${model}&view_type=form` : '')
   const missing = [
@@ -174,6 +203,7 @@ export function odooFacts(records = {}, { now = new Date(), models = [], url = '
     projects_open: atRisk ? projects.length : null,
     projects_at_risk: atRisk ? atRisk.length : null,
     byPartner,
+    byUser: users.length ? byUser : null,
     missing,
   }
 }

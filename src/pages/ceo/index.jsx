@@ -14,7 +14,7 @@ import { AttachButton, AttachmentTray, TurnAttachments } from '../../components/
 import { fetchLatestBrief, writeBrief, requestFrom } from '../../lib/ceo'
 import { fetchRequests, STATUS_LABEL } from '../../lib/requests'
 import { timeAgo } from '../../lib/utils'
-import { fetchControl, assignLead, remindOwner, accountContacted, sendToSales, saveTargets, saveRouting, odooSync } from '../../lib/control'
+import { fetchControl, assignLead, remindOwner, remindProject, accountContacted, sendToSales, saveTargets, saveRouting, odooSync } from '../../lib/control'
 import { CT } from './strings'
 import { HomeTab, TeamTab, AccountsTab, OpportunitiesTab, MarketingTab } from './Control'
 import { TargetsTab } from './Targets'
@@ -152,6 +152,7 @@ export function CeoPage() {
   const calls = useMemo(() => ({
     assign: (leadId, userId) => assignLead(activeWorkspaceId, accessToken, leadId, userId),
     remind: leadId => remindOwner(activeWorkspaceId, accessToken, leadId),
+    remindProject: projectId => remindProject(activeWorkspaceId, accessToken, projectId),
     contacted: accountId => accountContacted(activeWorkspaceId, accessToken, accountId),
     sendToSales: (oppId, userId) => sendToSales(activeWorkspaceId, accessToken, oppId, userId),
     saveTargets: form => saveTargets(activeWorkspaceId, accessToken, form),
