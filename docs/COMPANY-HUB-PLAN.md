@@ -257,3 +257,35 @@ So every v1 page takes the look without edits.
 
   It goes live when a permanent Odoo key is saved on Leads → Agent
   settings → CRM.
+
+## Progress, 2026-10-19 (Technical, Finance, locks, Arabic)
+
+- **Marketing and Insights locked in the database** (20261104): 50 tables
+  now answer to `has_any_section()`: read with the section at view, change
+  at work. Tables two sections share say so (Analytics reads posts; Research
+  sends ideas to plans; Sales' Target accounts reads opportunities). The
+  Email and Zernio routes, which act with the service key, check the same
+  grant (`sectionGate`). Checked signed in as every test login
+  (`dev/v2db/check-sections.mjs`, `check-api-gates.mjs`).
+- **Technical** and **Finance** sections (20261105): see
+  [TECHNICAL-FINANCE.md](TECHNICAL-FINANCE.md).
+- **CEO sheet:** red projects in the daily alert; "projects at risk" =
+  Technical's red projects.
+- **Arabic, app-wide:** one language switch in the top bar (`lib/i18n.js`),
+  remembered per browser; the shell turns right-to-left. Translated: the
+  shell (rail, section menus, top bar, notifications, account menu), Home,
+  the CEO pages, Tasks (lists, task panel, meetings), Technical, Finance,
+  Admin → Section access, the not-found page. A page not yet translated
+  keeps English left-to-right inside the Arabic shell (`translated: true`
+  in `lib/modules.js` marks the ones that are).
+
+  **Still English:** Marketing (Dashboard, Content Planning, Studio,
+  Schedule, Social, Post Queue, Auto-replies, Email, Media, Brand Brain),
+  Insights (Research, Analytics, reports), Sales (Leads, Target accounts,
+  Agent Brief), the sales team's own app, Admin → Team & Access, Requests,
+  the Assistant, Settings, and the sign-in pages. Each is translated the
+  same way: a `{ en, ar }` dictionary per page through `useT`, start/end
+  classes instead of left/right, then `translated: true`.
+- **Blocked, not built:** WhatsApp (needs a dedicated number, Meta business
+  verification, approved templates, a provider and a budget) and website
+  conversion tracking (needs Google Tag Manager on the website).

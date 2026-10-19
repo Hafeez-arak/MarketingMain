@@ -72,13 +72,21 @@ hourly timer has to be the website Sheet's 5-minute call or the n8n box.
 
 ## Phase 2
 
-- Projects (items 10–14, 18) and Finance (30–31): only once Arak actually uses
-  Odoo Project and Accounting. On 2026-10-11 neither app was seen installed.
-- WhatsApp (19–22, 34–36): needs a dedicated number, Meta business
-  verification, approved message templates, a provider, and per-message costs.
-  It runs on the n8n box, because Vercel is at 12 of 12 functions.
-- Arabic across the whole app: about 115 screens and 1,200 strings, plus
-  right-to-left layout.
+- **Projects (items 10–14, 18) and Finance (30–31): built on v2, 2026-10-19**
+  ([TECHNICAL-FINANCE.md](TECHNICAL-FINANCE.md)), against the fake Odoo. They
+  show real numbers once Arak uses Odoo Project and Accounting (neither was
+  seen installed on 2026-10-11) and the permanent key is saved.
+- **"Project turned red" in the daily alert: built** (v2). Listed first, once
+  per turn red, with the reason in both languages.
+- **Arabic across the app: started** (v2). One switch for the whole app; the
+  shell, Home, CEO, Tasks, Technical, Finance and Section access are
+  translated. The rest is listed in COMPANY-HUB-PLAN.md.
+- **Blocked:**
+  - WhatsApp (19–22, 34–36) needs a dedicated number, Meta business
+    verification, approved message templates, a provider, and a budget for
+    per-message costs. It runs on the n8n box, because Vercel is at 12 of 12
+    functions.
+  - Website conversion tracking needs Google Tag Manager on the website.
 
 ## Checking it without signing in
 
