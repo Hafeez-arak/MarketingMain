@@ -90,7 +90,7 @@ const T = {
   },
 }
 
-const TONE_DOT = { good: 'bg-green-600', watch: 'bg-amber-500', bad: 'bg-red-600' }
+const TONE_DOT = { good: 'bg-green-500', watch: 'bg-yellow-500', bad: 'bg-red-500' }
 
 function readLang() {
   try { return localStorage.getItem(LANG_KEY) === 'en' ? 'en' : 'ar' } catch { return 'ar' }
@@ -175,10 +175,10 @@ export function CeoPage() {
           <h1 className="text-lg font-bold text-text tracking-tight leading-none">{T[lang].title}</h1>
           {loadedAt && tab !== 'brief' && <p className="text-[11px] text-text-tertiary mt-1">{t.updated} {ago(loadedAt, lang)}</p>}
         </div>
-        <div className="flex border border-border" role="group" aria-label="Language" dir="ltr">
+        <div className="flex border border-border rounded-md overflow-hidden" role="group" aria-label="Language" dir="ltr">
           {[['ar', 'العربية'], ['en', 'English']].map(([k, label]) => (
             <button key={k} type="button" onClick={() => switchLang(k)} aria-pressed={lang === k}
-              className={`px-3 py-1.5 text-xs ${lang === k ? 'bg-amber-700 text-white' : 'bg-white text-text-secondary hover:text-text'}`}>
+              className={`px-3 py-1.5 text-xs ${lang === k ? 'bg-stone-900 text-white' : 'bg-white text-text-secondary hover:text-text'}`}>
               {label}
             </button>
           ))}
@@ -188,7 +188,7 @@ export function CeoPage() {
       <nav className="flex gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden border-b border-border -mx-1 px-1" aria-label={T[lang].title}>
         {TABS.map(k => (
           <button key={k} type="button" onClick={() => openTab(k)} aria-current={tab === k ? 'page' : undefined}
-            className={`whitespace-nowrap px-3 py-2 text-xs border-b-2 -mb-px ${tab === k ? 'border-amber-700 text-text font-semibold' : 'border-transparent text-text-secondary hover:text-text'}`}>
+            className={`whitespace-nowrap px-3 py-2 text-xs border-b-2 -mb-px ${tab === k ? 'border-stone-900 text-text font-medium' : 'border-transparent text-text-secondary hover:text-text'}`}>
             {t.tabs[k]}
           </button>
         ))}

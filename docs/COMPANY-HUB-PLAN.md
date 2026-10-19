@@ -210,25 +210,33 @@ Step 1 needs none of the decisions above, so it can start the day the owner says
 2. The CEO panel's migration (`20261025_ceo_control.sql`), which this branch carries.
 3. Step 2: per-person section access.
 
-## v2 look (decided 2026-10-19)
+## v2 look (decided 2026-10-19, second try)
 
-Taken from Arak's own Brand Brain: near-black `#0A0A0A`, warm cream
-`#FEFBF6`, mid grey, and "the only accent colour is the light itself, a warm
-amber/gold glow". The aim is clean and premium, not an "AI" look.
+The first try, Arak's black and gold, was rejected as "weird". On the owner's
+request ("look on the internet for simple, clean, professional ones with a
+similar format") the reference is now **shadcn/ui's sidebar blocks**, the
+open-source design system behind Vercel's dashboards and many SaaS apps. Its
+`sidebar-09` is our exact layout: an icon rail beside a second panel. The
+look follows Linear, Stripe and Attio, which every 2026 roundup cites as the
+clean, professional standard. Their shared rules: a light, quiet frame,
+neutral greys, near-black for the main action, and colour only for state.
 
-- **Ink for action.** Primary buttons, selected chips and toggles are
-  near-black with white text.
-- **Gold for light, and only that.** Gold marks the open section, highlights,
-  focus borders and amber warnings. It is never a fill on large areas.
-- **Warm neutrals.** The page is cream-grey (`#F7F6F3`), cards are white,
-  lines are warm grey (`#E7E5E0`), and small print is `#78716C` (4.8:1).
-- **No gradients, glows or purple**, the logo mark included.
-- **Square corners and 1px rules**, as in v1. Architectural, like the brand.
-- **Fonts:** DM Sans for Latin, IBM Plex Sans Arabic for Arabic.
-- **The rail is near-black**, with the open section's icon in gold. Notification
-  counts are red, the universal convention.
-- **Status colours keep their meaning:** green good, gold/amber watch, red bad.
+- **Frame:** the rail and the section menu sit on `#fafafa` with 1px
+  `#e4e4e7` lines. The page is a **white rounded panel** inset on that frame
+  (shadcn's "inset" layout), edge to edge on a phone.
+- **Navigation:** grey icons. The current item is a soft grey pill
+  (`.nav-active`) with no marker bar and no colour.
+- **Actions:** near-black buttons (`#18181b`) with white text. Secondary
+  buttons are white with a border.
+- **Corners:** 6px controls, 8px boxes, 10–12px cards and modals. Every white
+  bordered box gets the radius from one CSS rule (`index.css`), because v1
+  drew 136 of them by hand.
+- **Type:** Inter, with IBM Plex Sans Arabic for Arabic.
+- **Colour = state only:** green good, yellow watch, red bad. Shown as small
+  dots, never as fills or thick edges. Notification counts are red.
+- **No gradients, glows or purple.**
 
-All of it lives in `tailwind.config.js`. v1 used `amber-700` as "the primary
-action", so the accent scale's light end (50–600) is the gold and its dark end
-(700–900) is ink. Every existing page picks up the look with no page edits.
+All of it is in `tailwind.config.js`. The class names v1 uses stay and only
+their values change: `amber` is now the neutral accent scale (light end =
+hover/selection grey, dark end = ink), and `stone`/`clay` are neutral greys.
+So every v1 page takes the look without edits.

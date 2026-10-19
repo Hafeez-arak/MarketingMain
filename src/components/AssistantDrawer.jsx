@@ -165,7 +165,7 @@ export function AssistantDrawer() {
         <button
           onClick={() => setOpen(true)}
           title="Ask the assistant  (⌘K)"
-          className="fixed bottom-5 right-5 z-40 h-11 w-11 bg-amber-700 text-white
+          className="fixed bottom-5 right-5 z-40 h-11 w-11 rounded-full shadow-dropdown bg-amber-700 text-white
                      shadow-dropdown hover:bg-amber-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-700 focus-visible:ring-offset-2 flex items-center justify-center"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">

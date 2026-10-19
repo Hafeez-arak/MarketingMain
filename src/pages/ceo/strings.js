@@ -163,18 +163,20 @@ export const CT = {
   },
 }
 
-export const TONE_TILE = {
-  good: 'border-t-green-600',
-  watch: 'border-t-amber-500',
-  bad: 'border-t-red-600',
-  none: 'border-t-stone-300',
-  waiting: 'border-t-stone-200',
-}
-
+// Colour is for state only (v2): a small dot, Tailwind's own green / yellow
+// / red, since the app's `amber` became a neutral grey.
 export const TONE_DOT = {
-  good: 'bg-green-600',
-  watch: 'bg-amber-500',
-  bad: 'bg-red-600',
+  good: 'bg-green-500',
+  watch: 'bg-yellow-500',
+  bad: 'bg-red-500',
   none: 'bg-stone-300',
   waiting: 'bg-stone-200',
+}
+
+export const TONE_TEXT = {
+  good: 'text-green-700',
+  watch: 'text-yellow-700',
+  bad: 'text-red-600',
+  none: 'text-text-tertiary',
+  waiting: 'text-text-tertiary',
 }

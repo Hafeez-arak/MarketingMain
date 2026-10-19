@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Button, Spinner } from '../../components/ui/index'
-import { TONE_TILE, TONE_DOT } from './strings'
+import { TONE_DOT } from './strings'
 
 // ─── The control panel's tabs ──────────────────────────────────────────────
 // 2026-10-18, from the CEO's requirements. Each tab draws one part of the
@@ -29,8 +29,11 @@ const shortDate = (d, lang) => {
 
 export function Tile({ k, lang, t }) {
   return (
-    <div className={`bg-white border border-border border-t-4 ${TONE_TILE[k.tone] || TONE_TILE.none} px-3 py-2.5 min-w-0`}>
-      <p className="text-[11px] text-text-tertiary leading-tight truncate">{k.label?.[lang]}</p>
+    <div className="bg-white border border-border rounded-xl px-4 py-3 min-w-0">
+      <p className="flex items-center gap-1.5 text-xs text-text-secondary leading-tight min-w-0">
+        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${TONE_DOT[k.tone] || TONE_DOT.none}`} aria-hidden="true" />
+        <span className="truncate">{k.label?.[lang]}</span>
+      </p>
       <p className={`text-xl sm:text-2xl font-bold tabular-nums mt-1 leading-none ${k.tone === 'waiting' ? 'text-text-tertiary' : 'text-text'}`}
         dir={lang === 'ar' ? 'rtl' : 'ltr'}>
         {k.value?.[lang]}
@@ -91,7 +94,7 @@ export function HomeTab({ data, lang, t, act, calls }) {
       <section>
         <h2 className="eyebrow mb-2">{t.decisions}</h2>
         {data.decisions.length === 0 ? (
-          <div className="border border-green-200 bg-green-50/60 px-4 py-3 flex items-center gap-3">
+          <div className="border border-green-200 bg-green-50/60 rounded-xl px-4 py-3 flex items-center gap-3">
             <span className="text-green-700 text-lg" aria-hidden>✓</span>
             <div>
               <p className="text-sm font-semibold text-green-900">{t.allClear}</p>
@@ -104,9 +107,9 @@ export function HomeTab({ data, lang, t, act, calls }) {
               const s = state[d.key]
               const a = d.action
               return (
-                <li key={d.key} className="bg-white border border-border border-s-4 border-s-amber-500 px-3 py-2.5">
+                <li key={d.key} className="bg-white border border-border rounded-xl px-4 py-3">
                   <div className="flex gap-3">
-                    <span className="text-amber-800 font-bold tabular-nums">{i + 1}</span>
+                    <span className="w-6 h-6 rounded-full bg-stone-100 text-text text-xs font-semibold flex items-center justify-center flex-shrink-0 tabular-nums">{i + 1}</span>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-text leading-snug" dir="auto">{d.title[lang]}</p>
                       <p className="text-xs text-text-secondary mt-0.5 leading-snug" dir="auto">{d.why[lang]}</p>
@@ -142,7 +145,7 @@ export function TeamTab({ data, lang, t }) {
   const reps = data.reps || []
   if (!reps.length) return <p className="text-sm text-text-tertiary">{t.noTeam}</p>
   return (
-    <div className="bg-white border border-border overflow-x-auto">
+    <div className="bg-white border border-border rounded-xl overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="text-[11px] text-text-tertiary border-b border-border">
@@ -190,10 +193,13 @@ export function AccountsTab({ data, lang, t, act, calls }) {
       {!rows.length ? <p className="text-sm text-text-tertiary">{t.noAccounts}</p> : (
         <ul className="space-y-2">
           {rows.map(a => (
-            <li key={a.id} className={`bg-white border border-border border-s-4 ${a.tone === 'bad' ? 'border-s-red-600' : a.tone === 'watch' ? 'border-s-amber-500' : 'border-s-green-600'} px-3 py-2.5`}>
+            <li key={a.id} className="bg-white border border-border rounded-xl px-4 py-3">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-text" dir="auto">{a.name}</p>
+                  <p className="flex items-center gap-2 text-sm font-semibold text-text" dir="auto">
+                    <span className={`w-2 h-2 rounded-full flex-shrink-0 ${TONE_DOT[a.tone] || TONE_DOT.none}`} aria-hidden="true" />
+                    {a.name}
+                  </p>
                   <p className="text-[11px] text-text-secondary mt-0.5">
                     {t.owner}: {a.owner || t.nobody}
                   </p>
@@ -238,7 +244,7 @@ export function OpportunitiesTab({ data, lang, t, act, calls }) {
                 {state[o.id] ? <Status value={state[o.id]} t={t} /> : (
                   <PersonPicker team={data.team || []} label={t.sendToSales} t={t} onPick={who => go(o.id, () => calls.sendToSales(o.id, who))} />
                 )}
-                {o.source_url && <a href={o.source_url} target="_blank" rel="noreferrer" className="text-xs text-amber-800 hover:underline">{t.source}</a>}
+                {o.source_url && <a href={o.source_url} target="_blank" rel="noreferrer" className="text-xs text-text underline-offset-2 hover:underline">{t.source}</a>}
               </div>
             </li>
           ))}

@@ -24,17 +24,16 @@ export function Sidebar({ onNavigate }) {
 
   return (
     <aside aria-label={section.label} data-print-hide
-      className="w-52 flex-shrink-0 flex flex-col h-full overflow-hidden bg-white border-r border-border">
-      {/* The section's name, the height of the top bar so the two rules form
-          one line across the window. */}
-      <div className="h-14 flex-shrink-0 px-5 flex flex-col justify-center border-b border-border">
+      className="w-52 flex-shrink-0 flex flex-col h-full overflow-hidden bg-surface-muted border-r border-border">
+      {/* The section's name, level with the top bar's title. */}
+      <div className="h-14 flex-shrink-0 px-4 flex flex-col justify-center">
         <p className="font-semibold text-text text-sm leading-none tracking-tight">{section.label}</p>
-        <p className="eyebrow text-text-tertiary mt-1">Arak</p>
+        <p className="text-[11px] text-text-tertiary mt-1">Arak</p>
       </div>
 
-      {/* Items run full-bleed so the active marker sits flush against the
-          sidebar's own border; an inset pill would float it in a gutter. */}
-      <nav className="flex-1 overflow-y-auto scrollbar-thin py-3" onClick={e => { if (e.target.closest('a')) onNavigate?.() }}>
+      {/* v2: inset rounded items, the selected one a soft grey pill
+          (.nav-active), as in shadcn/ui's sidebars. */}
+      <nav className="flex-1 overflow-y-auto scrollbar-thin p-2 space-y-0.5" onClick={e => { if (e.target.closest('a')) onNavigate?.() }}>
         {pages.map(item => (
           <NavLink key={item.to} to={item.to} end={item.exact}
             // `notUnder` carves child routes out of a prefix match: the Post
@@ -43,13 +42,13 @@ export function Sidebar({ onNavigate }) {
             // am I".
             className={({ isActive: matched }) => {
               const isActive = matched && !(item.notUnder || []).some(p => pathname.startsWith(p))
-              return `flex items-center gap-2.5 pl-[18px] pr-4 py-1.5 text-[13px] w-full border-l-2 border-transparent transition-colors duration-150
-                ${isActive ? 'nav-active' : 'text-text-secondary hover:bg-surface-subtle hover:text-text'}`
+              return `flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] w-full transition-colors duration-150
+                ${isActive ? 'nav-active' : 'text-text-secondary hover:bg-stone-100 hover:text-text'}`
             }}>
             <span className="flex-shrink-0"><NavIcon name={item.icon} /></span>
             <span className="flex-1 truncate">{item.label}</span>
             {item.badge && badges[item.badge] > 0 && (
-              <span className="flex-shrink-0 min-w-[16px] h-4 px-1 flex items-center justify-center text-[10px] font-bold text-white bg-amber-700">
+              <span className="flex-shrink-0 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full text-[10px] font-semibold text-white bg-stone-900">
                 {badges[item.badge]}
               </span>
             )}

@@ -1,10 +1,10 @@
-/* DM Sans only. The display serif (Cormorant Garamond) that used to load here
+/* Inter (v2; DM Sans in v1), plus IBM Plex Sans Arabic for Arabic. The display serif (Cormorant Garamond) that used to load here
    is gone: the boxy pass replaced every `font-display` heading with the sans
    at a matched weight, so the serif had zero call sites left and was costing a
    render-blocking webfont request on every page load to paint nothing. To put
    a display face back, re-add it here AND to fontFamily.display in
    tailwind.config.js — both, or the class silently does nothing. */
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap');
 
 /* The Creative Studio overlay-editor typefaces are NOT imported here.
 
@@ -153,11 +153,10 @@
    every inactive one; the transparent border on the base state (see
    Sidebar.jsx) holds that column steady. */
 .nav-active {
-  /* v2: a quiet warm-grey fill, ink text, and the one gold mark: Arak's
-     "light" shows where you are. */
-  background-color: theme('colors.stone.100');
-  @apply text-amber-900 font-semibold;
-  border-left-color: theme('colors.amber.500');
+  /* v2: the selected item is a soft grey pill with ink text and no marker
+     bar, as in shadcn/ui's sidebars (and Linear, Attio). */
+  background-color: theme('colors.stone.200 / 70%');
+  @apply text-text font-medium;
 }
 
 /* ─── Printing a report ──────────────────────────────────────────────────
@@ -229,4 +228,19 @@
 @page {
   size: A4;
   margin: 14mm 13mm;
+}
+
+/* ─── v2: boxes get the same soft corner ────────────────────────────────
+   v1 drew its cards and panels by hand: 136 white bordered boxes across the
+   pages, 17 of them with a rounded-* class. Rounding only the shared
+   components would leave the rest square beside them. So every white box
+   with a border gets the cards' radius here, in the components layer: any
+   element that names its own rounded-* (a utility) still wins over it. */
+@layer components {
+  .bg-white.border,
+  .bg-surface.border,
+  .bg-surface-muted.border,
+  .bg-surface-subtle.border {
+    border-radius: theme('borderRadius.lg');
+  }
 }

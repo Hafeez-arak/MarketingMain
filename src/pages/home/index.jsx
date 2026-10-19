@@ -36,15 +36,14 @@ export function HomePage() {
           return (
             <li key={s.key}>
               <Link to={s.pages[0].to}
-                className="group relative flex flex-col h-full bg-white border border-border px-4 py-4 hover:border-amber-400 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400">
-                {/* Light against dark: Arak's gold on its near-black. */}
-                <span className="w-10 h-10 flex items-center justify-center bg-stone-950 text-amber-400">
+                className="group relative flex flex-col h-full bg-white border border-border rounded-xl px-4 py-4 hover:bg-stone-50 hover:border-stone-300 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-300">
+                <span className="w-9 h-9 rounded-lg flex items-center justify-center bg-stone-100 text-text border border-border">
                   <NavIcon name={s.icon} className="w-5 h-5" />
                 </span>
                 <span className="text-sm font-semibold text-text mt-3">{s.label}</span>
                 <span className="text-[11px] text-text-secondary leading-snug mt-1 line-clamp-3">{s.blurb}</span>
                 {n > 0 && (
-                  <span className="absolute top-3 right-3 min-w-[20px] h-5 px-1.5 flex items-center justify-center text-[11px] font-bold text-white bg-red-600 rounded-full"
+                  <span className="absolute top-3 right-3 min-w-[20px] h-5 px-1.5 flex items-center justify-center text-[11px] font-semibold text-white bg-red-500 rounded-full"
                     title={`${n} waiting`}>
                     {n}
                   </span>
@@ -60,10 +59,10 @@ export function HomePage() {
         <ul className="flex flex-wrap gap-2">
           {GLOBAL_PAGES.map(g => (
             <li key={g.to}>
-              <Link to={g.to} className="inline-flex items-center gap-2 bg-white border border-border px-3 py-2 text-xs text-text hover:border-stone-400">
+              <Link to={g.to} className="inline-flex items-center gap-2 bg-white border border-border rounded-md px-3 py-2 text-xs text-text hover:bg-stone-50">
                 <NavIcon name={g.icon} />
                 {g.label}
-                {g.badge && badges[g.badge] > 0 && <span className="text-[10px] font-bold text-white bg-amber-700 px-1">{badges[g.badge]}</span>}
+                {g.badge && badges[g.badge] > 0 && <span className="text-[10px] font-semibold text-white bg-stone-900 rounded-full px-1.5">{badges[g.badge]}</span>}
               </Link>
             </li>
           ))}

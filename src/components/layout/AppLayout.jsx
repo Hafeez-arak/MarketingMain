@@ -56,9 +56,12 @@ export function AppLayout({ children }) {
       {navOpen && (
         <div className="fixed inset-0 z-40 bg-black/30 md:hidden" aria-hidden="true" onClick={closeNav} data-print-hide />
       )}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden" data-print-shell>
+      {/* v2: the page sits in a white rounded panel inset on the grey frame,
+          shadcn/ui's "inset" sidebar layout. Edge to edge on a phone. */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-surface-muted md:py-2 md:pr-2" data-print-shell>
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-white md:rounded-xl md:border md:border-border" data-print-shell>
         <Topbar navOpen={navOpen} onMenu={() => (navOpen ? closeNav() : setNavOpenAt(location.pathname))} />
-        <main className="flex-1 overflow-y-auto scrollbar-thin bg-surface-muted" data-print-shell>
+        <main className="flex-1 overflow-y-auto scrollbar-thin bg-white" data-print-shell>
           {/* One page gutter, everywhere. Pages set their own max-width and
               internal rhythm, but none of them should change this number —
               the gutter is what makes a card's left edge line up with the
@@ -66,6 +69,7 @@ export function AppLayout({ children }) {
               24px a side is an eighth of the screen. */}
           <div key={location.pathname} className="p-3 md:p-6 page-enter" data-print-gutter>{children}</div>
         </main>
+      </div>
       </div>
       {/* Mounted at the layout, not per page, so the conversation survives
           navigation. AGENT.md §5a: continuing a thread across screens is the

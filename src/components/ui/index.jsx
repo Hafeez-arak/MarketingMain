@@ -6,16 +6,14 @@ import { STATUS_META, PLATFORM_META } from '../../lib/utils'
    One design language, enforced here so pages don't each invent their own.
 
    The rules:
-   · Square corners. Not "small radius" — zero. The radius scale in
-     tailwind.config.js resolves every rounded-* class to 0px, so a component
-     can't opt back into a pill by accident. Circles are reserved for things
-     that are actually circular: Avatar, Spinner, status dots.
+   · Soft corners (v2): 6px controls, 8px boxes, 12px modals; tailwind.config.js
+     keeps the scale small so nothing turns into a pill. Circles are reserved
+     for things that are actually circular: Avatar, Spinner, status dots.
    · Structure comes from 1px rules, never from elevation. Only surfaces that
      genuinely float above the page (Modal, dropdowns) carry a shadow.
-   · Ink for action, gold for light (v2, Arak's own palette). Near-black
-     (amber-700 #1c1917) marks the primary action on a screen; Arak's gold
-     (amber-50…600) is the only colour, used for highlights and markers;
-     everything else is white, warm border, and ink.
+   · v2 (2026-10-19), shadcn/ui-style: near-black (amber-700 #18181b) marks
+     the primary action; everything else is white, neutral grey and ink,
+     with colour only for state. Controls and boxes have soft corners.
    · Controls share a border on every variant — including a transparent one on
      the borderless variants — so a row of mixed buttons lines up on the same
      baseline instead of the ghost ones sitting 2px short.
@@ -26,10 +24,10 @@ import { STATUS_META, PLATFORM_META } from '../../lib/utils'
    reads like it still does something.
 ──────────────────────────────────────────────────────────────────────────── */
 
-const FOCUS = 'focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-700 focus-visible:ring-offset-1 focus-visible:ring-offset-white'
+const FOCUS = 'focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 focus-visible:ring-offset-1 focus-visible:ring-offset-white'
 
 export function Button({ variant='primary', size='md', children, onClick, disabled, type='button', className='', ...rest }) {
-  const base = `inline-flex items-center justify-center gap-2 font-semibold border transition-colors duration-150 cursor-pointer disabled:opacity-40 disabled:pointer-events-none ${FOCUS}`
+  const base = `inline-flex items-center justify-center gap-2 rounded-md font-medium border transition-colors duration-150 cursor-pointer disabled:opacity-40 disabled:pointer-events-none ${FOCUS}`
   // Vertical padding is tuned per size so every variant lands on an exact
   // pixel height (28/32/38/44) — square corners make a half-pixel mismatch
   // between two adjacent buttons obvious in a way rounded ones hide.
@@ -60,7 +58,7 @@ export function Button({ variant='primary', size='md', children, onClick, disabl
 export function Badge({ status, children, className='' }) {
   const cfg = STATUS_META[status]
   return (
-    <span className={`inline-flex items-center px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] leading-[1.4] whitespace-nowrap
+    <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] leading-[1.4] whitespace-nowrap
       ${cfg ? cfg.classes : 'bg-stone-100 text-stone-600'} ${className}`}>
       {cfg ? cfg.label : children}
     </span>
@@ -74,7 +72,7 @@ export function PlatformPill({ platform }) {
   const m = PLATFORM_META[platform]
   if (!m) return null
   return (
-    <span className={`inline-flex items-center gap-1.5 pl-1.5 pr-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] leading-[1.4]
+    <span className={`inline-flex items-center gap-1.5 rounded pl-1.5 pr-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] leading-[1.4]
       bg-surface-subtle text-text-secondary border-l-2 whitespace-nowrap`}
       style={{ borderLeftColor: m.color }}>
       {m.label}
@@ -137,8 +135,8 @@ export function SectionHead({ title, subtitle, action, bordered = true }) {
 /* Fields. A 1px ring drawn tight to a square edge reads as the border
    thickening; the old 2px blurred halo with a transparent border made the
    field look like it had grown, and left a rounded glow around a sharp box. */
-const fieldBase = `w-full border border-border bg-white text-text placeholder-text-tertiary text-sm
-  transition-colors duration-150 focus:outline-none focus:border-amber-700 focus:ring-1 focus:ring-amber-700`
+const fieldBase = `w-full rounded-md border border-border bg-white text-text placeholder-text-tertiary text-sm
+  transition-colors duration-150 focus:outline-none focus:border-stone-400 focus:ring-2 focus:ring-stone-200`
 
 export function Input({ label, hint, error, className='', ...props }) {
   return (
@@ -209,10 +207,10 @@ export function Modal({ open, onClose, title, children, width='max-w-lg' }) {
   return createPortal(
     <div ref={ref} onClick={e => e.target === ref.current && onClose()}
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(28,35,33,0.45)' }}>
+      style={{ background: 'rgba(9,9,11,0.40)' }}>
       {/* The one place elevation survives: a modal must read as detached from
           the page behind it, and there is no rule to do that job here. */}
-      <div className={`bg-white shadow-dropdown w-full ${width} max-h-[90vh] flex flex-col animate-fade-scale border border-border`}>
+      <div className={`bg-white shadow-dropdown rounded-xl overflow-hidden w-full ${width} max-h-[90vh] flex flex-col animate-fade-scale border border-border`}>
         <div className="flex items-center justify-between gap-4 px-5 py-3.5 border-b border-border flex-shrink-0">
           <h2 className="font-semibold text-text text-sm">{title}</h2>
           <button onClick={onClose} aria-label="Close"

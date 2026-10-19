@@ -2,90 +2,88 @@
 export default {
   content: ['./index.html','./src/**/*.{js,jsx,ts,tsx}'],
   theme: {
-    // Declared OUTSIDE `extend` on purpose: this replaces Tailwind's radius
-    // scale rather than adding to it, so every `rounded-*` class already
-    // written across the app collapses to a square corner in one move. That
-    // matters at this size — there are ~470 rounded-* usages across 25 pages,
-    // and chasing them by hand would guarantee a few stragglers keeping their
-    // pill shape on some page nobody reopened.
-    //
-    // `full` is the one deliberate exception. It survives because some things
-    // are genuinely circular and would look broken squared off: avatars,
-    // status dots, and spinners. Anything that is a *box* — cards, buttons,
-    // inputs, modals, badges, tags — must not use it.
+    // Declared OUTSIDE `extend` on purpose: it replaces Tailwind's radius
+    // scale, so every rounded-* class already written follows it in one move.
+    // v2 (2026-10-19): small radii, as shadcn/ui and the products it is
+    // modelled on (Vercel, Linear, Attio). v1 set every value to 0 for a
+    // boxy look; the owner found the result "weird" (2026-10-19). Kept modest so the ~470
+    // rounded-* classes v1's pages still carry round gently, not into pills.
+    // `full` stays for what is truly round: avatars, dots, spinners.
     borderRadius: {
       none:    '0px',
-      sm:      '0px',
-      DEFAULT: '0px',
-      md:      '0px',
-      lg:      '0px',
-      xl:      '0px',
-      '2xl':   '0px',
-      '3xl':   '0px',
-      '4xl':   '0px',
+      sm:      '4px',
+      DEFAULT: '6px',
+      md:      '6px',
+      lg:      '8px',
+      xl:      '10px',
+      '2xl':   '12px',
+      '3xl':   '12px',
+      '4xl':   '12px',
       full:    '9999px',
     },
     extend: {
       fontFamily: {
-        // One Latin family. Arabic falls through to IBM Plex Sans Arabic
-        // (loaded in src/index.css) rather than whatever the system has: DM
-        // Sans has no Arabic glyphs, and the CEO reads the app in Arabic.
-        sans: ['"DM Sans"', '"IBM Plex Sans Arabic"', 'system-ui', 'sans-serif'],
+        // Inter: the face of most clean professional software (Linear,
+        // Attio, Vercel's dashboards, shadcn/ui's examples). Arabic falls
+        // through to IBM Plex Sans Arabic, since Inter has no Arabic glyphs
+        // and the CEO reads the app in Arabic.
+        sans: ['Inter', '"IBM Plex Sans Arabic"', 'system-ui', 'sans-serif'],
       },
-      // ── v2 palette (2026-10-19): Arak's own identity ──
-      // Brand Brain, Arak: near-black #0A0A0A, warm cream #FEFBF6, mid grey
-      // #828182, and "the only accent colour is the light itself: a warm
-      // amber/gold glow". So the UI is warm neutrals, near-black for anything
-      // strong, and gold used sparingly. No gradients, no glow, no purple.
+      // ── v2 palette (2026-10-19): neutral, shadcn/ui-style ──
+      // Researched on the owner's request ("look on the internet for simple,
+      // clean, professional ones with a similar format"). The reference is
+      // shadcn/ui's sidebar blocks (an icon rail beside a second panel, the
+      // same layout as ours), in the lineage of Linear, Stripe and Attio.
+      // Their shared rules: a light, quiet frame; neutral greys; near-black
+      // for the primary action; colour only for state. The black-and-gold
+      // first try was rejected.
       //
       // The class NAMES stay what ~140 files already use; their values
-      // change:
-      //   amber  = the accent scale. Its light end (50–600) is the gold
-      //            light: highlights, markers, warnings, focus borders. Its
-      //            dark end (700–900) is ink, because v1 used amber-700 as
-      //            "the primary action": primary buttons, toggles, selected
-      //            chips and links become near-black, which is cleaner than
-      //            a gold or a steel fill.
-      //   stone  = warm neutral greys (Tailwind's own stone family).
-      //   clay   = the secondary dark, now the same warm neutrals.
-      //   sage   = unchanged: green means "good" whatever the brand.
+      // change, so every page takes the look without edits:
+      //   amber = v1's accent scale, now neutral. Its light end (50–300) is
+      //           the soft grey of hover and selection; its dark end (700–
+      //           900) is the near-black of primary buttons and toggles.
+      //           It no longer means "warning": state uses Tailwind's own
+      //           yellow / red / green.
+      //   stone, clay = Tailwind's neutral greys.
+      //   sage  = unchanged: green means "good".
       colors: {
         amber: {
-          50:  '#fdf9f1',
-          100: '#faf0dc',
-          200: '#f2ddb2',
-          300: '#e6c27c',
-          400: '#d9a54c',
-          500: '#c68a2c',
-          600: '#9a6a20',
-          700: '#1c1917',
-          800: '#0c0a09',
-          900: '#0a0a0a',
+          50:  '#fafafa',
+          100: '#f4f4f5',
+          200: '#e4e4e7',
+          300: '#d4d4d8',
+          400: '#a1a1aa',
+          500: '#71717a',
+          600: '#52525b',
+          700: '#18181b',
+          800: '#09090b',
+          900: '#09090b',
         },
         stone: {
-          50:  '#fafaf9',
-          100: '#f5f5f4',
-          200: '#e7e5e4',
-          300: '#d6d3d1',
-          400: '#a8a29e',
-          500: '#78716c',
-          600: '#57534e',
-          700: '#44403c',
-          800: '#292524',
-          900: '#1c1917',
-          950: '#0c0a09',
+          50:  '#fafafa',
+          100: '#f4f4f5',
+          200: '#e4e4e7',
+          300: '#d4d4d8',
+          400: '#a1a1aa',
+          500: '#71717a',
+          600: '#52525b',
+          700: '#3f3f46',
+          800: '#27272a',
+          900: '#18181b',
+          950: '#09090b',
         },
         clay: {
-          50:  '#fafaf9',
-          100: '#f5f5f4',
-          200: '#e7e5e4',
-          300: '#d6d3d1',
-          400: '#a8a29e',
-          500: '#78716c',
-          600: '#57534e',
-          700: '#292524',
-          800: '#1c1917',
-          900: '#0c0a09',
+          50:  '#fafafa',
+          100: '#f4f4f5',
+          200: '#e4e4e7',
+          300: '#d4d4d8',
+          400: '#a1a1aa',
+          500: '#71717a',
+          600: '#52525b',
+          700: '#27272a',
+          800: '#18181b',
+          900: '#09090b',
         },
         // Sage stays untouched — Approved/Published/Live status colors carry
         // usability meaning (green = good) independent of brand color.
@@ -103,21 +101,21 @@ export default {
         },
         surface: {
           DEFAULT: '#ffffff',
-          muted:   '#f7f6f3',   // the page: Arak's cream, a step darker so white cards read
-          subtle:  '#fafaf8',   // hover and table stripes
+          muted:   '#fafafa',   // the frame: rail, section menu, page behind the panel
+          subtle:  '#f4f4f5',   // hover, selected rows
           card:    '#ffffff',
-          warm:    '#fefbf6',   // Arak's cream itself
+          warm:    '#fafafa',
         },
         border: {
-          DEFAULT: '#e7e5e0',
-          strong:  '#d6d3d1',
-          light:   '#f0eeea',
+          DEFAULT: '#e4e4e7',
+          strong:  '#d4d4d8',
+          light:   '#f4f4f5',
         },
         text: {
-          DEFAULT:   '#1c1917',
-          secondary: '#57534e',
-          tertiary:  '#78716c',   // 4.8:1 on white, so small print stays readable
-          disabled:  '#a8a29e',
+          DEFAULT:   '#09090b',
+          secondary: '#52525b',
+          tertiary:  '#71717a',   // 4.8:1 on white
+          disabled:  '#a1a1aa',
         },
       },
       boxShadow: {
@@ -133,17 +131,16 @@ export default {
         'amber':     'none',
         'amber-lg':  'none',
         'clay':      'none',
-        'dropdown':  '0 8px 24px rgba(12,10,9,0.10), 0 2px 6px rgba(12,10,9,0.06)',
+        'dropdown':  '0 10px 30px rgba(9,9,11,0.08), 0 2px 6px rgba(9,9,11,0.05)',
         'inset':     'none',
       },
       backgroundImage: {
-        // No gradients in v2, the logo mark included: Arak's mark is a solid
-        // near-black square. The *-gradient names stay so existing call
-        // sites keep working; each paints one colour.
-        'logo-mark':      'linear-gradient(#0a0a0a, #0a0a0a)',
-        'amber-gradient': 'linear-gradient(#1c1917, #1c1917)',
-        'clay-gradient':  'linear-gradient(#292524, #292524)',
-        'warm-gradient':  'linear-gradient(#fefbf6, #fefbf6)',
+        // No gradients in v2, the logo mark included. The *-gradient names
+        // stay so existing call sites keep working; each paints one colour.
+        'logo-mark':      'linear-gradient(#18181b, #18181b)',
+        'amber-gradient': 'linear-gradient(#18181b, #18181b)',
+        'clay-gradient':  'linear-gradient(#27272a, #27272a)',
+        'warm-gradient':  'linear-gradient(#fafafa, #fafafa)',
         'card-warm':      'linear-gradient(#ffffff, #ffffff)',
         'hero-warm':      'none',
         'sidebar-warm':   'linear-gradient(#ffffff, #ffffff)',

@@ -50,13 +50,13 @@ export function Topbar({ navOpen = false, onMenu }) {
         {/* The sidebar is a drawer below md; this opens it. */}
         {onMenu && (
           <button id="nav-toggle" type="button" onClick={onMenu} aria-label="Menu" aria-controls="app-sidebar" aria-expanded={navOpen}
-            className="md:hidden w-8 h-8 flex items-center justify-center text-text-secondary hover:bg-surface-subtle hover:border-stone-400 border border-border transition-colors flex-shrink-0">
+            className="md:hidden w-8 h-8 rounded-md flex items-center justify-center text-text-secondary hover:bg-surface-subtle hover:border-stone-400 border border-border transition-colors flex-shrink-0">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
           </button>
         )}
         {backTarget && (
           <button onClick={() => navigate(backTarget)}
-            className="w-7 h-7 flex items-center justify-center text-text-secondary hover:bg-surface-subtle hover:text-text hover:border-stone-400 border border-border transition-colors flex-shrink-0">
+            className="w-7 h-7 rounded-md flex items-center justify-center text-text-secondary hover:bg-surface-subtle hover:text-text hover:border-stone-400 border border-border transition-colors flex-shrink-0">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
           </button>
         )}
@@ -75,7 +75,7 @@ export function Topbar({ navOpen = false, onMenu }) {
         {/* Notifications */}
         <div className="relative">
           <button onClick={() => setShowNotifs(v => !v)}
-            className="relative w-8 h-8 flex items-center justify-center text-text-secondary hover:bg-surface-subtle hover:border-stone-400 border border-border transition-colors">
+            className="relative w-8 h-8 rounded-md flex items-center justify-center text-text-secondary hover:bg-surface-subtle hover:border-stone-400 border border-border transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
               <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
             </svg>
@@ -129,8 +129,8 @@ export function Topbar({ navOpen = false, onMenu }) {
         {/* Workspace + sign out */}
         <div className="relative">
           <button onClick={() => setShowAccount(v => !v)}
-            className="flex items-center gap-2 h-8 pl-1 pr-2.5 border border-border hover:bg-surface-subtle hover:border-stone-400 transition-colors">
-            <div className="w-6 h-6 bg-amber-700 flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0">
+            className="flex items-center gap-2 h-8 pl-1 pr-2.5 rounded-md border border-border hover:bg-surface-subtle hover:border-stone-400 transition-colors">
+            <div className="w-6 h-6 rounded bg-amber-700 flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0">
               {(activeWorkspace?.name || '?').slice(0, 1).toUpperCase()}
             </div>
             <span className="hidden sm:inline text-xs font-medium text-text max-w-[120px] truncate">{activeWorkspace?.name || 'Workspace'}</span>
