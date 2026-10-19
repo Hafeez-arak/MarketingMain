@@ -3,9 +3,13 @@ import { useLocation } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { Rail } from './Rail'
 import { useNavBadges, NavBadgesContext } from './useNavBadges'
+import { useAuth } from '../../store/auth'
+import { menuPages } from '../../lib/modules'
 import { Topbar } from './Topbar'
 import { AssistantDrawer } from '../AssistantDrawer'
 import { usePublishWatch } from '../../lib/usePublishWatch'
+
+const MENU_KEY = 'arak.v2.menu'
 
 export function AppLayout({ children }) {
   const location = useLocation()
@@ -16,6 +20,28 @@ export function AppLayout({ children }) {
   // The counts on navigation items, read once and shared with the rail, the
   // section sidebar and Home's tiles.
   const badges = useNavBadges()
+  const { isAccessAdmin } = useAuth()
+  // The section menu can be hidden for more room (desktop only; on a phone
+  // it lives in the drawer). Remembered per browser.
+  const [menuHidden, setMenuHidden] = useState(() => {
+    try { return localStorage.getItem(MENU_KEY) === 'hidden' } catch { return false }
+  })
+  const hasMenu = menuPages(location.pathname, { isAccessAdmin }).length > 0
+  const toggleMenu = () => setMenuHidden(h => {
+    try { localStorage.setItem(MENU_KEY, h ? 'shown' : 'hidden') } catch { /* private window */ }
+    return !h
+  })
+  // Ctrl/⌘+B, as in shadcn/ui and most editors. Not while typing.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!(e.key === 'b' || e.key === 'B') || !(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return
+      if (e.target.closest?.('input, textarea, select, [contenteditable="true"]')) return
+      e.preventDefault()
+      toggleMenu()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
   // The phone drawer (below md). Kept as the path it was opened on, so any
   // navigation — a link, the bell, a workspace switch — closes it without an
   // effect resetting state.
@@ -51,7 +77,7 @@ export function AppLayout({ children }) {
           max-md:transition-[transform,visibility] max-md:duration-200
           ${navOpen ? '' : 'max-md:-translate-x-full max-md:invisible'}`}>
         <Rail onNavigate={closeNav} />
-        <Sidebar onNavigate={closeNav} />
+        <Sidebar onNavigate={closeNav} collapsed={menuHidden} />
       </div>
       {navOpen && (
         <div className="fixed inset-0 z-40 bg-black/30 md:hidden" aria-hidden="true" onClick={closeNav} data-print-hide />
@@ -60,7 +86,8 @@ export function AppLayout({ children }) {
           shadcn/ui's "inset" sidebar layout. Edge to edge on a phone. */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-surface-muted md:py-2 md:pr-2" data-print-shell>
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-white md:rounded-xl md:border md:border-border" data-print-shell>
-        <Topbar navOpen={navOpen} onMenu={() => (navOpen ? closeNav() : setNavOpenAt(location.pathname))} />
+        <Topbar navOpen={navOpen} onMenu={() => (navOpen ? closeNav() : setNavOpenAt(location.pathname))}
+          menuHidden={hasMenu ? menuHidden : null} onToggleMenu={toggleMenu} />
         <main className="flex-1 overflow-y-auto scrollbar-thin bg-white" data-print-shell>
           {/* One page gutter, everywhere. Pages set their own max-width and
               internal rhythm, but none of them should change this number —

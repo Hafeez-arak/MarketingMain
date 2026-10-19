@@ -3,6 +3,7 @@ import { useAuth } from '../../store/auth'
 import { HOME, GLOBAL_PAGES, sectionsFor, sectionOf } from '../../lib/modules'
 import { NavIcon } from './icons'
 import { useBadges, sectionBadge } from './useNavBadges'
+import { ArakMark } from './ArakMark'
 
 // ─── The rail: one icon per section (v2) ───────────────────────────────────
 // 2026-10-19. The far-left column: the logo, Home, the sections this person
@@ -11,10 +12,11 @@ import { useBadges, sectionBadge } from './useNavBadges'
 // alone cannot do: it sends you back to Home each time. See lib/modules.js
 // and docs/COMPANY-HUB-PLAN.md.
 
-// Light and quiet, as in shadcn/ui's icon-rail sidebar (and Linear, Attio):
-// the open section is a soft grey square with ink, the rest are grey icons.
-const cell = active => `relative w-9 h-9 rounded-md flex items-center justify-center transition-colors
-  ${active ? 'bg-stone-200/70 text-text' : 'text-text-tertiary hover:bg-stone-100 hover:text-text'}`
+// Light and quiet (shadcn/ui), with a short label under each icon, as in
+// Slack's rail (the owner asked for it, 2026-10-19): an icon alone made people
+// guess. The open section's icon sits in a soft grey square.
+const box = active => `relative w-10 h-8 rounded-lg flex items-center justify-center transition-colors
+  ${active ? 'bg-stone-200/80 text-text' : 'text-text-secondary group-hover:bg-stone-100 group-hover:text-text'}`
 
 function Dot({ n }) {
   if (!n) return null
@@ -32,30 +34,28 @@ export function Rail({ onNavigate }) {
   const sections = sectionsFor({ isAccessAdmin })
   const here = sectionOf(pathname)?.key || null
 
-  // The rail's labels are tooltips and aria-labels: at 56px there is no room
-  // for words, and the section sidebar beside it names the open section.
   const link = (to, label, icon, active, n) => (
-    <NavLink key={to} to={to} title={label} aria-label={label} aria-current={active ? 'page' : undefined} onClick={onNavigate} className={cell(active)}>
-      <NavIcon name={icon} className="w-5 h-5" />
-      <Dot n={n} />
+    <NavLink key={to} to={to} aria-current={active ? 'page' : undefined} onClick={onNavigate}
+      className="group w-full flex flex-col items-center gap-1 py-1 focus:outline-none focus-visible:[&>span:first-child]:ring-2 focus-visible:[&>span:first-child]:ring-stone-300">
+      <span className={box(active)}>
+        <NavIcon name={icon} className="w-[18px] h-[18px]" />
+        <Dot n={n} />
+      </span>
+      <span className={`text-[10px] leading-tight text-center ${active ? 'text-text font-semibold' : 'text-text-secondary group-hover:text-text'}`}>{label}</span>
     </NavLink>
   )
 
   return (
     <nav aria-label="Sections" data-print-hide
-      className="w-14 flex-shrink-0 h-full bg-surface-muted border-r border-border flex flex-col items-center py-2 gap-1">
-      {/* The brand mark, the height of the top bar so their rules line up. */}
-      <div className="h-12 flex items-center justify-center mb-1">
-        <div className="w-8 h-8 rounded-lg bg-stone-900 flex items-center justify-center" title="Arak">
-          <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/>
-          </svg>
-        </div>
+      className="w-[72px] flex-shrink-0 h-full bg-surface-muted border-r border-border flex flex-col items-center py-2 overflow-y-auto scrollbar-thin">
+      {/* Arak's mark, at the top bar's height so the two line up. */}
+      <div className="h-12 flex items-center justify-center mb-1 flex-shrink-0">
+        <ArakMark />
       </div>
       {link(HOME.to, HOME.label, HOME.icon, pathname === '/', 0)}
-      <span className="w-6 border-t border-border my-1" aria-hidden="true" />
+      <span className="w-8 border-t border-border my-1.5 flex-shrink-0" aria-hidden="true" />
       {sections.map(s => link(s.pages[0].to, s.label, s.icon, here === s.key, sectionBadge(s, badges)))}
-      <div className="flex-1" />
+      <div className="flex-1 min-h-4" />
       {GLOBAL_PAGES.map(g => link(g.to, g.label, g.icon, pathname === g.to || pathname.startsWith(`${g.to}/`), g.badge ? badges[g.badge] : 0))}
     </nav>
   )

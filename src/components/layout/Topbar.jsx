@@ -14,7 +14,7 @@ const BACK_TARGETS = {
   '/marketing/campaigns/plan': '/marketing/campaigns',
 }
 
-export function Topbar({ navOpen = false, onMenu }) {
+export function Topbar({ navOpen = false, onMenu, menuHidden = null, onToggleMenu }) {
   const location = useLocation()
   const navigate  = useNavigate()
   const { state, dispatch } = useApp()
@@ -52,6 +52,14 @@ export function Topbar({ navOpen = false, onMenu }) {
           <button id="nav-toggle" type="button" onClick={onMenu} aria-label="Menu" aria-controls="app-sidebar" aria-expanded={navOpen}
             className="md:hidden w-8 h-8 rounded-md flex items-center justify-center text-text-secondary hover:bg-surface-subtle hover:border-stone-400 border border-border transition-colors flex-shrink-0">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+          </button>
+        )}
+        {/* Show / hide the section menu (desktop). Only where there is one. */}
+        {menuHidden !== null && onToggleMenu && (
+          <button type="button" onClick={onToggleMenu} title={`${menuHidden ? 'Show' : 'Hide'} menu (Ctrl+B)`}
+            aria-label={menuHidden ? 'Show menu' : 'Hide menu'} aria-pressed={!menuHidden}
+            className="hidden md:flex w-7 h-7 rounded-md items-center justify-center text-text-tertiary hover:bg-stone-100 hover:text-text flex-shrink-0">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/></svg>
           </button>
         )}
         {backTarget && (

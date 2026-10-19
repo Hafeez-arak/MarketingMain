@@ -160,6 +160,18 @@ export function sectionsFor(who = {}) {
     .filter(s => s.pages.length)
 }
 
+/**
+ * The pages the section menu lists for this path and person: none on Home
+ * and the global pages, and none for a one-page section (the rail already
+ * opened it, and a column holding one link is space taken for nothing).
+ */
+export function menuPages(pathname, who = {}) {
+  const section = sectionOf(pathname)
+  if (!section) return []
+  const pages = section.pages.filter(pg => !pg.hidden && canOpen(pg, who))
+  return pages.length < 2 ? [] : pages
+}
+
 /** The section a path belongs to, or null for Home and the global pages. */
 export function sectionOf(pathname) {
   const p = String(pathname || '')

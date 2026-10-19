@@ -4,6 +4,7 @@ import { useAuth } from '../../store/auth'
 import { Button } from '../../components/ui/index'
 import { useInbox } from '../../lib/useInbox'
 import { timeAgo } from '../../lib/utils'
+import { ArakMark } from '../../components/layout/ArakMark'
 
 // ─── The sales team's frame: a bar across the top, two pages down the side ──
 // Since 2026-10-19 the sales app is two pages, not one: Leads (the Inbox and
@@ -119,11 +120,7 @@ export default function SalesShell({ children, onOpenLead }) {
       <header className="h-14 flex-shrink-0 bg-white border-b border-border">
         <div className="h-full px-4 md:px-5 flex items-center gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 bg-logo-mark flex items-center justify-center flex-shrink-0">
-              <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/>
-              </svg>
-            </div>
+            <ArakMark size="w-8 h-8" />
             <div className="min-w-0">
               <p className="font-semibold text-text text-sm leading-none tracking-tight">Arak</p>
               <p className="eyebrow text-text-tertiary mt-1">Sales</p>

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  SECTIONS, GLOBAL_PAGES, LEGACY, fromLegacy, toLegacy, sectionsFor, sectionOf, pageTitle, ALL_PAGES,
+  SECTIONS, GLOBAL_PAGES, LEGACY, fromLegacy, toLegacy, sectionsFor, sectionOf, pageTitle, ALL_PAGES, menuPages,
 } from './modules.js'
 
 describe('the section registry', () => {
@@ -68,5 +68,15 @@ describe('where am I', () => {
     expect(pageTitle('/marketing/campaigns/plan')).toBe('Content Planning')
     expect(pageTitle('/insights/analytics/report')).toBe('Performance Report')
     expect(pageTitle('/nowhere')).toBe('')
+  })
+})
+
+describe('the section menu', () => {
+  it('lists a section\'s visible pages, and nothing for Home, global pages or one-page sections', () => {
+    expect(menuPages('/marketing/schedule').map(p => p.label)).toContain('Schedule')
+    expect(menuPages('/insights/report').map(p => p.to)).toEqual(['/insights', '/insights/analytics'])
+    expect(menuPages('/')).toEqual([])
+    expect(menuPages('/requests')).toEqual([])
+    expect(menuPages('/ceo', { isAccessAdmin: true })).toEqual([])
   })
 })

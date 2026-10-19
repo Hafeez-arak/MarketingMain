@@ -1,6 +1,6 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import { useAuth } from '../../store/auth'
-import { sectionOf, canOpen } from '../../lib/modules'
+import { sectionOf, menuPages } from '../../lib/modules'
 import { NavIcon } from './icons'
 import { useBadges } from './useNavBadges'
 
@@ -11,24 +11,26 @@ import { useBadges } from './useNavBadges'
 // Requests, Settings) and one-page sections get no sidebar: the page gets
 // the width. See lib/modules.js.
 
-export function Sidebar({ onNavigate }) {
+// Collapsible (2026-10-19): the panel button at the left of the top bar, or
+// Ctrl/⌘+B (shadcn/ui's shortcut), hides it; AppLayout keeps the choice. On
+// a phone it is part of the drawer and never collapsed.
+export function Sidebar({ onNavigate, collapsed = false }) {
   const { pathname } = useLocation()
   const { isAccessAdmin } = useAuth()
   const badges = useBadges()
   const section = sectionOf(pathname)
-  if (!section) return null
-  const pages = section.pages.filter(pg => !pg.hidden && canOpen(pg, { isAccessAdmin }))
-  // A one-page section (CEO, Admin today) needs no menu: the rail already
-  // opened it, and a column holding one link is 208px taken for nothing.
-  if (pages.length < 2) return null
+  const pages = menuPages(pathname, { isAccessAdmin })
+  if (!pages.length) return null
 
   return (
     <aside aria-label={section.label} data-print-hide
-      className="w-52 flex-shrink-0 flex flex-col h-full overflow-hidden bg-surface-muted border-r border-border">
+      className={`w-52 flex-shrink-0 flex flex-col h-full overflow-hidden bg-surface-muted border-r border-border ${collapsed ? 'md:hidden' : ''}`}>
       {/* The section's name, level with the top bar's title. */}
-      <div className="h-14 flex-shrink-0 px-4 flex flex-col justify-center">
-        <p className="font-semibold text-text text-sm leading-none tracking-tight">{section.label}</p>
-        <p className="text-[11px] text-text-tertiary mt-1">Arak</p>
+      <div className="h-14 flex-shrink-0 px-4 flex items-center">
+        <div className="flex-1 min-w-0">
+          <p className="font-semibold text-text text-sm leading-none tracking-tight truncate">{section.label}</p>
+          <p className="text-[11px] text-text-tertiary mt-1">Arak</p>
+        </div>
       </div>
 
       {/* v2: inset rounded items, the selected one a soft grey pill
