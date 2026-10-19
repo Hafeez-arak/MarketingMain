@@ -399,6 +399,9 @@ function EventCard({ e, canEdit, onDecision, recent = false }) {
             {EVENT_DECISIONS.map(d => <option key={d} value={d}>{d}</option>)}
           </PillSelect>
         </label>
+      ) : e.id && !recent && e.decision && e.decision !== 'undecided' ? (
+        // Read only (the sales app): what marketing decided, as a fact.
+        <p className="text-xs text-text-tertiary sm:text-right sm:w-[180px]">We are {e.decision}</p>
       ) : null}
       todo={recent ? (e.takeaway || e.recommendation) : e.recommendation}
       todoLabel={recent ? 'What came of it' : 'Our recommendation'}
@@ -671,7 +674,13 @@ function Contents({ tabs, active }) {
 
 // Both filters behind one small menu. The button says what is showing, so a
 // narrowed page never passes for the whole report.
-function FilterMenu({ team, onTeam, lines, line, onLine, untagged }) {
+// What the sales app's Research page shows (2026-10-19): the "Sales" view
+// without the two sections a salesperson cannot act on from there. Website is
+// Google search numbers with a paid "Summarise" button; New competitors is an
+// accept/reject queue that belongs to marketing.
+const READ_ONLY_SECTIONS = ['top', 'sales', 'competitors', 'events', 'poles', 'sources']
+
+function FilterMenu({ team, onTeam, lines, line, onLine, untagged, lockTeam = false }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
   useEffect(() => {
@@ -682,23 +691,28 @@ function FilterMenu({ team, onTeam, lines, line, onLine, untagged }) {
   }, [open])
   const teamLabel = TEAMS.find(t => t.key === team)?.label || 'Everyone'
   const lineName = line === 'all' ? '' : (lines.find(l => l.key === line)?.label || '')
-  const narrowed = team !== 'all' || line !== 'all'
+  const narrowed = (!lockTeam && team !== 'all') || line !== 'all'
+  // Locked to one team, the menu is only the business filter, so it is not
+  // offered at all to a brand with one business.
+  if (lockTeam && lines.length < 2) return null
   return (
     <div ref={ref} data-print-hide className="relative">
       <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open}
         className={`inline-flex items-center gap-1.5 border px-2.5 py-1.5 text-sm transition-colors ${
           narrowed ? 'border-amber-600 bg-amber-50 text-text' : 'border-border bg-white text-text-secondary hover:text-text'}`}>
         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M3 5h18M6 12h12M10 19h4" strokeLinecap="round" /></svg>
-        {narrowed ? [teamLabel, lineName].filter(Boolean).join(' · ') : 'Filter'}
+        {narrowed ? [lockTeam ? '' : teamLabel, lineName].filter(Boolean).join(' · ') : 'Filter'}
       </button>
       {open && (
         <div className="absolute right-0 z-20 mt-1 w-64 border border-border bg-white p-3 shadow-sm space-y-3">
-          <label className="block">
-            <span className="block text-[11px] font-semibold uppercase tracking-wide text-text-tertiary mb-1">For</span>
-            <PillSelect value={team} onChange={e => onTeam(e.target.value)} className="w-full">
-              {TEAMS.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
-            </PillSelect>
-          </label>
+          {!lockTeam && (
+            <label className="block">
+              <span className="block text-[11px] font-semibold uppercase tracking-wide text-text-tertiary mb-1">For</span>
+              <PillSelect value={team} onChange={e => onTeam(e.target.value)} className="w-full">
+                {TEAMS.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
+              </PillSelect>
+            </label>
+          )}
           {/* Only when the run found more than one business line. A brand with
               one undivided business never sees a control that does nothing. */}
           {lines.length > 1 && (
@@ -716,7 +730,7 @@ function FilterMenu({ team, onTeam, lines, line, onLine, untagged }) {
             </p>
           )}
           {narrowed && (
-            <button type="button" onClick={() => { onTeam('all'); onLine('all') }}
+            <button type="button" onClick={() => { if (!lockTeam) onTeam('all'); onLine('all') }}
               className="text-xs font-semibold text-text-secondary underline underline-offset-2 hover:text-text">Show everything</button>
           )}
         </div>
@@ -741,12 +755,18 @@ function Section({ tab, children }) {
 
 // ─── The tab ───────────────────────────────────────────────────────────────
 
-export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRun, running, now }) {
+/**
+ * `readOnly` is the sales app's Research page: the same report, fixed to the
+ * Sales view, with nothing that writes or costs money (no Run research, no
+ * statuses, no event decisions, no Summarise, no watchlist).
+ */
+export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRun, running, now, readOnly = false }) {
   const { activeWorkspaceId, accessToken } = useAuth()
   const report = useMemo(() => run?.report || {}, [run])
   const [params, setParams] = useSearchParams()
 
   const [team, setTeam] = useState(() => {
+    if (readOnly) return 'sales'
     try { return localStorage.getItem('research.team') || 'all' } catch { return 'all' }
   })
   const chooseTeam = useCallback(t => {
@@ -887,7 +907,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
     .filter(n => matchesLine(line, linesOfRefs([n.ref].filter(Boolean), report)))
   const proposedCandidates = candidates.filter(c => c.status === 'proposed')
 
-  const show = key => sectionVisible(key, team)
+  const show = key => (readOnly ? READ_ONLY_SECTIONS.includes(key) : sectionVisible(key, team))
   const showSearch = show('search') && (search.present || !!site?.summary)
   const searchCount = search.opportunities.length + search.movers.length
   const ours = show('social') ? social.ours : []
@@ -907,7 +927,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
     const leadsCount = show('sales') ? (storeLoaded ? visibleSales.open.length : null) : 0
     const compCount = (show('competitors') ? visibleMoves.length : 0) + (show('newcomp') && storeLoaded ? proposedCandidates.length : 0)
     const marketCount = (show('market') ? visibleNotes.length : 0) + (show('global') ? world.items.length : 0) +
-      (show('poles') ? poles.items.length : 0) + (showEvents && storeLoaded ? events.count + events.dates.length : 0)
+      (show('poles') ? poles.items.length : 0) + (showEvents && storeLoaded ? events.count + (readOnly ? 0 : events.dates.length) : 0)
     const has = {
       do: doCount > 0,
       content: contentCount > 0 || showSearch || ours.length > 0,
@@ -928,7 +948,11 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
     // The glance card's chips name one kind of thing each, so they count only
     // that kind: "8 content ideas", not ideas and search rows added together.
     const chipCounts = { ...counts, content: ideaCount, competitors: show('competitors') ? visibleMoves.length : 0 }
-    return TAB_DEFS.filter(t => has[t.key]).map(t => ({ ...t, count: counts[t.key], chipCount: chipCounts[t.key] }))
+    // Read only, the last section is the sources and nothing of the method.
+    return TAB_DEFS.filter(t => has[t.key]).map(t => ({
+      ...t, count: counts[t.key], chipCount: chipCounts[t.key],
+      ...(readOnly && t.key === 'method' ? { label: 'Sources' } : {}),
+    }))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [team, storeLoaded, visibleTop, visibleSales, sales.closed, visibleMoves, proposedCandidates, candidates, plan,
     showSearch, searchCount, ours, theirs, showDirection, showEvents, events, visibleNotes, world, poles, sources])
@@ -1003,7 +1027,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
         <Empty
           title="No research yet"
           description="Research looks for leads, events, competitor activity and market news for this brand. Each week it reports what changed since the last time."
-          action={<Button onClick={onRun} disabled={running}>Run research</Button>}
+          action={readOnly ? null : <Button onClick={onRun} disabled={running}>Run research</Button>}
         />
       </Card>
     )
@@ -1132,7 +1156,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
         <div className="min-w-0 space-y-8">
         <div className="flex items-center justify-between gap-3">
           <p className="text-sm text-text-secondary">The full report, section by section.</p>
-          <FilterMenu team={team} onTeam={chooseTeam} lines={lines} line={line} onLine={chooseLine} untagged={untagged} />
+          <FilterMenu team={team} onTeam={chooseTeam} lines={lines} line={line} onLine={chooseLine} untagged={untagged} lockTeam={readOnly} />
         </div>
 
         {/* Do next */}
@@ -1243,14 +1267,14 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
         <Section tab={tabOf('leads')}>
             <Part title="Leads, tenders and projects" count={storeLoaded ? visibleSales.open.length : null}
               helper={sales.trackerAvailable
-                ? 'Every open opening we are tracking, not only this week’s. Set the status as you work each one.'
+                ? `Every open opening we are tracking, not only this week’s.${readOnly ? '' : ' Set the status as you work each one.'}`
                 : 'Openings found in this research. From the next research they are tracked week to week.'}>
               {!storeLoaded ? (
                 <div className="space-y-3" aria-busy="true"><Skeleton className="h-28 w-full" /><Skeleton className="h-28 w-full" /></div>
               ) : visibleSales.open.length ? (
                 <Stack>
                   {visibleSales.open.map((r, i) => (
-                    <LeadCard key={r.id || `f${i}`} r={r} canEdit={intel.available} onStatus={onStatus} busyId={busyId} />
+                    <LeadCard key={r.id || `f${i}`} r={r} canEdit={intel.available && !readOnly} onStatus={onStatus} busyId={busyId} />
                   ))}
                 </Stack>
               ) : <Quiet>No open leads, tenders or projects right now.</Quiet>}
@@ -1352,15 +1376,15 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
             )}
             {showEvents && storeLoaded && events.count > 0 && (
               <Part title="Events and expos" count={events.count}
-                helper="Shows and conferences where our buyers gather. Mark whether we are going so the team knows.">
+                helper={`Shows and conferences where our buyers gather.${readOnly ? '' : ' Mark whether we are going so the team knows.'}`}>
                 {events.soon.length > 0 && (
                   <div className="space-y-3"><SubHead>Next 90 days</SubHead>
-                    <Stack>{events.soon.map((e, i) => <EventCard key={e.id || `s${i}`} e={e} canEdit={intel.available} onDecision={onDecision} />)}</Stack>
+                    <Stack>{events.soon.map((e, i) => <EventCard key={e.id || `s${i}`} e={e} canEdit={intel.available && !readOnly} onDecision={onDecision} />)}</Stack>
                   </div>
                 )}
                 {events.later.length > 0 && (
                   <div className="space-y-3 pt-2"><SubHead>Later this year — stands and deadlines to book now</SubHead>
-                    <Stack>{events.later.map((e, i) => <EventCard key={e.id || `l${i}`} e={e} canEdit={intel.available} onDecision={onDecision} />)}</Stack>
+                    <Stack>{events.later.map((e, i) => <EventCard key={e.id || `l${i}`} e={e} canEdit={intel.available && !readOnly} onDecision={onDecision} />)}</Stack>
                   </div>
                 )}
                 {events.recent.length > 0 && (
@@ -1372,7 +1396,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
             )}
             {/* Holidays and seasonal dates, kept apart from the expos: nobody
                 exhibits at a public holiday. */}
-            {showEvents && storeLoaded && events.dates.length > 0 && (
+            {showEvents && !readOnly && storeLoaded && events.dates.length > 0 && (
               <Part title="Dates to plan content around" count={events.dates.length}>
                 <ul className="bg-white border border-border divide-y divide-border max-w-[72ch]">
                   {events.dates.map((d, i) => (
@@ -1406,7 +1430,9 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
 
         {/* Sources & method */}
         <Section tab={tabOf('method')}>
-          <Part title="How this research went" helper={[status?.label, reading].filter(Boolean).join(' · ')}>
+          {/* The run's housekeeping (what failed, what is still unanswered) is
+              for the people who run the research, not for the sales app. */}
+          {!readOnly && <Part title="How this research went" helper={[status?.label, reading].filter(Boolean).join(' · ')}>
             <div className="bg-white border border-border p-4 sm:p-5 space-y-5">
               {report.repetition && <p className="text-sm text-amber-700 max-w-[72ch]">{report.repetition}</p>}
               {faults.length > 0 && (
@@ -1457,7 +1483,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
                 </div>
               )}
             </div>
-          </Part>
+          </Part>}
 
           <Part title="All sources" count={sources.length || null}
             helper={sources.length ? `Every page this research quotes, checked on ${fmtDate(run.started_at)}.` : null}>
@@ -1466,7 +1492,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
             ) : <Quiet>This research does not quote any web pages.</Quiet>}
           </Part>
 
-          <section data-print-hide>
+          {!readOnly && <section data-print-hide>
             <Card className="p-0 overflow-hidden">
               <details className="group">
                 <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden px-4 sm:px-5 py-3.5 flex items-start justify-between gap-3 hover:bg-surface-subtle">
@@ -1482,7 +1508,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
                 <div className="p-4 sm:p-5 border-t border-border bg-surface-subtle"><AgentSteering /></div>
               </details>
             </Card>
-          </section>
+          </section>}
         </Section>
         </div>
       </div>
