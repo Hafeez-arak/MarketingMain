@@ -1,40 +1,71 @@
 # Arak company hub: plan (not started)
 
-Written 2026-10-19 on the owner's idea: one app with an Odoo-style home screen
-of modules (Marketing, Sales, CEO, Finance, …), internally linked, each person
-given only the modules they need, and one AI assistant that knows every part.
+Written 2026-10-19 on the owner's idea: split the app into sections by type of
+work (Marketing, Sales, CEO, …) instead of one long sidebar, each person given
+only the sections they need, and one AI assistant that knows every part.
 **Nothing is built yet. Start only when the owner says so.**
 
-## Verdict
+## What the owner means (clarified 2026-10-19)
 
-The idea is right, with one boundary.
+Not a second Odoo. The aim is to **split our own app into sections by type of
+work**, because one long sidebar holding everything (dashboard, CEO, sales,
+brand, marketing, social, insights, admin, assets, settings) is confusing
+already and will not survive more features.
 
-**Right:**
-- **One front door.** Today the app is a long sidebar of mixed sections, and
-  access is a patchwork: admin / member / sales seat / `leads_approver`, plus
-  `adminOnly` sections. A home screen of modules with per-person access is
-  cleaner for users and safer, because each module's data is locked in the
-  database, not just hidden in the menu.
-- **One assistant across everything.** This is where "internally linked" pays
-  off. If a lead, a key account, an Odoo deal, a project and an invoice all
-  carry the same customer key, the assistant can answer "what is going on
-  with this client?" in one step. Today it would need several guesses.
+## The navigation pattern: app rail + per-module sidebar
 
-**The boundary: don't rebuild Odoo.** The screenshot is Odoo, which Arak already
-pays for, and it already does CRM, Sales, Employees, Time Off, Expenses and
-Approvals.
-- Building our own **accounting** would be a real risk. Saudi e-invoicing
-  (ZATCA / Fatoora) is a legal requirement that Odoo already handles.
-- Running two systems is exactly what the CEO's rule 7 forbids: "Odoo is the
-  single source of truth, no data entered in both."
+Three patterns are common in business software:
 
-So the hub's modules come in three kinds:
+| Pattern | Who uses it | Good | Bad |
+|---|---|---|---|
+| Launcher only: home screen of tiles, each app its own menu | Odoo, Zoho One | very clear separation | switching apps always goes back through the home screen: an extra click every time |
+| Hubs in a top bar with drop-down menus | HubSpot, Salesforce (tabs) | familiar, wide pages | top bars get crowded, and drop-downs are poor on phones |
+| **App rail + module sidebar** | Slack, Linear, Microsoft Teams, Notion, Shopify admin | one click between modules, and each module shows only its own pages | needs icons people learn |
 
-| Kind | Meaning | Modules |
-|---|---|---|
-| **Ours** | Campai is the system of record, because Odoo has nothing for it | Marketing, Research, Requests, Assistant |
-| **Over Odoo** | Our screens, Odoo's data. Read from Odoo; any write goes back into Odoo | CEO, Sales (after a lead is approved), Finance, Projects |
-| **Link out** | A tile that opens Odoo itself | Employees, Time Off, Expenses, Approvals |
+**Recommended: the third, plus a launcher Home.** It is the current standard
+for multi-module business apps.
+
+- **The rail:** a narrow icon column on the far left, one icon per module:
+  Home, CEO, Sales, Marketing, Insights, Admin. It shows only the modules that
+  person has.
+- **The module sidebar:** next to the rail, the pages of the open module only.
+  Marketing shows ~8 pages instead of everyone seeing all 20.
+- **Home:** a launcher page of tiles, as in the Odoo screenshot. It is the
+  first screen and the phone layout, and each tile shows one live hint (for
+  example, "3 posts waiting").
+- **Always present, whatever the module:**
+  - the assistant (drawer)
+  - the bell
+  - Requests
+  - search, as a ⌘K command bar that jumps to any page, lead or post
+  - the account menu (Settings, change password, sign out)
+- **One-module people** (sales reps today) get no rail at all: they land
+  straight in Sales, as the Leads-only app does now.
+- **URLs carry the module** (`/sales/leads`, `/marketing/schedule`), so a link
+  always opens in the right section. Every old URL redirects, so no bookmark
+  or email link breaks.
+- **Phone:** the rail becomes the top of the drawer as a module picker, and
+  Home shows the tiles.
+
+### Where today's pages go
+
+| Module | Pages |
+|---|---|
+| Home | launcher tiles, today's to-dos |
+| CEO | control panel (Home, Sales team, Key accounts, Opportunities, Marketing, Targets, Brief) |
+| Sales | Leads (Inbox / Pipeline), Target accounts, Opportunities sent to sales; settings: lead agent, Agent Brief / battle cards |
+| Marketing | Content Planning, Creative Studio, Schedule, Post Queue, Social media, Auto-replies, Email, Media Library, Brand Brain |
+| Insights | Research, Analytics (social + website), competitors |
+| Admin | Team & Access, AI spending, connections |
+| Global (not a module) | Assistant, Requests, bell, search, account |
+
+This is mostly a navigation change: the pages themselves stay as they are.
+Later modules (Finance, Projects over Odoo data) slot in as new rail icons.
+
+## Later: data from Odoo
+
+The CEO's rule 7 still holds: anything Odoo owns (deals, invoices, projects) is
+**shown** from Odoo, never re-entered here.
 
 ## The modules
 
@@ -153,13 +184,14 @@ zero data retention and no training on prompts (`provider.only`, `zdr`,
 
 ## Build order, once the owner says go
 
-1. **Foundation:** `module_access`, `has_module()`, the launcher, and routes and
-   sidebar by module. It maps today's roles one-to-one, with no new features.
-2. **Odoo read sync:** partners, deals, quotes, and invoices if Accounting is
-   used. Hourly, with the shared partner key filled in.
-3. **Assistant by module:** the tool registry and the audit log for actions.
-   Then the model adapter and the bake-off, and switching jobs where Flash wins.
-4. **CEO panel goes live** on Odoo numbers (the branch above, plus the sync).
-5. **Finance and Projects** screens, once their Odoo apps hold data.
-6. **WhatsApp** as another way into the same assistant (number, Meta
-   verification and budget first).
+1. **Navigation:** rail, module sidebars, launcher Home, ⌘K search, module URLs
+   with redirects from the old ones. Access is still today's roles. One PR, no
+   new features.
+2. **Access by module:** `module_access` + `has_module()`, and the Admin screen
+   to give people modules. Maps today's roles one-to-one.
+3. **Odoo read sync:** partners, deals, quotes, invoices; the shared partner key.
+4. **Assistant by module:** tool registry, audit log, model adapter + bake-off.
+5. **CEO panel live** on Odoo numbers; then Finance and Projects as new modules.
+6. **WhatsApp** as another way into the same assistant.
+
+Step 1 needs none of the decisions above, so it can start the day the owner says go.
