@@ -4,24 +4,14 @@ import { useApp } from '../../store/app'
 import { useAuth } from '../../store/auth'
 import { timeAgo } from '../../lib/utils'
 import { useInbox } from '../../lib/useInbox'
+import { pageTitle } from '../../lib/modules'
 
-const titles = {
-  '/': 'Dashboard', '/brand-brain': 'Brand Brain', '/campaigns': 'Content Planning', '/campaigns/plan': 'Content Planning',
-  '/schedule': 'Content Calendar', '/email': 'Email Flows',
-  '/analytics': 'Analytics', '/agent': 'Assistant', '/insights': 'Research', '/media': 'Media Library', '/social': 'Social Media',
-  '/social/instagram': 'Instagram',
-  '/social/tiktok': 'TikTok',
-  '/social/linkedin': 'LinkedIn',
-  '/social/approvals': 'Post Queue',
-  '/analytics/report': 'Performance Report', '/insights/report': 'Research Brief', '/insights/business': 'Business View',
-  '/settings': 'Settings', '/team': 'Team & Access', '/requests': 'Requests', '/ceo': 'CEO',
-}
-
-// Sub-pages reached via a flow (not a direct sidebar link) get a back button
-// pointed at their logical parent — more reliable than browser history,
-// which breaks if the page was opened directly or refreshed mid-flow.
+// Sub-pages reached via a flow (not a direct link in the sidebar) get a back
+// button pointed at their logical parent: more reliable than browser history,
+// which breaks if the page was opened directly or refreshed mid-flow. The
+// title itself comes from the section registry (lib/modules.js).
 const BACK_TARGETS = {
-  '/campaigns/plan': '/campaigns',
+  '/marketing/campaigns/plan': '/marketing/campaigns',
 }
 
 export function Topbar({ navOpen = false, onMenu }) {
@@ -35,7 +25,7 @@ export function Topbar({ navOpen = false, onMenu }) {
   const [showNotifs, setShowNotifs] = useState(false)
   const [showAccount, setShowAccount] = useState(false)
 
-  const title      = titles[location.pathname] || 'Arak Content Studio'
+  const title      = pageTitle(location.pathname) || 'Arak'
   const backTarget = BACK_TARGETS[location.pathname]
   const unread = state.notifications.filter(n => !n.read).length + inbox.unread
   const total = state.notifications.length + inbox.items.length

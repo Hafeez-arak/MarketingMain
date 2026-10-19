@@ -100,3 +100,11 @@ describe('the drawer tells the person what it can see', () => {
     expect(describeContextLabel({ entity: 'post', id: '1', draft: {} })).toMatch(/draft/)
   })
 })
+
+describe('v2 section URLs (2026-10-19)', () => {
+  it('reads a page under its section as the v1 page it was', () => {
+    expect(describePage({ pathname: '/marketing/social/instagram', search: '?post=p1' })).toEqual({ route: '/social/instagram', entity: 'post', id: 'p1' })
+    expect(describePage({ pathname: '/marketing/campaigns/plan', search: '?plan=7' })).toEqual({ route: '/campaigns/plan', entity: 'plan', id: '7' })
+    expect(describePage({ pathname: '/insights/analytics' })).toEqual({ route: '/analytics' })
+  })
+})

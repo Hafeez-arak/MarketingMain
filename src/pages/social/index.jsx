@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useApp, actions } from '../../store/app'
 import { useAuth } from '../../store/auth'
 import { fetchPostCounts } from '../../lib/scheduledPosts'
@@ -225,8 +225,9 @@ export function SocialOverview() {
 // PLATFORM_META before its page exists still shows something honest rather
 // than a blank route.
 export function SocialPlatform() {
-  const { pathname } = useLocation()
-  const platform = pathname.split('/')[2]
+  // The route's own parameter, not a split of the path: v2 moved the page
+  // from /social/:platform to /marketing/social/:platform.
+  const { platform } = useParams()
   const { state, dispatch } = useApp()
   const meta = PLATFORM_META[platform]
   const posts = state.posts.filter(p => p.platform === platform)

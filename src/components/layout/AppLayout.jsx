@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
+import { Rail } from './Rail'
+import { useNavBadges, NavBadgesContext } from './useNavBadges'
 import { Topbar } from './Topbar'
 import { AssistantDrawer } from '../AssistantDrawer'
 import { usePublishWatch } from '../../lib/usePublishWatch'
@@ -11,6 +13,9 @@ export function AppLayout({ children }) {
   // not on whichever page happens to be open, so the bell has to be watching
   // from wherever you are. See lib/usePublishWatch.js.
   usePublishWatch()
+  // The counts on navigation items, read once and shared with the rail, the
+  // section sidebar and Home's tiles.
+  const badges = useNavBadges()
   // The phone drawer (below md). Kept as the path it was opened on, so any
   // navigation — a link, the bell, a workspace switch — closes it without an
   // effect resetting state.
@@ -35,8 +40,19 @@ export function AppLayout({ children }) {
     // print has no concept of. The report pages are real documents, so the
     // chain from here down is marked for the @media print block in index.css
     // to unwind. Nothing changes on screen.
+    <NavBadgesContext.Provider value={badges}>
     <div className="flex h-screen overflow-hidden" data-print-shell>
-      <Sidebar open={navOpen} onClose={closeNav} />
+      {/* v2 (2026-10-19): the rail of sections, then the open section's own
+          pages (none on Home and the global pages). Below md both are one
+          drawer, opened from the top bar. */}
+      <div id="app-sidebar" data-print-hide
+        className={`flex h-full flex-shrink-0
+          max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:shadow-dropdown
+          max-md:transition-[transform,visibility] max-md:duration-200
+          ${navOpen ? '' : 'max-md:-translate-x-full max-md:invisible'}`}>
+        <Rail onNavigate={closeNav} />
+        <Sidebar onNavigate={closeNav} />
+      </div>
       {navOpen && (
         <div className="fixed inset-0 z-40 bg-black/30 md:hidden" aria-hidden="true" onClick={closeNav} data-print-hide />
       )}
@@ -59,5 +75,6 @@ export function AppLayout({ children }) {
           is a zero-width flex item and changes nothing on screen. */}
       <div data-print-hide><AssistantDrawer /></div>
     </div>
+    </NavBadgesContext.Provider>
   )
 }

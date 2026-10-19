@@ -1,0 +1,72 @@
+import { describe, it, expect } from 'vitest'
+import {
+  SECTIONS, GLOBAL_PAGES, LEGACY, fromLegacy, toLegacy, sectionsFor, sectionOf, pageTitle, ALL_PAGES,
+} from './modules.js'
+
+describe('the section registry', () => {
+  it('every page URL starts with its section, and no URL is listed twice', () => {
+    for (const s of SECTIONS) for (const pg of s.pages) expect(pg.to === s.base || pg.to.startsWith(`${s.base}/`)).toBe(true)
+    const all = ALL_PAGES.map(p => p.to)
+    expect(new Set(all).size).toBe(all.length)
+  })
+
+  it('every v1 address lands on a page that exists', () => {
+    const known = ALL_PAGES.map(p => p.to)
+    for (const now of Object.values(LEGACY)) expect(known.some(k => now === k || now.startsWith(`${k}/`) || k.startsWith(`${now}`))).toBe(true)
+  })
+
+  it('global pages belong to no section', () => {
+    for (const g of GLOBAL_PAGES) expect(sectionOf(g.to)).toBeNull()
+  })
+})
+
+describe('old addresses', () => {
+  it('keeps the tail of the path', () => {
+    expect(fromLegacy('/leads')).toBe('/sales/leads')
+    expect(fromLegacy('/campaigns/plan')).toBe('/marketing/campaigns/plan')
+    expect(fromLegacy('/social/approvals')).toBe('/marketing/social/approvals')
+    expect(fromLegacy('/analytics/report')).toBe('/insights/analytics/report')
+  })
+  it('matches whole segments only, and leaves new paths alone', () => {
+    expect(fromLegacy('/socialite')).toBeNull()
+    expect(fromLegacy('/sales/leads')).toBeNull()
+    expect(fromLegacy('/insights')).toBeNull()
+    expect(fromLegacy('/ceo')).toBeNull()
+    expect(fromLegacy('/')).toBeNull()
+  })
+  it('turns back into v1 routes for the assistant', () => {
+    expect(toLegacy('/marketing/campaigns/plan')).toBe('/campaigns/plan')
+    expect(toLegacy('/marketing/social/instagram')).toBe('/social/instagram')
+    expect(toLegacy('/insights/analytics')).toBe('/analytics')
+    expect(toLegacy('/insights')).toBe('/insights')
+    expect(toLegacy('/marketing')).toBe('/dashboard')
+    for (const old of Object.keys(LEGACY)) expect(toLegacy(fromLegacy(old))).toBe(old)
+  })
+})
+
+describe('who sees what', () => {
+  it('an admin gets every section; a member gets Marketing and Insights', () => {
+    expect(sectionsFor({ isAccessAdmin: true }).map(s => s.key)).toEqual(['ceo', 'sales', 'marketing', 'insights', 'admin'])
+    expect(sectionsFor({ isAccessAdmin: false }).map(s => s.key)).toEqual(['marketing', 'insights'])
+  })
+})
+
+describe('where am I', () => {
+  it('finds the section from the path', () => {
+    expect(sectionOf('/marketing/social/instagram').key).toBe('marketing')
+    expect(sectionOf('/sales/leads').key).toBe('sales')
+    expect(sectionOf('/insights/report').key).toBe('insights')
+    expect(sectionOf('/')).toBeNull()
+    expect(sectionOf('/requests')).toBeNull()
+    expect(sectionOf('/salesforce')).toBeNull()
+  })
+  it('titles the page by its longest match', () => {
+    expect(pageTitle('/')).toBe('Home')
+    expect(pageTitle('/marketing')).toBe('Marketing')
+    expect(pageTitle('/marketing/social/approvals')).toBe('Post Queue')
+    expect(pageTitle('/marketing/social/linkedin')).toBe('Social Media')
+    expect(pageTitle('/marketing/campaigns/plan')).toBe('Content Planning')
+    expect(pageTitle('/insights/analytics/report')).toBe('Performance Report')
+    expect(pageTitle('/nowhere')).toBe('')
+  })
+})

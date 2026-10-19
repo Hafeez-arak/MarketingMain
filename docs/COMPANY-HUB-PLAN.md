@@ -195,3 +195,17 @@ zero data retention and no training on prompts (`provider.only`, `zdr`,
 6. **WhatsApp** as another way into the same assistant.
 
 Step 1 needs none of the decisions above, so it can start the day the owner says go.
+
+## Progress
+
+**Step 1 (navigation) built 2026-10-19 on branch `v2`.** Not merged; v1 stays live and untouched, and nothing in the database changed.
+- Registry: `src/lib/modules.js`, the one place a section or page is named (tested in `modules.test.js`).
+- Shell: `components/layout/Rail.jsx` (sections), `Sidebar.jsx` (the open section's pages only), `useNavBadges.js` (counts read once and shared), and `pages/home/index.jsx` (tiles).
+- Routes: every page lives under its section in `App.jsx`. v1 addresses fall through to `LegacyOrNotFound`, which redirects with the path tail, query, hash and navigation state kept. The sales team's own app keeps `/leads`.
+- The assistant's page context reads v2 paths in v1's words (`toLegacy`), so it knows every page as before.
+- To check it without signing in: `/dev/v2.html` (`?page=/schedule` for a v1 address, `?as=member` for a member's view).
+
+**Before v2 can replace v1:**
+1. Sweep the links inside pages to the new addresses. They work today through the redirect, but each one costs a hop.
+2. The CEO panel's migration (`20261025_ceo_control.sql`), which this branch carries.
+3. Step 2: per-person section access.

@@ -43,6 +43,8 @@ import { CeoPage } from './pages/ceo/index'
 import { Access } from './pages/settings/Access'
 import { BrandBrain } from './pages/settings/BrandBrain'
 import { CreativeStudio } from './pages/studio/index'
+import { HomePage } from './pages/home/index'
+import { fromLegacy } from './lib/modules'
 
 // Loads the account's saved webhook URLs into state.webhooks on startup, so
 // they're there regardless of which page loads first. This used to happen
@@ -67,6 +69,17 @@ function WebhooksLoader() {
   return null
 }
 
+// A v1 address (/leads, /schedule, /campaigns/plan?plan=7…) goes to its v2
+// home with everything after the old prefix kept: the tail of the path, the
+// query, the hash, and the navigation state a page may have passed along
+// (navigate(path, { state })). Anything else is a real not-found.
+function LegacyOrNotFound() {
+  const location = useLocation()
+  const to = fromLegacy(location.pathname)
+  if (to) return <Navigate to={{ pathname: to, search: location.search, hash: location.hash }} state={location.state} replace />
+  return <NotFound />
+}
+
 // The page you land on when a URL doesn't match anything. Previously the
 // inner <Routes> had no catch-all, so a mistyped or stale link rendered the
 // layout around an empty hole — indistinguishable from a crash.
@@ -76,10 +89,10 @@ function NotFound() {
       <div className="border border-border bg-surface p-5">
         <h2 className="text-sm font-semibold text-text">That page doesn't exist</h2>
         <p className="text-xs text-text-secondary mt-1.5">
-          The link may be out of date. Everything is reachable from the sidebar.
+          The link may be out of date. Everything is reachable from Home.
         </p>
         <a href="/" className="inline-block mt-4 border border-border bg-white px-3 py-1.5 text-xs font-semibold text-text hover:bg-surface-subtle">
-          Back to dashboard
+          Back to Home
         </a>
       </div>
     </div>
@@ -127,61 +140,69 @@ function ProtectedApp() {
               pin the error screen in place for every page after it. */}
           <ErrorBoundary key={pathname}>
           <Routes>
+            {/* v2 (2026-10-19): every page's URL starts with its section;
+                lib/modules.js names them. v1's addresses (/leads, /schedule…)
+                are not listed here: they fall through to the catch-all, which
+                redirects them with the rest of the path, the query, the hash
+                and any navigation state kept (LegacyOrNotFound). */}
             {/* sales.araklighting.com opens straight onto the leads page. */}
-            <Route path="/"                      element={isLeadsHost() ? <Navigate to="/leads" replace /> : <Home />} />
-            <Route path="/brand-brain"           element={<BrandBrain />} />
-            <Route path="/studio"                element={<CreativeStudio />} />
-            {/* Two routes, not four. `/campaigns` was a menu whose only job
-                was to offer "Plan with AI" or "Content Plans" — but the plans
-                list already carries a "New monthly plan" button, so the menu
-                was a click between you and a page that could do both. The
-                per-post editor route was a tombstone: ideas have been edited
-                inline since the modal landed, and nothing linked to it.
-                `/campaigns/plans` still resolves, for links already sent. */}
-            <Route path="/campaigns"             element={<ContentPlans />} />
-            <Route path="/campaigns/plans"       element={<Navigate to="/campaigns" replace />} />
-            <Route path="/campaigns/plan"        element={<CampaignPlanner />} />
-            <Route path="/schedule"              element={<Schedule />} />
-            <Route path="/email"                 element={<EmailFlows />} />
-            <Route path="/analytics"             element={<Analytics />} />
-            {/* The two printable documents. Separate routes rather than a mode
-                on their parent pages: a report is a different object from a
-                dashboard — it has its own period, its own URL to send someone,
-                and it has to survive being printed. */}
-            <Route path="/analytics/report"      element={<PerformanceReport />} />
-            <Route path="/insights"              element={<Insights />} />
-            <Route path="/insights/report"       element={<ResearchReport />} />
-            <Route path="/insights/business"     element={<BusinessView />} />
-            {/* Research and "What We Learned" were two pages that each carried
-                a copy of the watchlist, the run history, the run button and the
-                proposed rules. They are one page with two halves now; the old
-                path still resolves, for links already sent. */}
-            <Route path="/insights/research"     element={<Navigate to="/insights" replace />} />
-            <Route path="/agent"                 element={<AgentPage />} />
-            {/* Admin only: the page sends anyone else to the dashboard. */}
-            <Route path="/leads"                 element={<LeadAgent />} />
-            <Route path="/targets"               element={<Targets />} />
-            <Route path="/agent-brief"           element={<AgentBrief />} />
-            <Route path="/media"                 element={<MediaLibrary />} />
-            <Route path="/social"                element={<SocialOverview />} />
-            <Route path="/social/approvals"      element={<PostApprovals />} />
-            <Route path="/social/auto-replies"   element={<AutoReplies />} />
-            <Route path="/social/instagram"      element={<InstagramPage />} />
-            <Route path="/social/tiktok"         element={<Navigate to="/social" replace />} />
-            <Route path="/social/linkedin"       element={<LinkedInPage />} />
-            {/* Fallback for any platform in PLATFORM_META without its own page
-                yet. React Router ranks static segments above dynamic ones, so
-                the platform routes above still win regardless of order. */}
-            <Route path="/social/:platform"      element={<SocialPlatform />} />
-            <Route path="/settings"             element={<Settings />} />
-            <Route path="/requests"             element={<Requests />} />
+            <Route path="/"                      element={isLeadsHost() ? <Navigate to="/sales/leads" replace /> : <Home />} />
+
+            {/* ── CEO ── */}
             <Route path="/ceo"                  element={<AdminOnly><CeoPage /></AdminOnly>} />
-            {/* The Integrations page was removed; old links land on the
-                dashboard instead of the not-found page. */}
+
+            {/* ── Sales ── admin only: each page sends anyone else away. */}
+            <Route path="/sales"                 element={<Navigate to="/sales/leads" replace />} />
+            <Route path="/sales/leads"           element={<LeadAgent />} />
+            <Route path="/sales/targets"         element={<Targets />} />
+            <Route path="/sales/agent-brief"     element={<AgentBrief />} />
+
+            {/* ── Marketing ── v1's dashboard is its Overview. */}
+            <Route path="/marketing"             element={<Dashboard />} />
+            {/* Two routes, not four: the plans list carries "New monthly plan",
+                so v1's menu between them was a click in the way.
+                `/campaigns/plans` still resolves, for links already sent. */}
+            <Route path="/marketing/campaigns"       element={<ContentPlans />} />
+            <Route path="/marketing/campaigns/plans" element={<Navigate to="/marketing/campaigns" replace />} />
+            <Route path="/marketing/campaigns/plan"  element={<CampaignPlanner />} />
+            <Route path="/marketing/studio"          element={<CreativeStudio />} />
+            <Route path="/marketing/schedule"        element={<Schedule />} />
+            <Route path="/marketing/email"           element={<EmailFlows />} />
+            <Route path="/marketing/media"           element={<MediaLibrary />} />
+            <Route path="/marketing/brand-brain"     element={<BrandBrain />} />
+            <Route path="/marketing/social"              element={<SocialOverview />} />
+            <Route path="/marketing/social/approvals"    element={<PostApprovals />} />
+            <Route path="/marketing/social/auto-replies" element={<AutoReplies />} />
+            <Route path="/marketing/social/instagram"    element={<InstagramPage />} />
+            <Route path="/marketing/social/linkedin"     element={<LinkedInPage />} />
+            <Route path="/marketing/social/tiktok"       element={<Navigate to="/marketing/social" replace />} />
+            <Route path="/marketing/social/snapchat"     element={<Navigate to="/marketing/social" replace />} />
+            {/* Any platform in PLATFORM_META without its own page yet. Static
+                segments outrank dynamic ones, so the routes above still win. */}
+            <Route path="/marketing/social/:platform"    element={<SocialPlatform />} />
+
+            {/* ── Insights ── the two printable documents are routes of their
+                own: a report has its own period, its own URL to send someone,
+                and has to survive being printed. */}
+            <Route path="/insights"                  element={<Insights />} />
+            <Route path="/insights/report"           element={<ResearchReport />} />
+            <Route path="/insights/business"         element={<BusinessView />} />
+            <Route path="/insights/research"         element={<Navigate to="/insights" replace />} />
+            <Route path="/insights/analytics"        element={<Analytics />} />
+            <Route path="/insights/analytics/report" element={<PerformanceReport />} />
+
+            {/* ── Admin ── */}
+            <Route path="/admin"                 element={<Navigate to="/admin/team" replace />} />
+            <Route path="/admin/team"            element={<Access />} />
+
+            {/* ── Everywhere (no section) ── */}
+            <Route path="/agent"                 element={<AgentPage />} />
+            <Route path="/requests"              element={<Requests />} />
+            <Route path="/settings"              element={<Settings />} />
+
+            {/* The Integrations page was removed; old links land on Home. */}
             <Route path="/integrations"          element={<Navigate to="/" replace />} />
-            <Route path="/social/snapchat"       element={<Navigate to="/social" replace />} />
-            <Route path="/team"                  element={<Access />} />
-            <Route path="*"                      element={<NotFound />} />
+            <Route path="*"                      element={<LegacyOrNotFound />} />
           </Routes>
           </ErrorBoundary>
         </AppLayout>
@@ -191,14 +212,14 @@ function ProtectedApp() {
 }
 
 // The CEO lands on his own page (user_access.landing = 'ceo'), once per
-// visit: after that the sidebar's Dashboard link still opens the dashboard.
+// visit: after that the rail's Home icon still opens Home.
 const LANDED_KEY = 'arak.landed'
 function Home() {
   const { access, isAccessAdmin } = useAuth()
   let landed = true
   try { landed = sessionStorage.getItem(LANDED_KEY) === '1'; sessionStorage.setItem(LANDED_KEY, '1') } catch { /* private window */ }
   if (!landed && isAccessAdmin && access?.landing === 'ceo') return <Navigate to="/ceo" replace />
-  return <Dashboard />
+  return <HomePage />
 }
 
 // The CEO page is built from leads and sales, which only admins see; the

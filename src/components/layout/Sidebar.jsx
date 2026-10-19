@@ -1,272 +1,58 @@
 import { NavLink, useLocation } from 'react-router-dom'
-import { countWaiting } from '../../lib/requests'
 import { useAuth } from '../../store/auth'
-import { useState, useEffect } from 'react'
-import { fetchPendingCount } from '../../lib/access'
-import { fetchScheduledPosts } from '../../lib/scheduledPosts'
-import { needsQueueAttention } from '../../lib/postLock'
+import { sectionOf, canOpen } from '../../lib/modules'
+import { NavIcon } from './icons'
+import { useBadges } from './useNavBadges'
 
-const nav = [
-  { section: 'Overview', items: [
-    { to: '/', label: 'Dashboard', exact: true, icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg> },
-    { to: '/requests', label: 'Requests', badge: 'waitingRequests', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> },
-  ]},
-  // Admin only for now (2026-10-06): the lead agent reads clients' names,
-  // emails and phone numbers. `adminOnly` items and sections are dropped for
-  // everyone else at render.
-  // The CEO's page: his numbers, the week's brief, his requests and the
-  // assistant. Admin-only, like the leads and sales it is built from.
-  { section: 'CEO', adminOnly: true, items: [
-    { to: '/ceo', label: 'CEO', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M3 21h18"/><path d="M5 21V8l7-5 7 5v13"/><path d="M9 21v-6h6v6"/></svg> },
-  ] },
-  { section: 'Sales', adminOnly: true, items: [
-    { to: '/leads', label: 'Leads', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg> },
-    { to: '/targets', label: 'Targets', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg> },
-  ]},
-  { section: 'Brand', items: [
-    { to: '/brand-brain', label: 'Brand Brain', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M9.5 2A3.5 3.5 0 0 0 6 5.5v.5a3 3 0 0 0-2 2.83V10a3 3 0 0 0 1 2.24V14a3 3 0 0 0 2.5 2.96V18a3 3 0 0 0 3 3h3a3 3 0 0 0 3-3v-1.04A3 3 0 0 0 19 14v-1.76A3 3 0 0 0 20 10V8.83a3 3 0 0 0-2-2.83v-.5A3.5 3.5 0 0 0 14.5 2 3.5 3.5 0 0 0 12 3.17 3.5 3.5 0 0 0 9.5 2z"/></svg> },
-  ]},
-  { section: 'Marketing', items: [
-    { to: '/studio',     label: 'Creative Studio', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg> },
-    { to: '/campaigns',  label: 'Content Planning',   icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg> },
-    { to: '/schedule',   label: 'Schedule',    icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> },
-    { to: '/email',      label: 'Email Flows', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> },
-  ]},
-  { section: 'Social', items: [
-    { to: '/social',           label: 'Social Media',   notUnder: ['/social/approvals', '/social/auto-replies'],   icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg> },
-    { to: '/social/approvals', label: 'Post Queue', badge: 'pendingPosts', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> },
-    { to: '/social/auto-replies', label: 'Auto-replies', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><polyline points="8 10 10.5 12.5 15 8"/></svg> },
-  ]},
-  { section: 'Insights', items: [
-    { to: '/analytics', label: 'Analytics', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg> },
-    { to: '/agent',     label: 'Assistant', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> },
-    { to: '/insights',  label: 'Research', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg> },
-  ]},
-  // Admin only (2026-10-08): what the research agent searches for, word for
-  // word, and the ICPs it works from.
-  { section: 'Admin', adminOnly: true, items: [
-    { to: '/agent-brief', label: 'Agent Brief', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg> },
-  ]},
-  { section: 'Assets', items: [
-    { to: '/media',     label: 'Media Library', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg> },
-  ]},
-  { section: 'Settings', items: [
-    { to: '/settings',     label: 'Settings',     icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> },
-    { to: '/team',         label: 'Team & Access', badge: 'pendingAccess', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
-  ]},
-]
+// ─── The open section's pages (v2) ─────────────────────────────────────────
+// 2026-10-19. v1 had one sidebar listing every page in the app under ten
+// headings. v2 shows only the pages of the section you are in, next to the
+// rail (Rail.jsx) that switches sections. Home and the global pages
+// (assistant, Requests, Settings) belong to no section, and there is no
+// sidebar on them: the page gets the width. See lib/modules.js.
 
-// Below `md` the sidebar is a drawer (2026-10-18): a fixed 208px column left
-// a 375px phone about 120px for the page. AppLayout owns `open`; a link
-// tapped here closes it. At md and up nothing about it changes.
-export function Sidebar({ open = false, onClose }) {
+export function Sidebar({ onNavigate }) {
   const { pathname } = useLocation()
-  const { user, workspaces, activeWorkspace, activeWorkspaceId, accessToken, switchWorkspace, signOut, isAccessAdmin } = useAuth()
-  const [showWsPicker, setShowWsPicker] = useState(false)
-  // The only notification the access gate has: a count on the nav item.
-  // Requests otherwise sit unseen until someone thinks to look, and a
-  // teammate blocked on approval has no way to nudge from inside the app.
-  // Admin-only — for everyone else there is nothing to act on.
-  const [pendingAccess, setPendingAccess] = useState(0)
-  useEffect(() => {
-    if (!isAccessAdmin) return
-    let cancelled = false
-    fetchPendingCount().then(n => { if (!cancelled) setPendingAccess(n) })
-    return () => { cancelled = true }
-  }, [isAccessAdmin])
-
-  // ── Posts that need a person ──
-  // On the nav item that owns them. An approved post whose booking failed is invisible otherwise:
-  // it is not on the calendar (nothing is going to send it) and nobody thinks
-  // to open the Post Queue to look for a failure they were never told about.
-  const [pendingPosts, setPendingPosts] = useState(0)
-  useEffect(() => {
-    if (!activeWorkspaceId || !accessToken) return
-    let cancelled = false
-    // Re-read on a slow interval as well as on mount: this sits on screen for
-    // hours at a time, and a booking that fails at 3pm should not wait for a
-    // reload to show up.
-    async function count() {
-      // Counted with the Post Queue's own test (needsQueueAttention), so the
-      // badge and its "Needs attention" tab show the same number. Only
-      // unbooked and failed rows can need a person; booked ones never do.
-      const rows = await fetchScheduledPosts(activeWorkspaceId, accessToken, {
-        publishStatus: ['not_published', 'failed'], limit: 500,
-      })
-      if (!cancelled) setPendingPosts(rows.filter(r => needsQueueAttention(r)).length)
-    }
-    queueMicrotask(() => { if (!cancelled) void count() })
-    const id = setInterval(() => { void count() }, 120_000)
-    return () => { cancelled = true; clearInterval(id) }
-  }, [activeWorkspaceId, accessToken])
-  // ── Requests waiting on this person ──
-  // New requests for an admin (they build the changes); open work assigned
-  // to them for anyone. Same slow re-read as the Post Queue badge.
-  const [waitingRequests, setWaitingRequests] = useState(0)
-  useEffect(() => {
-    if (!activeWorkspaceId || !user?.id) return
-    let cancelled = false
-    async function count() {
-      const n = await countWaiting(activeWorkspaceId, user.id, isAccessAdmin)
-      if (!cancelled) setWaitingRequests(n)
-    }
-    queueMicrotask(() => { if (!cancelled) void count() })
-    const id = setInterval(() => { void count() }, 120_000)
-    return () => { cancelled = true; clearInterval(id) }
-  }, [activeWorkspaceId, user?.id, isAccessAdmin])
-
-  // Gated at render rather than by resetting the count when isAccessAdmin
-  // flips: a stale number from a previous session can then never leak into
-  // a non-admin's sidebar, and the effect stays free of a synchronous
-  // setState (which React's lint rule rightly flags as a cascading render).
-  const badges = { pendingAccess: isAccessAdmin ? pendingAccess : 0, pendingPosts, waitingRequests }
+  const { isAccessAdmin } = useAuth()
+  const badges = useBadges()
+  const section = sectionOf(pathname)
+  if (!section) return null
+  const pages = section.pages.filter(pg => !pg.hidden && canOpen(pg, { isAccessAdmin }))
 
   return (
-    <aside
-      id="app-sidebar"
-      data-print-hide
-      className={`w-52 flex-shrink-0 flex flex-col h-full overflow-hidden bg-white border-r border-border
-        max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:shadow-dropdown
-        max-md:transition-[transform,visibility] max-md:duration-200
-        ${open ? '' : 'max-md:-translate-x-full max-md:invisible'}`}
-    >
-
-      {/* Logo. Fixed to h-14 — the same height as the Topbar — so the sidebar's
-          header rule and the topbar's rule form one unbroken horizontal line
-          across the whole window. In a layout this dependent on rules, a 16px
-          step between two adjacent ones is the first thing you notice. */}
-      <div className="h-14 flex-shrink-0 px-4 flex items-center border-b border-border">
-        <div className="flex items-center gap-2.5 min-w-0">
-          {/* The one surviving gradient in the app. It's the brand mark, so it
-              gets to be the single place with any depth to it. */}
-          <div className="w-8 h-8 bg-logo-mark flex items-center justify-center flex-shrink-0">
-            <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/>
-            </svg>
-          </div>
-          <div className="min-w-0">
-            <p className="font-semibold text-text text-sm leading-none tracking-tight">Arak</p>
-            <p className="eyebrow text-text-tertiary mt-1">Content Studio</p>
-          </div>
-        </div>
+    <aside aria-label={section.label} data-print-hide
+      className="w-52 flex-shrink-0 flex flex-col h-full overflow-hidden bg-white border-r border-border">
+      {/* The section's name, the height of the top bar so the two rules form
+          one line across the window. */}
+      <div className="h-14 flex-shrink-0 px-5 flex flex-col justify-center border-b border-border">
+        <p className="font-semibold text-text text-sm leading-none tracking-tight">{section.label}</p>
+        <p className="eyebrow text-text-tertiary mt-1">Arak</p>
       </div>
 
-      {/* Workspace chip */}
-      <div className="px-4 py-3 border-b border-border relative">
-        <button
-          onClick={() => setShowWsPicker(v => !v)}
-          className="w-full flex items-center gap-2.5 px-2.5 py-2 border border-border bg-white hover:border-stone-400 hover:bg-surface-subtle transition-colors group">
-          <div className="w-5 h-5 bg-amber-700 flex items-center justify-center text-[9px] font-bold text-white flex-shrink-0">
-            {(activeWorkspace?.name || '?').charAt(0).toUpperCase()}
-          </div>
-          <div className="min-w-0 flex-1 text-left">
-            <p className="text-xs font-semibold text-text truncate">{activeWorkspace?.name || 'Workspace'}</p>
-            <p className="text-[10px] text-text-tertiary">Workspace</p>
-          </div>
-          <svg className={`w-3 h-3 text-text-tertiary transition-transform flex-shrink-0 ${showWsPicker ? 'rotate-180' : ''}`}
-            fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-            <path d="M6 9l6 6 6-6"/>
-          </svg>
-        </button>
-
-        {/* Workspace picker dropdown — only shows a "switch" list when the
-            signed-in user actually belongs to more than one workspace. */}
-        {showWsPicker && (
-          <div className="absolute left-4 right-4 top-full -mt-px bg-white border border-border shadow-dropdown z-50 animate-fade-scale">
-            {workspaces.length > 1 && (
-              <>
-                <div className="px-3 py-2 border-b border-border bg-surface-subtle">
-                  <p className="eyebrow text-text-tertiary">Switch workspace</p>
-                </div>
-                <ul className="max-h-48 overflow-y-auto scrollbar-thin divide-y divide-border">
-                  {workspaces.map(ws => (
-                    <li key={ws.id}>
-                      <button
-                        onClick={() => {
-                          if (ws.id !== activeWorkspaceId) switchWorkspace(ws.id)
-                          setShowWsPicker(false)
-                        }}
-                        className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-surface-subtle
-                          ${ws.id === activeWorkspaceId ? 'bg-amber-50' : ''}`}>
-                        <div className={`w-5 h-5 flex items-center justify-center text-[9px] font-bold text-white flex-shrink-0
-                          ${ws.id === activeWorkspaceId ? 'bg-amber-700' : 'bg-stone-500'}`}>
-                          {ws.name.charAt(0).toUpperCase()}
-                        </div>
-                        <span className="flex-1 text-xs text-text truncate">{ws.name}</span>
-                        {ws.id === activeWorkspaceId && (
-                          <svg className="w-3 h-3 text-amber-700 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
-                        )}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </>
+      {/* Items run full-bleed so the active marker sits flush against the
+          sidebar's own border; an inset pill would float it in a gutter. */}
+      <nav className="flex-1 overflow-y-auto scrollbar-thin py-3" onClick={e => { if (e.target.closest('a')) onNavigate?.() }}>
+        {pages.map(item => (
+          <NavLink key={item.to} to={item.to} end={item.exact}
+            // `notUnder` carves child routes out of a prefix match: the Post
+            // Queue and Auto-replies live under Social Media's URL but have
+            // their own entries, and two lit items is two answers to "where
+            // am I".
+            className={({ isActive: matched }) => {
+              const isActive = matched && !(item.notUnder || []).some(p => pathname.startsWith(p))
+              return `flex items-center gap-2.5 pl-[18px] pr-4 py-1.5 text-[13px] w-full border-l-2 border-transparent transition-colors duration-150
+                ${isActive ? 'nav-active' : 'text-text-secondary hover:bg-surface-subtle hover:text-text'}`
+            }}>
+            <span className="flex-shrink-0"><NavIcon name={item.icon} /></span>
+            <span className="flex-1 truncate">{item.label}</span>
+            {item.badge && badges[item.badge] > 0 && (
+              <span className="flex-shrink-0 min-w-[16px] h-4 px-1 flex items-center justify-center text-[10px] font-bold text-white bg-amber-700">
+                {badges[item.badge]}
+              </span>
             )}
-            <div className={workspaces.length > 1 ? 'border-t border-border' : ''}>
-              <button
-                onClick={() => { setShowWsPicker(false); signOut() }}
-                className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-600 hover:bg-red-50 transition-colors">
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-                Sign out
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Nav — items run full-bleed to both edges so the active marker bar sits
-          flush against the sidebar's own border. Inset nav pills would put the
-          marker in the middle of a gutter, floating. */}
-      <nav className="flex-1 overflow-y-auto scrollbar-thin py-3"
-        onClick={e => { if (e.target.closest('a')) onClose?.() }}>
-        {nav.filter(group => isAccessAdmin || !group.adminOnly).map((group, gi) => (
-          <div key={group.section} className={gi > 0 ? 'mt-5' : ''}>
-            <p className="px-5 mb-1.5 eyebrow text-text-disabled">{group.section}</p>
-            {group.items.map(item => (
-              <NavLink key={item.to} to={item.to} end={item.exact}
-                /* border-l-2 border-transparent on the base state reserves the
-                   marker's column on EVERY item, so activating one doesn't
-                   nudge its label 2px right of its neighbours. */
-                // `notUnder` carves child routes out of a prefix match: the
-                // Post Queue and Auto-replies live under /social but have
-                // their own entries, and two lit items is two answers to
-                // "where am I". A list rather than one path, because the
-                // moment there was a second carve-out the string silently
-                // stopped covering it — and a nav that lights twice is the
-                // kind of wrong nobody files a bug for.
-                className={({ isActive: matched }) => { const carved = [].concat(item.notUnder || []); const isActive = matched && !carved.some(p => pathname.startsWith(p)); return `
-                  flex items-center gap-2.5 pl-[18px] pr-4 py-1.5 text-[13px] w-full
-                  border-l-2 border-transparent transition-colors duration-150
-                  ${item.sub ? 'pl-7 text-xs' : ''}
-                  ${isActive ? 'nav-active' : 'text-text-secondary hover:bg-surface-subtle hover:text-text'}` }}>
-                <span className="flex-shrink-0">{item.icon}</span>
-                <span className="flex-1 truncate">{item.label}</span>
-                {item.badge && badges[item.badge] > 0 && (
-                  <span className="flex-shrink-0 min-w-[16px] h-4 px-1 flex items-center justify-center text-[10px] font-bold text-white bg-amber-700">
-                    {badges[item.badge]}
-                  </span>
-                )}
-              </NavLink>
-            ))}
-          </div>
+          </NavLink>
         ))}
       </nav>
-
-      {/* User */}
-      <div className="px-4 py-3 border-t border-border">
-        <div className="flex items-center gap-2.5">
-          <div className="w-6 h-6 rounded-full bg-stone-600 flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0">
-            {(user?.email || '?').charAt(0).toUpperCase()}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-medium text-text truncate">{user?.email || 'Signed out'}</p>
-            {/* Was the workspace_members role, which is now the same string
-                for everyone and told you nothing. The only distinction that
-                exists is who can change the access list. */}
-            <p className="text-[10px] text-text-tertiary">{isAccessAdmin ? 'Access admin' : 'Team member'}</p>
-          </div>
-        </div>
-      </div>
     </aside>
   )
 }

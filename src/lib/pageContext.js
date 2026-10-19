@@ -1,3 +1,5 @@
+import { toLegacy } from './modules.js'
+
 // ─── The page's context descriptor ─────────────────────────────────────────
 // AGENT.md §5a. The panel opens anywhere and knows what you are looking at,
 // and it learns that from a small TYPED descriptor — a route, an entity type
@@ -25,7 +27,9 @@
  * @returns {{route:string, entity?:string, id?:string}}
  */
 export function describePage(location) {
-  const route = location?.pathname || ''
+  // In v1's words: v2 moved pages under sections (/marketing/schedule), and
+  // everything the assistant knows about a page is keyed on v1's route.
+  const route = toLegacy(location?.pathname || '')
   const params = new URLSearchParams(location?.search || '')
 
   // /campaigns/plan/post/:rowId — the post editor
