@@ -60,8 +60,8 @@ Written 2026-10-17. This is the starting list now loaded on **Research → Where
 | Instagram | @riyadh_today | Posts projects under construction in Riyadh. |
 | LinkedIn | linkedin.com/company/mep-middle-east-itp | MEP and building contract awards. |
 | LinkedIn | linkedin.com/company/incsolutionsgroup | INC Solutions: Riyadh office fit-outs. A fit-out buyer that posts its jobs. |
-| LinkedIn | Havelock One Interiors | Fit-out contractor that posts Saudi wins. |
-| LinkedIn | ALEC FITOUT | Fit-out contractor for hotels and offices in Riyadh. |
+| LinkedIn | linkedin.com/company/havelock-one | Fit-out contractor that posts Saudi wins. |
+| LinkedIn | linkedin.com/company/alec-fitout | Fit-out contractor for hotels and offices in Riyadh. |
 | Search phrase | "awarded" fit-out contract Riyadh | Finds contractor and fit-out company posts about new jobs. |
 | Hashtag | #مشاريع_السعودية | "Saudi projects": wider than Riyadh. |
 | Government | muqawil.org | Saudi Contractors Authority: monthly award reports, contractor classifications. |
@@ -74,7 +74,7 @@ Written 2026-10-17. This is the starting list now loaded on **Research → Where
 | News | aleqt.com | Al Eqtisadiah, Arabic business daily. |
 | Government | rcrc.gov.sa | Royal Commission for Riyadh City programmes. |
 | LinkedIn | Khaled AlOjyan | Architect who posts often about Riyadh projects and milestones. |
-| LinkedIn | Depa Interiors | Fit-out contractor that posts Saudi awards. |
+| LinkedIn | linkedin.com/company/depainteriors | Fit-out contractor that posts Saudi awards. |
 
 ## Worth knowing, not on the list
 
