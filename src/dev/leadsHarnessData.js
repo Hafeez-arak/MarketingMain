@@ -249,12 +249,16 @@ window.fetch = async (input, init = {}) => {
     return json({ ok: true, card: cards[lead_id], watchlist: WATCHLIST })
   }
   if (url.includes('/api/leads/attachment_file')) {
+    const { attachment_id } = JSON.parse(init.body || '{}')
+    window.__lastAttachment = attachment_id
+    // A large one comes back as a private link, as Storage would sign it.
+    if (attachment_id === 'a2') return json({ ok: true, url: 'data:application/zip;base64,UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==', filename: 'Facade drawings.zip' })
     return new Response('made-up file', { status: 200, headers: { 'Content-Type': 'application/octet-stream' } })
   }
   if (url.includes('/api/leads/attachments')) {
     const { lead_id } = JSON.parse(init.body || '{}')
     return lead_id === 'e1'
-      ? json({ ok: true, attachments: [{ id: 'a1', name: 'Tower BOQ rev2.xlsx', contentType: 'application/vnd.ms-excel', size: 84_000, kind: 'file', tooBig: false }, { id: 'a2', name: 'Facade drawings.zip', contentType: 'application/zip', size: 9_400_000, kind: 'file', tooBig: true }] })
+      ? json({ ok: true, attachments: [{ id: 'a1', name: 'Tower BOQ rev2.xlsx', contentType: 'application/vnd.ms-excel', size: 84_000, kind: 'file', tooBig: false }, { id: 'a2', name: 'Facade drawings.zip', contentType: 'application/zip', size: 9_400_000, kind: 'file', big: true, tooBig: false }, { id: 'a3', name: 'Site survey video.mp4', contentType: 'video/mp4', size: 180_000_000, kind: 'file', big: true, tooBig: true }] })
       : json({ ok: false, error: 'This email is no longer in info@example-co.sa: it was deleted there.' }, 404)
   }
   if (url.includes('/api/leads/try')) {

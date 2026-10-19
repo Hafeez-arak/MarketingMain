@@ -46,10 +46,13 @@ describe('the attachments worth showing', () => {
       { id: '3', name: 'logo.png', contentType: 'image/png', size: 60_000, isInline: true },
       { id: '4', name: 'Site photo.jpg', contentType: 'image/jpeg', size: 900_000, isInline: false },
       { id: '5', name: 'Drawings.zip', contentType: 'application/zip', size: 9_000_000, isInline: false },
+      { id: '7', name: 'Video.mp4', contentType: 'video/mp4', size: 150_000_000, isInline: false },
       { id: '6', name: 'RFQ', contentType: '', size: 0, isInline: false, '@odata.type': '#microsoft.graph.referenceAttachment' },
     ]
-    expect(realAttachments(list).map((a) => [a.name, a.kind, a.tooBig])).toEqual([
-      ['BOQ.xlsx', 'file', false], ['Site photo.jpg', 'file', false], ['Drawings.zip', 'file', true], ['RFQ', 'link', false],
+    // Over 4.3 MB: big (through Storage); over 100 MB: too big (Outlook).
+    expect(realAttachments(list).map((a) => [a.name, a.kind, a.big, a.tooBig])).toEqual([
+      ['BOQ.xlsx', 'file', false, false], ['Site photo.jpg', 'file', false, false], ['Drawings.zip', 'file', true, false],
+      ['Video.mp4', 'file', true, true], ['RFQ', 'link', false, false],
     ])
   })
 })

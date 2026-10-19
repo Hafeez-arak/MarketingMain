@@ -1,3 +1,4 @@
+import { linkToFile, MAX_BIG_FILE } from './_files.js'
 import { READ_SCOPES, refreshTokens, exchangeCode, whoAmI, packTokens, unpackTokens, classifyGraphError, tenantOf } from '../email/_graph.js'
 import { toEnvelope, findDuplicate, verdictColumns, emailKind, extractPhones, mergePhones } from '../../src/lib/leads/qualify.js'
 import { capDecision } from '../../src/lib/agent/budget.js'
@@ -651,7 +652,9 @@ export function realAttachments(list = []) {
     .map((a) => ({
       id: a.id, name: a.name || 'attachment', contentType: a.contentType || '', size: a.size || 0,
       kind: KIND[a['@odata.type']] || 'file',
-      tooBig: (a.size || 0) > MAX_EMAIL_FILE,
+      // Over 4.3 MB it goes through Storage (_files.js); only past this is it Outlook's.
+      big: (a.size || 0) > MAX_EMAIL_FILE,
+      tooBig: (a.size || 0) > MAX_BIG_FILE,
     }))
 }
 
@@ -665,7 +668,11 @@ export async function emailAttachments(deps, { workspaceId, leadId }) {
   return { attachments: realAttachments((await r.json())?.value || []) }
 }
 
-/** One attachment's bytes. Returns { bytes, filename, contentType } or { status, error }. */
+/**
+ * One attachment: its bytes when small enough to answer directly, or a
+ * ten-minute private link to a copy kept a day in Storage (_files.js) when
+ * not. Returns { bytes, filename, contentType } or { url, filename } or { status, error }.
+ */
 export async function attachmentFile(deps, { workspaceId, leadId, attachmentId }) {
   if (!attachmentId || String(attachmentId).length > 500) return { status: 400, error: 'Which attachment?' }
   const f = await findMessage(deps, { workspaceId, leadId, select: 'id' })
@@ -676,13 +683,27 @@ export async function attachmentFile(deps, { workspaceId, leadId, attachmentId }
   const a = await meta.json()
   const kind = KIND[a['@odata.type']] || 'file'
   if (kind === 'link') return { status: 409, error: 'This attachment is a link to a shared file. Open the email in Outlook to follow it.' }
-  if ((a.size || 0) > MAX_EMAIL_FILE) return { status: 413, error: 'This attachment is too large to download here. Open it in Outlook on the web.' }
-  const raw = await deps.fetch(`${base}/$value`, { headers: f.auth })
-  if (!raw.ok) return { status: 502, error: `Microsoft answered ${raw.status} for the attachment.` }
-  const bytes = Buffer.from(await raw.arrayBuffer())
-  if (bytes.length > MAX_EMAIL_FILE) return { status: 413, error: 'This attachment is too large to download here. Open it in Outlook on the web.' }
-  const name = String(a.name || 'attachment').replace(/[\\/:*?"<>|\r\n]+/g, ' ').trim().slice(0, 150) || 'attachment'
-  return { bytes, filename: kind === 'email' && !/\.eml$/i.test(name) ? `${name}.eml` : name, contentType: kind === 'email' ? 'message/rfc822' : (a.contentType || 'application/octet-stream') }
+  if ((a.size || 0) > MAX_BIG_FILE) return { status: 413, error: 'This attachment is too large to download here. Open it in Outlook on the web.' }
+  const clean = String(a.name || 'attachment').replace(/[\\/:*?"<>|\r\n]+/g, ' ').trim().slice(0, 150) || 'attachment'
+  const filename = kind === 'email' && !/\.eml$/i.test(clean) ? `${clean}.eml` : clean
+  const contentType = kind === 'email' ? 'message/rfc822' : (a.contentType || 'application/octet-stream')
+  const fetchBytes = async () => {
+    const raw = await deps.fetch(`${base}/$value`, { headers: f.auth })
+    if (!raw.ok) return { status: 502, error: `Microsoft answered ${raw.status} for the attachment.` }
+    return { bytes: Buffer.from(await raw.arrayBuffer()) }
+  }
+  if ((a.size || 0) > MAX_EMAIL_FILE) {
+    const out = await linkToFile(deps, { workspaceId, leadId, attachmentId, name: filename, contentType, fetchBytes })
+    return out.error ? out : { url: out.url, filename }
+  }
+  const got = await fetchBytes()
+  if (got.error) return got
+  // Microsoft's size is close, not exact: a file just over the line still goes through Storage.
+  if (got.bytes.length > MAX_EMAIL_FILE) {
+    const out = await linkToFile(deps, { workspaceId, leadId, attachmentId, name: filename, contentType, fetchBytes: async () => got })
+    return out.error ? out : { url: out.url, filename }
+  }
+  return { bytes: got.bytes, filename, contentType }
 }
 
 // ─── Forwarding a lead to its salesperson (2026-10-13) ─────────────────────

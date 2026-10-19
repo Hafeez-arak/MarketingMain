@@ -119,6 +119,19 @@ async function download(workspaceId, lead, a) {
     const j = await res.json().catch(() => null)
     throw new Error(j?.error || `Download failed (${res.status}).`)
   }
+  // A large file comes back as a ten-minute private link to a copy kept for
+  // a day (api/leads/_files.js); the link itself says "download".
+  if (/application\/json/i.test(res.headers.get('content-type') || '')) {
+    const j = await res.json().catch(() => null)
+    if (!j?.url) throw new Error(j?.error || 'No download link came back.')
+    const link = document.createElement('a')
+    link.href = j.url
+    link.rel = 'noopener'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    return
+  }
   const url = URL.createObjectURL(await res.blob())
   const link = document.createElement('a')
   link.href = url
@@ -167,7 +180,7 @@ function Attachments({ lead, workspaceId }) {
           {list.items.map((a) => (
             <li key={a.id}>
               <button type="button" onClick={() => get(a)} disabled={busy === a.id || a.tooBig || a.kind === 'link'}
-                title={a.tooBig ? 'Too large to download here: open the email in Outlook.' : a.kind === 'link' ? 'A link to a shared file: open the email in Outlook.' : 'Download'}
+                title={a.tooBig ? 'Too large to download here: open the email in Outlook.' : a.kind === 'link' ? 'A link to a shared file: open the email in Outlook.' : a.big ? 'Download (a large file: it takes a moment to prepare)' : 'Download'}
                 className="inline-flex items-center gap-1.5 border border-border bg-white px-2.5 py-1.5 text-xs hover:bg-surface-subtle disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400">
                 {busy === a.id ? <Spinner size="sm" /> : (
                   <svg className="w-3.5 h-3.5 text-text-tertiary" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v3h16v-3"/></svg>

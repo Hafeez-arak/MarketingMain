@@ -213,11 +213,13 @@ const actions = {
     return { attachments: out.attachments }
   },
 
-  /** One attachment, downloaded straight from the mailbox. Written to the response (not JSON). */
+  /** One attachment from the mailbox: the file itself, or a private link to it when it is large. */
   async attachment_file({ workspaceId, body }) {
     if (!isUuid(body.lead_id)) return fail(400, 'Which lead?')
     const out = await attachmentFile(leadDeps(), { workspaceId, leadId: body.lead_id, attachmentId: body.attachment_id })
     if (out.error) return fail(out.status, out.error)
+    // Too big for Vercel's 4.5 MB answer: a ten-minute private link instead.
+    if (out.url) return { url: out.url, filename: out.filename }
     const res = this.res
     res.setHeader('Content-Type', out.contentType)
     res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(out.filename)}`)
