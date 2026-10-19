@@ -230,9 +230,17 @@ that mailbox's Sent Items. **Send test alert** on the page proves the path;
 
 ## 6. The sales team: Leads only
 
-A sales person signs in to the same address (or leads.arak-sa.com) and sees
-the leads list and nothing else: no sidebar, no marketing app, no agent
-settings. Two kinds (2026-10-12):
+A sales person signs in at **sales.araklighting.com** (the same app; the old
+leads.araklighting.com address still works) and sees the leads list and
+nothing else: no sidebar, no marketing app, no agent settings.
+
+The address needs, once:
+- **GoDaddy** (araklighting.com → DNS): a CNAME record, name `sales`, value
+  `572be35c9166c963.vercel-dns-017.com` (the same value `leads` has). Vercel
+  issues the certificate by itself once it resolves.
+- **Supabase** (Authentication → URL Configuration → Redirect URLs):
+  `https://sales.araklighting.com/**`, so "Forgot password" emails come back
+  to it. Two kinds (2026-10-12):
 
 - **Sales**: sees **only the leads assigned to them** (section 8), plus every
   website enquiry if their seat has that switch on. Filter, open a lead, read
