@@ -213,7 +213,9 @@ function SourceRecordLine({ record }) {
     return <div className="mt-0.5 text-xs text-amber-700">Could not be checked on {shortDate(record.checkedAt)}.</div>
   }
   const parts = [`Checked ${shortDate(record.checkedAt)}`,
-    record.results ? `${record.results} result${record.results === 1 ? '' : 's'}` : 'nothing came back']
+    !record.results ? 'nothing came back'
+      : record.fresh != null ? `${record.fresh} new of ${record.results}`
+        : `${record.results} result${record.results === 1 ? '' : 's'}`]
   if (record.lastHitAt) parts.push(`led to a project ${shortDate(record.lastHitAt)}`)
   else if (record.runs >= 3) parts.push(`no project from it in ${record.runs} checks`)
   return <div className="mt-0.5 text-xs text-text-tertiary">{parts.join(' · ')}</div>
