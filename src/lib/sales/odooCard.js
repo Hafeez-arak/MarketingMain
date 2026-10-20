@@ -1,79 +1,65 @@
-// ─── The battle card as Odoo fields (2026-10-20) ───────────────────────────
-// The owner's decisions: every lead pushed to Odoo carries the whole battle
-// card as real fields on the lead, the before-call part filled and the rest
-// left for the salesperson; it syncs both ways, Odoo being the master (its
-// value wins), read from Odoo twice a day (07:50 and 13:00 Riyadh); and every
-// change made here is also written as a note in the lead's history.
+// ─── The battle card in Odoo (2026-10-20, simplified the same day) ─────────
+// The owner's decisions: everything in Odoo, but simple. Each part of the
+// card goes where it is used:
 //
-// The fields are Odoo Properties: defined once on the sales team the leads
-// go into (crm.team.lead_properties_definition), shown as their own block on
-// the lead form, no Studio needed. Properties have no long-text type, so
-// lists are written one per line in a char field and read back the same way.
+//   the prep      → the lead's Internal Notes (its description), written once
+//                   when it goes to Odoo: a short brief read before the call
+//                   (briefHtml). Our coaching lines stay on our platform.
+//   the outcome   → six fields on the lead (Odoo Properties of the team our
+//                   leads go into), synced both ways, Odoo the master:
+//                   decision, quote due, target price, who decides, who else
+//                   is quoting, call notes.
+//   the next step → an Odoo Activity (a to-do with a due date) for the
+//                   salesperson; done or rescheduled in Odoo comes back here.
 //
-// Odoo writes Properties WHOLE: writing { la_who: 'x' } empties every other
-// property. So a push reads the lead's current values, changes only what
-// changed here, and writes the full set back (mergeProps).
+// The first version (26 fields) was dropped as too much: nobody fills a form
+// that long, and the prep is read once, not edited.
+//
+// Properties are single-line in Odoo, and a line break typed there is lost,
+// so the call notes are numbered answers joined by " | ": "1) Yes | 2) …",
+// the numbers matching the questions in the brief.
+//
+// Odoo writes Properties WHOLE: writing { la_x: 'v' } empties the others. So
+// a push reads the lead's current values and writes the full set back
+// (mergeProps).
 //
 // Pure. No network.
 
-import { DECISIONS, CARD_KINDS, CUSTOMER_LABEL, BAND_LABEL, normaliseLeadCard } from './leadCard.js'
+import { DECISIONS, CUSTOMER_LABEL, BAND_LABEL, normaliseLeadCard } from './leadCard.js'
 
 const str = (v) => String(v ?? '').trim()
-const opts = (labels) => Object.entries(labels).map(([k, l]) => [k, l])
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]))
 
 /** Every property we own starts with this, so others' properties are never touched. */
 export const PREFIX = 'la_'
 
-/** "Q → A" lines and "objection → answer" lines, one per line. */
-const ARROW = ' → '
+/** A free call note (not an answer to a numbered question) on our card. */
+export const CALL_NOTE = 'Call note'
 
-// The block, in the order the lead form shows it. The keys are stable: a
-// rename here must keep the key, or Odoo loses the values stored under it.
+const SEP = ' | '
+
+// The block on the lead form. Keys are stable: renaming a key loses the
+// values stored under it.
 export const PROPS = [
-  { name: 'la_sep_before', string: 'Battle card: before the call', type: 'separator' },
-  { name: 'la_kind', string: 'Card', type: 'selection', selection: opts(CARD_KINDS) },
-  { name: 'la_customer', string: 'Customer', type: 'selection', selection: opts(CUSTOMER_LABEL) },
-  { name: 'la_headline', string: 'Headline', type: 'char' },
-  { name: 'la_who', string: 'Who they are', type: 'char' },
-  { name: 'la_wants', string: 'What they want', type: 'char' },
-  { name: 'la_brand', string: 'Brand rule', type: 'char' },
-  { name: 'la_due', string: 'Deadline', type: 'char' },
-  { name: 'la_fit', string: 'ICP fit', type: 'selection', selection: opts(BAND_LABEL) },
-  { name: 'la_fit_text', string: 'Why that fit', type: 'char' },
-  { name: 'la_references', string: 'Proof to name', type: 'char' },
-  { name: 'la_history', string: 'History with us', type: 'char' },
-  { name: 'la_sep_call', string: 'Battle card: the first call', type: 'separator' },
-  { name: 'la_q1', string: 'Question 1', type: 'char' },
-  { name: 'la_a1', string: 'Answer 1', type: 'char' },
-  { name: 'la_q2', string: 'Question 2', type: 'char' },
-  { name: 'la_a2', string: 'Answer 2', type: 'char' },
-  { name: 'la_q3', string: 'Question 3', type: 'char' },
-  { name: 'la_a3', string: 'Answer 3', type: 'char' },
-  { name: 'la_more', string: 'More questions (question → answer, one per line)', type: 'char' },
-  { name: 'la_pushback', string: 'Objections (objection → answer, one per line)', type: 'char' },
-  { name: 'la_sep_after', string: 'Battle card: after the call', type: 'separator' },
-  { name: 'la_decision', string: 'Decision', type: 'selection', selection: opts(DECISIONS) },
+  { name: 'la_sep_card', string: 'Battle card', type: 'separator' },
+  { name: 'la_decision', string: 'Decision', type: 'selection', selection: Object.entries(DECISIONS) },
   { name: 'la_quote_due', string: 'Quote due', type: 'date' },
   { name: 'la_target_price', string: 'Target price', type: 'char' },
   { name: 'la_decides', string: 'Who decides', type: 'char' },
   { name: 'la_competitors', string: 'Who else is quoting', type: 'char' },
-  { name: 'la_next_step', string: 'Next step', type: 'char' },
-  { name: 'la_follow_up', string: 'Follow up on', type: 'date' },
+  { name: 'la_call_notes', string: 'Call notes (1) answer | 2) answer …)', type: 'char' },
 ]
 
 const VALUE_PROPS = PROPS.filter((p) => p.type !== 'separator')
-const LABEL = Object.fromEntries(PROPS.map((p) => [p.name, p.string]))
+const LABEL = Object.fromEntries(PROPS.map((p) => [p.name, p.string.replace(/ \(.*$/, '')]))
 
-/**
- * The team's definition with ours put in: ours replaced by the current
- * version (in order, at the end), anyone else's kept as they are.
- */
+/** The team's definition with ours put in (replacing any older version of ours), others kept. */
 export function mergeDefinition(current = []) {
   const others = (Array.isArray(current) ? current : []).filter((d) => !String(d?.name || '').startsWith(PREFIX))
   return [...others, ...PROPS.map((p) => ({ ...p }))]
 }
 
-/** Does the team already hold exactly our definition? */
+/** Does the team hold exactly our current definition? */
 export function definitionCurrent(current = []) {
   const ours = new Map((Array.isArray(current) ? current : []).filter((d) => String(d?.name || '').startsWith(PREFIX)).map((d) => [d.name, d]))
   return PROPS.length === ours.size && PROPS.every((p) => {
@@ -83,39 +69,47 @@ export function definitionCurrent(current = []) {
   })
 }
 
-const lines = (arr) => arr.map(str).filter(Boolean).join('\n')
-const pairs = (arr) => lines(arr.map(([a, b]) => (str(b) ? `${str(a)}${ARROW}${str(b)}` : str(a))))
-const unpairs = (text) => str(text).split('\n').map(str).filter(Boolean).map((l) => {
-  const i = l.indexOf(ARROW.trim())
-  return i < 0 ? [l, ''] : [str(l.slice(0, i)), str(l.slice(i + 1))]
-})
+// ─── Call notes ────────────────────────────────────────────────────────────
+
+/** Our card's answers → "1) answer | 2) answer | free note". */
+export function callNotes(cardRaw = {}) {
+  const c = normaliseLeadCard(cardRaw)
+  const questions = c.ask.filter((a) => a.q !== CALL_NOTE)
+  const answered = questions.map((a, i) => (str(a.a) ? `${i + 1}) ${str(a.a)}` : '')).filter(Boolean)
+  const notes = c.ask.filter((a) => a.q === CALL_NOTE).map((a) => str(a.a)).filter(Boolean)
+  return [...answered, ...notes].join(SEP)
+}
 
 /**
- * Our card, its after-call fields and the lead's next step → { la_*: value }.
- * Empty is false, which is how Odoo stores an empty property.
+ * "1) Yes | 2) Example | spoke to the PM" → our card's answers. A numbered
+ * part answers that question; anything else is kept as a call note. Odoo is
+ * the master: a question with no part here has no answer.
  */
-export function cardToProps(cardRaw = {}, after = {}, lead = {}) {
+export function applyCallNotes(cardRaw = {}, text = '') {
   const c = normaliseLeadCard(cardRaw)
-  const ask = c.ask
+  const questions = c.ask.filter((a) => a.q !== CALL_NOTE).map((a) => ({ q: a.q, a: '' }))
+  const notes = []
+  for (const part of str(text).split('|').map(str).filter(Boolean)) {
+    const m = part.match(/^(\d+)\)\s*(.*)$/)
+    const i = m ? Number(m[1]) - 1 : -1
+    if (m && questions[i]) questions[i].a = str(m[2])
+    else notes.push({ q: CALL_NOTE, a: part })
+  }
+  return normaliseLeadCard({ ...c, ask: [...questions, ...notes] })
+}
+
+// ─── The six fields ────────────────────────────────────────────────────────
+
+/** Our card and its after-call fields → { la_*: value }; empty is false (Odoo's empty). */
+export function cardToProps(cardRaw = {}, after = {}) {
   const v = {
-    la_kind: c.kind, la_customer: c.customer, la_headline: c.headline,
-    la_who: c.facts.who, la_wants: c.facts.wants, la_brand: c.facts.brand, la_due: c.facts.due,
-    la_fit: c.fit.band, la_fit_text: c.fit.text,
-    la_references: lines(c.references), la_history: lines(c.history),
-    la_q1: ask[0]?.q, la_a1: ask[0]?.a, la_q2: ask[1]?.q, la_a2: ask[1]?.a, la_q3: ask[2]?.q, la_a3: ask[2]?.a,
-    la_more: pairs(ask.slice(3).map((a) => [a.q, a.a])),
-    la_pushback: pairs(c.pushback.map((p) => [p.objection, p.answer])),
     la_decision: after.decision, la_quote_due: after.quote_due, la_target_price: after.target_price,
-    la_decides: after.decides, la_competitors: after.competitors,
-    la_next_step: lead.next_step, la_follow_up: lead.follow_up,
+    la_decides: after.decides, la_competitors: after.competitors, la_call_notes: callNotes(cardRaw),
   }
   return Object.fromEntries(VALUE_PROPS.map((p) => [p.name, str(v[p.name]) || false]))
 }
 
-/**
- * Odoo's read format (a list of { name, value, … }) → { la_*: value }, ours
- * only; a selection value is its key, a date 'YYYY-MM-DD', empty is false.
- */
+/** Odoo's read format ([{ name, value, … }]) → { la_*: value }, ours only. */
 export function propsFromRead(list = []) {
   const out = {}
   for (const p of Array.isArray(list) ? list : []) {
@@ -127,38 +121,21 @@ export function propsFromRead(list = []) {
 }
 
 /**
- * Odoo's values → our card, after-call fields and lead fields. Odoo is the
- * master: what it holds replaces ours. A property Odoo does not have (the
- * block not defined yet) leaves ours as it is.
+ * Odoo's values → our card and after-call fields. Only the names present
+ * are applied; anything else stays ours.
  */
-export function propsToCard(props = {}, cardRaw = {}, after = {}, lead = {}) {
+export function propsToCard(props = {}, cardRaw = {}, after = {}) {
   const has = (k) => Object.prototype.hasOwnProperty.call(props, k)
-  const val = (k, fallback) => (has(k) ? str(props[k] || '') : fallback)
-  const c = normaliseLeadCard(cardRaw)
-  const askFixed = [1, 2, 3].map((i) => ({ q: val(`la_q${i}`, c.ask[i - 1]?.q || ''), a: val(`la_a${i}`, c.ask[i - 1]?.a || '') }))
-  const askMore = has('la_more') ? unpairs(props.la_more).map(([q, a]) => ({ q, a })) : c.ask.slice(3)
-  const card = normaliseLeadCard({
-    ...c,
-    kind: val('la_kind', c.kind) || c.kind,
-    customer: val('la_customer', c.customer) || c.customer,
-    headline: val('la_headline', c.headline),
-    facts: { who: val('la_who', c.facts.who), wants: val('la_wants', c.facts.wants), brand: val('la_brand', c.facts.brand), due: val('la_due', c.facts.due) },
-    fit: { band: val('la_fit', c.fit.band), text: val('la_fit_text', c.fit.text) },
-    references: has('la_references') ? str(props.la_references || '').split('\n') : c.references,
-    history: has('la_history') ? str(props.la_history || '').split('\n') : c.history,
-    ask: [...askFixed, ...askMore].filter((a) => a.q),
-    pushback: has('la_pushback') ? unpairs(props.la_pushback).map(([objection, answer]) => ({ objection, answer })) : c.pushback,
-  })
+  const val = (k, fallback) => (has(k) ? str(props[k] || '') : str(fallback))
   return {
-    card,
+    card: has('la_call_notes') ? applyCallNotes(cardRaw, props.la_call_notes || '') : normaliseLeadCard(cardRaw),
     after: {
-      decision: val('la_decision', str(after.decision)),
-      quote_due: val('la_quote_due', str(after.quote_due)) || null,
-      target_price: val('la_target_price', str(after.target_price)),
-      decides: val('la_decides', str(after.decides)),
-      competitors: val('la_competitors', str(after.competitors)),
+      decision: val('la_decision', after.decision),
+      quote_due: val('la_quote_due', after.quote_due) || null,
+      target_price: val('la_target_price', after.target_price),
+      decides: val('la_decides', after.decides),
+      competitors: val('la_competitors', after.competitors),
     },
-    track: { next_step: val('la_next_step', str(lead.next_step)), follow_up: val('la_follow_up', str(lead.follow_up)) || null },
   }
 }
 
@@ -167,30 +144,75 @@ export function changedProps(before = {}, after = {}) {
   return VALUE_PROPS.map((p) => p.name).filter((k) => (before[k] || false) !== (after[k] || false))
 }
 
-/**
- * The full set to write to Odoo: what Odoo holds now (others' properties
- * included), with only the names that changed here replaced.
- */
+/** The full set to write: what Odoo holds now, with only the changed names replaced. */
 export function mergeProps(odooNow = {}, ours = {}, names = []) {
   const out = { ...odooNow }
   for (const k of names) out[k] = ours[k] || false
   return out
 }
 
+// ─── The next step as an Odoo Activity ─────────────────────────────────────
+
+/** The lead's next step and follow-up as an activity: { summary, date } or null. */
+export function activityOf(lead = {}) {
+  const summary = str(lead.next_step)
+  const date = str(lead.follow_up)
+  return summary || date ? { summary: summary || 'Follow up', date: date || null } : null
+}
+
+/** Same activity? */
+export const sameActivity = (a, b) => (a?.summary || '') === (b?.summary || '') && (a?.date || '') === (b?.date || '')
+
+// ─── The prep: the brief in Internal Notes ─────────────────────────────────
+
 /**
- * The history note for a change made on our platform: who, and each changed
- * field with its new value. HTML, every value escaped.
+ * An objection's answer for the brief: what to say (its first two
+ * sentences), without the coaching ("Walk away if…", proof notes) that stays
+ * on our platform's card.
  */
-export function changeNote(names = [], values = {}, by = '', title = '') {
-  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]))
-  const selLabel = (k, v) => PROPS.find((p) => p.name === k)?.selection?.find(([key]) => key === v)?.[1] || v
-  const rows = names.map((k) => {
-    const v = values[k]
-    const shown = v ? esc(selLabel(k, v)).replace(/\n/g, '<br>') : '<i>cleared</i>'
-    return `<li><b>${esc(LABEL[k] || k)}:</b> ${shown}</li>`
-  })
-  const head = title || `Battle card updated on the Arak leads platform${by ? ` by ${by}` : ''}.`
-  return `<p>${esc(head)}</p><ul>${rows.join('')}</ul>`
+export function shortAnswer(answer = '') {
+  const said = str(answer).split(/\s(?:Walk away if|Proof|Why)\b/)[0]
+  const sentences = said.match(/[^.!?]+[.!?]+/g) || [said]
+  return sentences.slice(0, 2).join('').trim()
+}
+
+/** "Naba Hospital, Riyadh — supply, testing…" → "Naba Hospital, Riyadh". */
+const projectName = (ref) => str(ref).split(' — ')[0]
+
+/**
+ * The brief at the top of the lead's Internal Notes: what to know and ask
+ * before the first call. HTML, every value escaped. '' with no card.
+ */
+export function briefHtml(cardRaw) {
+  if (!cardRaw) return ''
+  const c = normaliseLeadCard(cardRaw)
+  const line = (label, value) => (str(value) ? `<li><b>${esc(label)}:</b> ${esc(value).replace(/\n/g, '; ')}</li>` : '')
+  const questions = c.ask.filter((a) => a.q !== CALL_NOTE)
+  const objection = c.pushback[0]
+  return [
+    '<p><b>Battle card: before the call</b></p><ul>',
+    line('Who', c.facts.who),
+    c.customer !== 'new' ? line('Customer', CUSTOMER_LABEL[c.customer]) : '',
+    line('Wants', c.facts.wants),
+    line('Brand', c.facts.brand),
+    line('Deadline', c.facts.due),
+    c.fit.band ? line('Fit', `${BAND_LABEL[c.fit.band]}${c.fit.text ? `: ${c.fit.text.replace(/^[^:]*:\s*/, '')}` : ''}`) : '',
+    line('Proof to name', c.references.map(projectName).filter(Boolean).join(', ')),
+    questions.length ? `<li><b>Ask:</b> ${questions.map((a, i) => `${i + 1}) ${esc(a.q)}`).join(' ')}</li>` : '',
+    objection ? `<li><b>If they say</b> “${esc(objection.objection)}”: ${esc(shortAnswer(objection.answer))}</li>` : '',
+    '</ul>',
+    '<p><i>Answers go in Call notes as 1) … | 2) … | 3) …</i></p>',
+  ].filter(Boolean).join('')
+}
+
+// ─── History notes ─────────────────────────────────────────────────────────
+
+/** One short line for a change made on our platform: who, and what changed to what. */
+export function changeNote(names = [], values = {}, by = '', activity = undefined) {
+  const label = (k, v) => (k === 'la_decision' ? DECISIONS[v] || v : v)
+  const parts = names.map((k) => `${LABEL[k] || k}: ${values[k] ? label(k, values[k]) : 'cleared'}`)
+  if (activity !== undefined) parts.push(activity ? `Next step: ${activity.summary}${activity.date ? ` (by ${activity.date})` : ''}` : 'Next step: done/cleared')
+  return `<p>Battle card updated on the Arak leads platform${by ? ` by ${esc(by)}` : ''}: ${esc(parts.join('; '))}.</p>`
 }
 
 // ─── When Odoo is read: 07:50 and 13:00, Riyadh (UTC+3, no daylight saving) ──

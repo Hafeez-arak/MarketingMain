@@ -18,7 +18,7 @@ const TEAM = 42
 
 // ── A fake Odoo ──────────────────────────────────────────────────────────
 function fakeOdoo({ salesAdmin = true } = {}) {
-  const o = { teams: { [TEAM]: { id: TEAM, name: 'Test team', lead_properties_definition: [] }, 10: { id: 10, name: 'Projects', lead_properties_definition: [] } }, leads: {}, notes: [], writes: [], nextId: 900 }
+  const o = { activities: {}, nextAct: 300, teams: { [TEAM]: { id: TEAM, name: 'Test team', lead_properties_definition: [] }, 10: { id: 10, name: 'Projects', lead_properties_definition: [] } }, leads: {}, notes: [], writes: [], nextId: 900 }
   const shown = (lead) => {
     const def = o.teams[lead.team_id]?.lead_properties_definition || []
     return def.map((d) => ({ ...d, value: d.type === 'separator' ? undefined : (lead.props[d.name] ?? false) }))
@@ -42,7 +42,13 @@ function fakeOdoo({ salesAdmin = true } = {}) {
       o.leads[id] = { id, ...a[0], props: {} }
       return ok(id)
     }
-    if (model === 'crm.lead' && m === 'read') return ok(a[0].map((id) => o.leads[id]).filter(Boolean).map((l) => ({ id: l.id, team_id: [l.team_id, 't'], lead_properties: shown(l) })))
+    if (model === 'crm.lead' && m === 'read') return ok(a[0].map((id) => o.leads[id]).filter(Boolean).map((l) => ({ id: l.id, team_id: [l.team_id, 't'], user_id: [l.user_id || 21, 'Owner'], lead_properties: shown(l) })))
+    if (model === 'ir.model' && m === 'search') return ok([77])
+    if (model === 'mail.activity.type' && m === 'search') return ok([4])
+    if (model === 'mail.activity' && m === 'create') { const id = o.nextAct++; o.activities[id] = { id, ...a[0] }; return ok(id) }
+    if (model === 'mail.activity' && m === 'write') { Object.assign(o.activities[a[0][0]], a[1]); return ok(true) }
+    if (model === 'mail.activity' && m === 'action_feedback') { o.activities[a[0][0]].done = kw.feedback; delete o.activities[a[0][0]]; return ok(1) }
+    if (model === 'mail.activity' && m === 'search_read') return ok(Object.values(o.activities).filter((x) => a[0][0][2].includes(x.id)).map((x) => ({ id: x.id, summary: x.summary, date_deadline: x.date_deadline })))
     if (model === 'crm.lead' && m === 'write') {
       if (a[1].lead_properties) {
         o.writes.push({ ...a[1].lead_properties })
@@ -163,7 +169,7 @@ describe('the team carries the card fields', () => {
 })
 
 describe('approving sends the card with the lead', () => {
-  it('into the chosen team, every filled field set, and a note saying it came from us', async () => {
+  it('into the chosen team: the brief in Internal Notes, the six fields empty until the call, one line in its history', async () => {
     const w = world()
     const conn = { ...w.tables.lead_crm[0], apiKey: 'key', ready: true }
     await ensureTeamFields(w.deps, conn)
@@ -171,10 +177,14 @@ describe('approving sends the card with the lead', () => {
     expect(out.crm).toBe('sent')
     const odooLead = w.odoo.leads[900]
     expect(odooLead.team_id).toBe(TEAM)
-    expect(odooLead.props).toMatchObject({ la_who: 'Contractor, verified', la_q1: 'Is the main contract awarded?', la_fit: 'possible', la_decision: false })
-    expect(w.odoo.notes[0].body).toMatch(/^<p>Battle card from the Arak leads platform, approved by Arif/)
+    expect(odooLead.description).toMatch(/^<p><b>Battle card: before the call<\/b><\/p>/)
+    expect(odooLead.description).toContain('1) Is the main contract awarded?')
+    expect(odooLead.description).toContain(`Lead Agent ref: ${L1}`)
+    expect(w.odoo.writes).toEqual([]) // nothing filled yet, so no field write
+    expect(Object.keys(w.odoo.activities)).toEqual([])
+    expect(w.odoo.notes).toHaveLength(1)
+    expect(w.odoo.notes[0].body).toBe('<p>From the Arak leads platform, approved by Arif (arif@example.com). The brief to read before the call is in Internal Notes.</p>')
     expect(w.odoo.notes[0]).toMatchObject({ body_is_html: true, subtype_xmlid: 'mail.mt_note' })
-    expect(w.tables.lead_cards[0].crm_props.la_who).toBe('Contractor, verified')
     expect(w.tables.lead_cards[0].crm_sync_error).toBe('')
   })
 })
@@ -190,11 +200,25 @@ describe('a card saved here, on a lead already in Odoo', () => {
 
   it('writes only what changed here, keeps an edit made in Odoo meanwhile, and notes who changed what', async () => {
     w.odoo.leads[900].props.la_decides = 'Set in Odoo by the salesperson'
-    const out = await saveCard(w.deps, { workspaceId: WS, leadId: L1, user: { id: OMAR }, body: { card: theCard, target_price: '180k SAR', decision: 'project_quote' } })
-    expect(out.odoo).toMatchObject({ ok: true, changed: ['la_decision', 'la_target_price'] })
-    expect(w.odoo.leads[900].props).toMatchObject({ la_target_price: '180k SAR', la_decision: 'project_quote', la_decides: 'Set in Odoo by the salesperson', la_who: 'Contractor, verified' })
-    expect(w.odoo.notes[0].body).toContain('by Omar')
-    expect(w.odoo.notes[0].body).toContain('<b>Target price:</b> 180k SAR')
+    const answered = { ...theCard, ask: [{ q: 'Is the main contract awarded?', a: 'Yes' }] }
+    const out = await saveCard(w.deps, { workspaceId: WS, leadId: L1, user: { id: OMAR }, body: { card: answered, target_price: '180k SAR', decision: 'project_quote' } })
+    expect(out.odoo).toMatchObject({ ok: true, changed: ['la_decision', 'la_target_price', 'la_call_notes'] })
+    expect(w.odoo.leads[900].props).toEqual({ la_target_price: '180k SAR', la_decision: 'project_quote', la_call_notes: '1) Yes', la_decides: 'Set in Odoo by the salesperson', la_quote_due: false, la_competitors: false })
+    expect(w.odoo.notes[0].body).toBe('<p>Battle card updated on the Arak leads platform by Omar: Decision: Project quote, with a date; Target price: 180k SAR; Call notes: 1) Yes.</p>')
+  })
+
+  it('the next step becomes the salesperson\'s to-do in Odoo; changed, it moves; cleared, it is marked done', async () => {
+    const out = await saveCard(w.deps, { workspaceId: WS, leadId: L1, user: { id: OMAR }, body: { card: theCard, next_step: 'Send samples', follow_up: '2026-10-25' } })
+    expect(out.odoo).toMatchObject({ ok: true, changed: ['next_step'] })
+    const [id] = Object.keys(w.odoo.activities)
+    expect(w.odoo.activities[id]).toMatchObject({ res_model_id: 77, res_id: 900, activity_type_id: 4, summary: 'Send samples', date_deadline: '2026-10-25', user_id: 21 })
+    await saveCard(w.deps, { workspaceId: WS, leadId: L1, user: { id: OMAR }, body: { card: theCard, next_step: 'Send samples', follow_up: '2026-10-27' } })
+    expect(Object.keys(w.odoo.activities)).toEqual([id])
+    expect(w.odoo.activities[id].date_deadline).toBe('2026-10-27')
+    await saveCard(w.deps, { workspaceId: WS, leadId: L1, user: { id: OMAR }, body: { card: theCard, next_step: '', follow_up: '' } })
+    expect(w.odoo.activities).toEqual({})
+    expect(w.tables.lead_cards[0].crm_activity_id).toBeNull()
+    expect(w.odoo.notes.at(-1).body).toContain('Next step: done/cleared')
   })
 
   it('a save that changes nothing writes nothing', async () => {
@@ -228,17 +252,30 @@ describe('reading back from Odoo (Odoo is the master)', () => {
     await pushCard(w.deps, { workspaceId: WS, leadId: L1 })
   })
 
-  it('takes what the salesperson filled in Odoo into our card, the lead\'s next step too', async () => {
-    Object.assign(w.odoo.leads[900].props, { la_decision: 'park', la_a1: 'Not yet, award in March', la_next_step: 'Call after the award', la_follow_up: '2026-11-02' })
+  it('takes what the salesperson filled in Odoo into our card', async () => {
+    Object.assign(w.odoo.leads[900].props, { la_decision: 'park', la_call_notes: '1) Not yet, award in March | spoke to the PM' })
     const out = await pullCards(w.deps, WS)
     expect(out).toEqual({ read: 1, updated: 1, failed: 0 })
     const row = w.tables.lead_cards[0]
     expect(row.decision).toBe('park')
-    expect(row.card.ask[0]).toEqual({ q: 'Is the main contract awarded?', a: 'Not yet, award in March' })
+    expect(row.card.ask).toEqual([{ q: 'Is the main contract awarded?', a: 'Not yet, award in March' }, { q: 'Call note', a: 'spoke to the PM' }])
     expect(row.card.facts.who).toBe('Contractor, verified')
-    expect(w.tables.leads[0]).toMatchObject({ next_step: 'Call after the award', follow_up: '2026-11-02' })
     // Nothing changed since: the next read changes nothing.
     expect(await pullCards(w.deps, WS)).toEqual({ read: 1, updated: 0, failed: 0 })
+  })
+
+  it('a to-do rescheduled in Odoo moves our follow-up; marked done there, our next step clears', async () => {
+    w.tables.leads[0].next_step = 'Send samples'
+    w.tables.leads[0].follow_up = '2026-10-25'
+    await pushCard(w.deps, { workspaceId: WS, leadId: L1 })
+    const [id] = Object.keys(w.odoo.activities)
+    w.odoo.activities[id].date_deadline = '2026-10-29'
+    await pullCards(w.deps, WS)
+    expect(w.tables.leads[0]).toMatchObject({ next_step: 'Send samples', follow_up: '2026-10-29' })
+    delete w.odoo.activities[id]
+    await pullCards(w.deps, WS)
+    expect(w.tables.leads[0]).toMatchObject({ next_step: '', follow_up: null })
+    expect(w.tables.lead_cards[0].crm_activity_id).toBeNull()
   })
 
   it('runs from the heartbeat once at 07:50 and once at 13:00 Riyadh, never in between', async () => {

@@ -19,6 +19,7 @@ import {
 import { riyadhTime } from './_export.js'
 import { normalizeUrl, defaultDb, discoverDb, testConnection, createLead, findUserId } from './_odoo.js'
 import { pushCard } from './_crmCard.js'
+import { briefHtml } from '../../src/lib/sales/odooCard.js'
 
 const isUuid = (v) => /^[0-9a-f-]{36}$/i.test(String(v || ''))
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
@@ -32,14 +33,24 @@ export const STUCK_MS = 5 * 60_000
  * message and the agent's questions go in the description, which also
  * carries our reference so the same lead is never created twice.
  */
-export function odooLeadValues(lead, { approvedBy = '' } = {}) {
+export function odooLeadValues(lead, { approvedBy = '', card = null } = {}) {
   const phones = phonesOf(lead)
   const v2 = (lead.criteria_version || 1) >= 2
   const what = lead.summary || lead.subject || 'Enquiry'
   const who = lead.company || lead.name || lead.email || ''
   const asks = Array.isArray(lead.ask_next) ? lead.ask_next : []
   const message = [lead.subject && lead.source === 'email' ? lead.subject : '', lead.message].filter(Boolean).join('\n\n').slice(0, 8000)
-  const description = [
+  // With its battle card (2026-10-20): Internal Notes open on the short brief
+  // to read before the call, then their own words. The criteria are in the
+  // brief already, so they are not repeated.
+  const description = card ? [
+    briefHtml(card),
+    para('Came in', [channelLabel(lead), lead.mailbox, lead.source === 'email' && lead.folder ? FOLDER_LABEL[lead.folder] || lead.folder : '', riyadhTime(lead.received_at || lead.created_at)].filter(Boolean).join(' · ')),
+    phones.length ? para(phones.length > 1 ? 'Numbers' : 'Number', phones.join(', ')) : '',
+    message ? `<p><b>Their message:</b></p><blockquote>${esc(message).replace(/\n/g, '<br>')}</blockquote>` : '',
+    para('Approved by', approvedBy),
+    `<p>Lead Agent ref: ${esc(lead.id)}</p>`,
+  ].filter(Boolean).join('') : [
     '<p><b>From the Lead Agent</b></p>',
     para('Came in', [channelLabel(lead), lead.mailbox, lead.source === 'email' && lead.folder ? FOLDER_LABEL[lead.folder] || lead.folder : ''].filter(Boolean).join(' · ')),
     para('Received', riyadhTime(lead.received_at || lead.created_at)),
@@ -208,7 +219,9 @@ async function pushOne(deps, conn, lead, marks = {}) {
     const owner = await odooOwner(deps, conn, claimed.workspace_id || lead.workspace_id || conn.workspace_id, claimed.assigned_to)
     // Into the team chosen on Agent settings (its leads carry the battle-card
     // fields); with none chosen, Odoo picks as before.
-    const values = { ...odooLeadValues({ ...lead, ...claimed }, { approvedBy: by }), user_id: owner, ...(conn.team_id ? { team_id: conn.team_id } : {}) }
+    // Its battle card (made when it was assigned) opens its Internal Notes.
+    const [cardRow] = conn.team_id ? await deps.db(`lead_cards?lead_id=eq.${lead.id}&select=card`).catch(() => []) || [] : []
+    const values = { ...odooLeadValues({ ...lead, ...claimed }, { approvedBy: by, card: cardRow?.card || null }), user_id: owner, ...(conn.team_id ? { team_id: conn.team_id } : {}) }
     const out = await createLead(deps.fetch, odooCfg(conn), values, lead.id)
     const [row] = await deps.db(`leads?id=eq.${lead.id}`, {
       method: 'PATCH', prefer: 'return=representation',
@@ -216,7 +229,7 @@ async function pushOne(deps, conn, lead, marks = {}) {
     }) || []
     // The whole battle card as fields on it, and a note in its history. A
     // failure here is kept on the card and retried; the lead is in Odoo.
-    if (conn.team_id) await pushCard(deps, { conn, workspaceId: claimed.workspace_id || lead.workspace_id || conn.workspace_id, leadId: lead.id, title: `Battle card from the Arak leads platform${by ? `, approved by ${by}` : ''}.` })
+    if (conn.team_id) await pushCard(deps, { conn, workspaceId: claimed.workspace_id || lead.workspace_id || conn.workspace_id, leadId: lead.id, title: `From the Arak leads platform${by ? `, approved by ${by}` : ''}. The brief to read before the call is in Internal Notes.` })
     return row
   } catch (err) {
     const [row] = await deps.db(`leads?id=eq.${lead.id}`, {
