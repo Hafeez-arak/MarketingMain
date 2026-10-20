@@ -233,18 +233,60 @@ const SOURCE_QUALITY = [
  * its name — but as the PIECE that fits, with the person who holds it.
  * `fit` is the company's own size/share/region lines, rendered from its ICP.
  */
-function sizing(fit) {
+function sizing(fit, late = null) {
   if (!fit) return ''
   return [
     '',
     'SIZE EVERY PROJECT AGAINST WHAT WE ACTUALLY WIN:',
     fit,
     'When a project\'s value is far larger than that, do NOT propose the whole project. Name the',
-    'specific piece that fits us — one building, one hotel, the interiors, a fit-out floor, the',
-    'controls package — and who holds it (the contractor, fit-out company or consultant that won',
-    'it). If you cannot find such a piece, still report the project, but say plainly that it is a',
-    'programme to split and lower the relevance to medium.',
+    ...(late?.stage
+      ? [
+          'specific piece that fits us — one building, one hotel, one phase of the outside works — and',
+          'who holds it (the main contractor or the owner who lets that part of the work). If you cannot',
+          'find such a piece, still report the project, but say plainly that it is a programme to split',
+          'and lower the relevance to medium.',
+        ]
+      : [
+          'specific piece that fits us — one building, one hotel, the interiors, a fit-out floor, the',
+          'controls package — and who holds it (the contractor, fit-out company or consultant that won',
+          'it). If you cannot find such a piece, still report the project, but say plainly that it is a',
+          'programme to split and lower the relevance to medium.',
+        ]),
   ].join('\n')
+}
+
+/**
+ * The order of value for a brand that is hired LATE in a project, or that
+ * sells a recurring service to sites that already exist.
+ *
+ * Added 2026-10-20 for Ghusn (landscape). The specification list below puts
+ * "projects entering DESIGN" first, which is right for a product that has to
+ * be written into a spec and wrong for a trade that is let near handover: the
+ * lens was told design stage is "the single most valuable thing" and, three
+ * paragraphs later, that this brand is hired at the end. It now gets one
+ * story. Driven by the ICP's `hire_stage` (and its recurring offers), never by
+ * a brand name, so any late-hired trade gets it by writing that one line.
+ */
+function lateHireOrder(late) {
+  return [
+    '1. Projects at the stage named under WHEN WE ARE HIRED below: buildings nearing completion',
+    '   or handover, and sites announced to OPEN in the coming months (a hotel, a mall, a branch,',
+    '   a campus, a hospital). That is when this work is let, so it is the most valuable thing',
+    '   you can find. A project still in design is a name to watch, not a lead yet.',
+    '2. Live tenders and contract awards where our work is in scope — INCLUDING ones you can only',
+    '   see as a listing on a tender portal, and operation, maintenance or care tenders for sites',
+    '   that already exist.',
+    '3. Main contractors, developers and operators newly active in this market. They let this',
+    '   work across many sites at once.',
+    ...(late?.recurring?.length
+      ? [
+          `4. Sites that already exist and may need what we sell on a recurring basis (${late.recurring.join('; ')}):`,
+          '   a service contract ending or re-tendered, a new operator or owner taking a site over, a',
+          '   site visibly run down. Name the site and who runs it.',
+        ]
+      : []),
+  ]
 }
 
 /**
@@ -343,7 +385,7 @@ const CLOSING = [
  * that is a tender; for a local service it is a new neighbourhood, a rival
  * closing, or an event needing suppliers. Same question, different target.
  */
-export function openingsPrompt(brand, { motion, agenda = [], language = '', intel = '', sources = [], sweep = [], fit = '' }) {
+export function openingsPrompt(brand, { motion, agenda = [], language = '', intel = '', sources = [], sweep = [], fit = '', late = null }) {
   // Ranked, not listed. The previous version gave three equal bullets and the
   // model spread its searches evenly across them; design-stage projects are
   // worth more than everything else here combined, because they are the only
@@ -379,7 +421,7 @@ export function openingsPrompt(brand, { motion, agenda = [], language = '', inte
     'One question: WHO IS ABOUT TO NEED WHAT THIS BRAND SELLS, and can we still reach them.',
     '',
     'Look for, in this order of value:',
-    ...(byMotion[motion] || byMotion.local_service),
+    ...(late?.stage ? lateHireOrder(late) : (byMotion[motion] || byMotion.local_service)),
     '',
     // ── THE INSTRUCTION THIS LENS KEPT FAILING ON ──
     //
@@ -425,7 +467,7 @@ export function openingsPrompt(brand, { motion, agenda = [], language = '', inte
     'Expos, conferences and trade shows are NOT your question — a separate events lens covers',
     'them with its own searches. Spend yours on projects, and on the procurement or budget',
     'cycles that decide when buyers can commit.',
-    sizing(fit),
+    sizing(fit, late),
     sourcesBlock(sources, { sweep }),
     social(language),
     SOURCE_QUALITY,
@@ -537,7 +579,7 @@ export function eventsPrompt(brand, { motion, competitors = [], agenda = [], lan
  * packages" would quietly stop looking at anything large, and the company asked
  * for the opposite.
  */
-export function targetsPrompt(brand, { icp = '', mix = { core: 50, broader: 50 }, searches = 8, agenda = [], language = '', intel = '', sources = [], sweep = [] }) {
+export function targetsPrompt(brand, { icp = '', mix = { core: 50, broader: 50 }, searches = 8, agenda = [], language = '', intel = '', sources = [], sweep = [], late = null }) {
   const coreSearches = Math.max(1, Math.round((searches * (mix.core ?? 50)) / 100))
   const broaderSearches = Math.max(0, searches - coreSearches)
   return [
@@ -562,8 +604,24 @@ export function targetsPrompt(brand, { icp = '', mix = { core: 50, broader: 50 }
     '  target.track to "broader".',
     '',
     'WHAT COUNTS AS A TARGET:',
-    '- A PROJECT with a name: one that has just been awarded to a contractor, is in design, is in',
-    '  fit-out, or has been announced with a budget. Name the buyer we would actually sell to.',
+    ...(late?.stage
+      ? [
+          '- A PROJECT with a name at the stage under WHEN WE ARE HIRED: nearing completion or handover,',
+          '  opening soon, or just awarded to the main contractor who will let our part. Name the buyer',
+          '  we would actually sell to.',
+        ]
+      : [
+          '- A PROJECT with a name: one that has just been awarded to a contractor, is in design, is in',
+          '  fit-out, or has been announced with a budget. Name the buyer we would actually sell to.',
+        ]),
+    ...(late?.recurring?.length
+      ? [
+          `- A SITE THAT ALREADY EXISTS and could buy what we sell on a recurring basis (${late.recurring.join('; ')}):`,
+          '  an operator, owner or facility manager running sites in our segments, especially one whose',
+          '  contract is ending or who has just taken a site over. Set target.kind to "company" and name',
+          '  the sites.',
+        ]
+      : []),
     '- A COMPANY: one that has just won work in our segments (a contractor or fit-out company that',
     '  announced an award), a developer or operator launching projects, or a company newly arrived',
     '  in our market. Set target.kind to "company" and name what makes them a buyer now.',
@@ -582,8 +640,15 @@ export function targetsPrompt(brand, { icp = '', mix = { core: 50, broader: 50 }
     '- value_kind — "project" when value_sar is the whole project, "package" when it is only the part',
     '  we would supply; empty when there is no value.',
     '- package — when the whole project is far bigger than what we win: the specific piece that fits',
-    '  us (one building, one hotel, the interiors, a fit-out floor, the controls package) and who',
-    '  holds it, e.g. "Hotel 3 interiors — fit-out by X". Empty when the whole job already fits.',
+    ...(late?.stage
+      ? [
+          '  us (one building, one hotel, one phase of the outside works) and who holds it, e.g.',
+          '  "Hotel 3 external works — main contractor X". Empty when the whole job already fits.',
+        ]
+      : [
+          '  us (one building, one hotel, the interiors, a fit-out floor, the controls package) and who',
+          '  holds it, e.g. "Hotel 3 interiors — fit-out by X". Empty when the whole job already fits.',
+        ]),
     '- package_value_sar — that piece\'s own value when a source states it; empty otherwise.',
     '- deadline — a real ISO date only; timing — open | closed | unconfirmed.',
     '- why_fit — one sentence: which part of the ICP it matches.',
