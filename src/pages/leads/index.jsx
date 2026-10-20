@@ -151,7 +151,7 @@ export default function LeadAgent() {
       )}
 
       {view === 'leads' ? (
-        <LeadsBoard workspaceId={activeWorkspaceId} onReview={review} refreshKey={refreshKey} mailboxes={status?.mailboxes || []} canApprove team={team} me={user?.id || ''} />
+        <LeadsBoard workspaceId={activeWorkspaceId} onReview={review} refreshKey={refreshKey} mailboxes={status?.mailboxes || []} canApprove canTest team={team} me={user?.id || ''} />
       ) : view === 'pipeline' ? (
         <Pipeline workspaceId={activeWorkspaceId} onReview={review} refreshKey={refreshKey} mailboxes={status?.mailboxes || []} canApprove team={team} me={user?.id || ''} focus={params.get('lead') || ''} />
       ) : (

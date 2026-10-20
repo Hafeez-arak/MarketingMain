@@ -19,6 +19,7 @@ import {
 import { riyadhTime } from './_export.js'
 import { normalizeUrl, defaultDb, discoverDb, testConnection, createLead, findUserId, customerHistory } from './_odoo.js'
 import { pushCard } from './_crmCard.js'
+import { openCard } from './_card.js'
 import { briefHtml } from '../../src/lib/sales/odooCard.js'
 import { matchAccount } from '../../src/lib/sales/leadCard.js'
 
@@ -205,7 +206,7 @@ export async function leadHistory(deps, conn, lead) {
 
 // ─── Approving and sending ─────────────────────────────────────────────────
 
-const LEAD_SELECT = 'id,source,received_at,created_at,name,company,email,phone,phones,subject,message,summary,ask_next,verdict,human_verdict,mailbox,folder,sender_type,source_check,project_type,request_type,philips,email_kind,criteria_version,human_project_type,project_final,approved_at,approved_by,assigned_to,stage,channel,crm_status,crm_id,crm_url,crm_error,crm_sent_at,updated_at'
+const LEAD_SELECT = 'id,source,received_at,created_at,name,company,email,phone,phones,subject,message,summary,ask_next,verdict,human_verdict,mailbox,folder,sender_type,source_check,project_type,request_type,philips,email_kind,criteria_version,human_project_type,project_final,approved_at,approved_by,assigned_to,stage,channel,crm_test,crm_status,crm_id,crm_url,crm_error,crm_sent_at,updated_at'
 
 /** Claim a lead for sending: only one request can, and only from these states. */
 function claimable(now) {
@@ -234,11 +235,19 @@ async function pushOne(deps, conn, lead, marks = {}) {
   if (!claimed) return null // someone else is sending it, or it is already in Odoo
   try {
     const by = await approverName(deps, claimed.approved_by)
-    const owner = await odooOwner(deps, conn, claimed.workspace_id || lead.workspace_id || conn.workspace_id, claimed.assigned_to)
+    // A test push (the access admin's "Test only") belongs to the Odoo
+    // connection's own user: no salesperson of ours sees it or is told.
+    const owner = claimed.crm_test ? conn.odoo_uid : await odooOwner(deps, conn, claimed.workspace_id || lead.workspace_id || conn.workspace_id, claimed.assigned_to)
     // Into the team chosen on Agent settings (its leads carry the battle-card
     // fields); with none chosen, Odoo picks as before.
     // Its battle card (made when it was assigned) opens its Internal Notes.
-    const [cardRow] = conn.team_id ? await deps.db(`lead_cards?lead_id=eq.${lead.id}&select=card`).catch(() => []) || [] : []
+    // Its battle card opens its Internal Notes; made now if it has none yet
+    // (a lead approved before anyone was assigned to it).
+    let [cardRow] = conn.team_id ? await deps.db(`lead_cards?lead_id=eq.${lead.id}&select=card`).catch(() => []) || [] : []
+    if (conn.team_id && !cardRow) {
+      await openCard(deps, { workspaceId: claimed.workspace_id || lead.workspace_id || conn.workspace_id, leadId: lead.id }).catch(() => null)
+      ;[cardRow] = await deps.db(`lead_cards?lead_id=eq.${lead.id}&select=card`).catch(() => []) || []
+    }
     // Their history with us, read from Odoo, for "who they are" on the card.
     // Unreadable is not a reason to hold the lead back.
     const history = cardRow ? await leadHistory(deps, conn, { ...lead, ...claimed }).catch(() => null) : null
@@ -267,12 +276,15 @@ async function pushOne(deps, conn, lead, marks = {}) {
  * Approving one that is already in Odoo changes nothing.
  * Returns { lead, crm: 'sent' | 'queued' | 'failed' | 'already' } or { status, error }.
  */
-export async function approveLead(deps, { workspaceId, leadId, user }) {
+export async function approveLead(deps, { workspaceId, leadId, user, test = false }) {
   if (!isUuid(leadId)) return { status: 400, error: 'Which lead?' }
   const [lead] = await deps.db(`leads?id=eq.${leadId}&workspace_id=eq.${workspaceId}&select=${LEAD_SELECT}`) || []
   if (!lead) return { status: 404, error: 'That lead is not in this company.' }
   if (lead.crm_status === 'sent') return { lead, crm: 'already' }
-  if (!lead.assigned_to) return { status: 400, error: 'Assign this lead to a salesperson before approving it.' }
+  // "Test only" (the access admin, 2026-10-20): no one of ours is needed,
+  // and it is not worth waiting for Odoo.
+  if (test && lead.assigned_to) return { status: 409, error: 'This lead is assigned to someone. A test uses a lead no one has yet.' }
+  if (!test && !lead.assigned_to) return { status: 400, error: 'Assign this lead to a salesperson before approving it.' }
 
   const now = deps.now().toISOString()
   const marks = { updated_at: now }
@@ -280,7 +292,9 @@ export async function approveLead(deps, { workspaceId, leadId, user }) {
   // Approved leads gather in the Pipeline (2026-10-18), starting at New.
   if (!lead.stage) Object.assign(marks, { stage: 'new', stage_at: now, stage_by: user.id })
   if (effectiveVerdict(lead) !== 'qualified') Object.assign(marks, { human_verdict: 'qualified', reviewed_by: user.id, reviewed_at: now })
+  if (test) marks.crm_test = true
   const conn = await crmConnection(deps, workspaceId)
+  if (test && !conn?.ready) return { status: 409, error: 'Connect Odoo first: a test goes there straight away.' }
   if (!conn?.ready) {
     marks.crm_status = 'queued'
     const [row] = await deps.db(`leads?id=eq.${leadId}&workspace_id=eq.${workspaceId}&${claimable(deps.now())}`, { method: 'PATCH', prefer: 'return=representation', body: marks }) || []

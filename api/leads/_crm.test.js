@@ -265,6 +265,26 @@ describe('approving', () => {
     expect(odoo.leads[0].stage_id).toBe(1)
   })
 
+  it('"Test only": no one of ours, the connection\'s own user owns it in Odoo, and it is marked as a test', async () => {
+    state.crm = { ...connected }
+    state.leads[0].assigned_to = null
+    const odoo = fakeOdoo()
+    const r = await approveLead(depsOf(state, odoo), { workspaceId: WS, leadId: L1, user: LAYLA, test: true })
+    expect(r.crm).toBe('sent')
+    expect(odoo.leads[0].user_id).toBe(7) // the connection's own Odoo user, not a salesperson
+    expect(state.leads[0]).toMatchObject({ crm_test: true, assigned_to: null })
+    expect(odoo.calls.some((c) => c.includes('res.users'))).toBe(false)
+  })
+
+  it('a test refuses a lead someone already has, and waits for nothing: Odoo must be connected', async () => {
+    const odoo = fakeOdoo()
+    expect((await approveLead(depsOf(state, odoo), { workspaceId: WS, leadId: L1, user: LAYLA, test: true })).status).toBe(409)
+    state.leads[0].assigned_to = null
+    const r = await approveLead(depsOf(state, odoo), { workspaceId: WS, leadId: L1, user: LAYLA, test: true })
+    expect(r).toMatchObject({ status: 409, error: expect.stringMatching(/Connect Odoo first/) })
+    expect(state.leads[0].approved_at).toBeNull()
+  })
+
   it('refuses a lead of another company', async () => {
     const r = await approveLead(depsOf(state, fakeOdoo()), { workspaceId: '99999999-9999-4999-8999-999999999999', leadId: '55555555-5555-4555-8555-555555555555', user: LAYLA })
     expect(r.status).toBe(404)

@@ -385,6 +385,16 @@ const actions = {
   async approve({ workspaceId, body, user, token }) {
     if (!(await canApprove(workspaceId, token))) return fail(403, 'Only a sales admin can approve leads into the CRM.')
     const deps = leadDeps()
+    // "Test only" (2026-10-20): the access admin tries the Odoo path on one
+    // lead with no one assigned and nothing forwarded; it goes to Odoo as the
+    // connection's own user. Never for anyone else.
+    if (body.test === true) {
+      const [member, admin] = await Promise.all([isMember(workspaceId, token), isAdmin(token)])
+      if (!member || !admin) return fail(403, 'Only the access admin can approve a lead as a test.')
+      const out = await approveLead(deps, { workspaceId, leadId: body.lead_id, user, test: true })
+      if (out.error) return fail(out.status, out.error)
+      return { lead: out.lead, crm: out.crm, forward: null }
+    }
     // Chosen in the confirmation when no one had it yet (or someone else):
     // assigned first, which forwards the email, then approved.
     let forward = null

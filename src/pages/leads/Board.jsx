@@ -67,9 +67,10 @@ const stop = (e) => e.stopPropagation()
 function CrmCell({ lead, canApprove, onAsk }) {
   const st = lead.crm_status
   if (st === 'sent') {
+    const testTag = lead.crm_test ? <span className="block text-[10px] font-bold text-amber-800 uppercase tracking-wide">Test</span> : null
     return lead.crm_url
-      ? <a href={lead.crm_url} target="_blank" rel="noreferrer" onClick={stop} className="text-xs font-semibold text-sage-700 hover:underline">In Odoo ↗</a>
-      : <span className="text-xs font-semibold text-sage-700">{CRM_LABEL.sent}</span>
+      ? <span className="block"><a href={lead.crm_url} target="_blank" rel="noreferrer" onClick={stop} className="text-xs font-semibold text-sage-700 hover:underline">In Odoo ↗</a>{testTag}</span>
+      : <span className="text-xs font-semibold text-sage-700">{CRM_LABEL.sent}{testTag}</span>
   }
   if (st === 'queued') return <span className="text-[11px] font-semibold text-amber-800 leading-tight block">{CRM_LABEL.queued}</span>
   if (st === 'sending') return <span className="text-[11px] text-text-secondary">{CRM_LABEL.sending}</span>
@@ -292,8 +293,12 @@ function AskAboutLead({ lead }) {
  * It goes with a salesperson: the one it is assigned to, or one chosen here
  * (which forwards them the email, as Assign does).
  */
-function ApproveDialog({ lead, team, busy, error, onCancel, onConfirm }) {
+function ApproveDialog({ lead, team, busy, error, onCancel, onConfirm, canTest = false }) {
   const [to, setTo] = useState(lead.assigned_to || '')
+  // "Test only" (the access admin, 2026-10-20): no salesperson, nothing
+  // forwarded; in Odoo it belongs to the connection's own user.
+  const [test, setTest] = useState(false)
+  const testable = canTest && !lead.assigned_to && lead.crm_status !== 'failed'
   const person = team.find((m) => m.user_id === to)
   const changing = to && to !== lead.assigned_to
   const phones = phonesOf(lead)
@@ -318,21 +323,33 @@ function ApproveDialog({ lead, team, busy, error, onCancel, onConfirm }) {
             </div>
           ))}
         </dl>
-        <Select label="Assigned to" value={to} onChange={(e) => setTo(e.target.value)} disabled={lead.crm_status === 'failed' && Boolean(lead.assigned_to)}>
-          <option value="">Choose who works it…</option>
-          <PersonOptions team={team} />
-        </Select>
-        {changing && <p className="text-xs text-text-secondary leading-relaxed">{forwardWords(lead, person)}</p>}
+        {testable && (
+          <label className="flex items-start gap-2 text-xs text-text cursor-pointer border border-amber-300 bg-amber-50 px-3 py-2">
+            <input type="checkbox" checked={test} onChange={(e) => setTest(e.target.checked)} className="mt-0.5" />
+            <span><b>Test only.</b> No one on the sales team gets it and nothing is emailed: in Odoo it belongs to the connection's own user, so only you see it there. It is marked TEST, to be taken out after.</span>
+          </label>
+        )}
+        {!test && (
+          <>
+            <Select label="Assigned to" value={to} onChange={(e) => setTo(e.target.value)} disabled={lead.crm_status === 'failed' && Boolean(lead.assigned_to)}>
+              <option value="">Choose who works it…</option>
+              <PersonOptions team={team} />
+            </Select>
+            {changing && <p className="text-xs text-text-secondary leading-relaxed">{forwardWords(lead, person)}</p>}
+          </>
+        )}
         <p className="text-xs text-text-secondary leading-relaxed">
-          It becomes a lead in Odoo CRM with {person ? shortName(person) : 'them'} as its salesperson, the email, the criteria and the agent's questions; its battle card stays with it. It can't be sent twice.
+          {test
+            ? 'It goes onto the Odoo Pipeline with its battle card, with no salesperson of ours. It can\'t be sent twice.'
+            : `It becomes a lead in Odoo CRM with ${person ? shortName(person) : 'them'} as its salesperson, the email, the criteria and the agent's questions; its battle card stays with it. It can't be sent twice.`}
           {notQualified ? ' Approving also marks it qualified.' : ''}
-          {' '}If Odoo isn't connected yet, it is marked approved and sent as soon as it is.
+          {test ? '' : ' If Odoo isn\'t connected yet, it is marked approved and sent as soon as it is.'}
         </p>
         {error && <p className="text-xs text-red-600">{error}</p>}
         <div className="flex gap-3 pt-1">
           <Button variant="secondary" className="flex-1 justify-center" disabled={busy} onClick={onCancel}>Cancel</Button>
-          <Button className="flex-1 justify-center" disabled={busy || !to} onClick={() => onConfirm(to)}>
-            {busy ? <Spinner size="sm" /> : null}{busy ? 'Sending…' : 'Approve and send'}
+          <Button className="flex-1 justify-center" disabled={busy || (!test && !to)} onClick={() => onConfirm(test ? null : to, test)}>
+            {busy ? <Spinner size="sm" /> : null}{busy ? 'Sending…' : test ? 'Send as a test' : 'Approve and send'}
           </Button>
         </div>
       </div>
@@ -340,7 +357,7 @@ function ApproveDialog({ lead, team, busy, error, onCancel, onConfirm }) {
   )
 }
 
-export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mailboxes = [], canApprove = false, team = [], me = '' }) {
+export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mailboxes = [], canApprove = false, team = [], me = '', canTest = false }) {
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   // The search box waits for a pause in typing before it asks the database.
   const [searchText, setSearchText] = useState('')
@@ -401,9 +418,9 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
   // any, stays on the row (Retry) rather than in the dialog.
   const [asking, setAsking] = useState(null)
   const [approving, setApproving] = useState({ busy: false, error: '' })
-  async function approve(assignTo) {
+  async function approve(assignTo, test = false) {
     setApproving({ busy: true, error: '' })
-    const r = await leadsApi('approve', workspaceId, { lead_id: asking.id, assign_to: assignTo })
+    const r = await leadsApi('approve', workspaceId, test ? { lead_id: asking.id, test: true } : { lead_id: asking.id, assign_to: assignTo })
     if (r.error) return setApproving({ busy: false, error: r.error })
     replaceRow(asking.id, r.lead)
     setApproving({ busy: false, error: '' })
@@ -532,7 +549,7 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
           </div>
         )}
       </div>
-      {asking && <ApproveDialog lead={asking} team={team} busy={approving.busy} error={approving.error} onCancel={() => setAsking(null)} onConfirm={approve} />}
+      {asking && <ApproveDialog lead={asking} team={team} busy={approving.busy} error={approving.error} onCancel={() => setAsking(null)} onConfirm={approve} canTest={canTest} />}
       {assigning && <AssignDialog lead={assigning} team={team} busy={assignState.busy} error={assignState.error} onCancel={() => setAssigning(null)} onConfirm={assign} />}
     </div>
   )
