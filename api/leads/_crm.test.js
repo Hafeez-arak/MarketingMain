@@ -52,6 +52,7 @@ function fakeOdoo({ plan = 'custom', canCreate = true, failCreate = false, lists
       for (const id of a[0]) Object.assign(odoo.leads.find((l) => l.id === id) || {}, a[1])
       return ok(true)
     }
+    if (model === 'crm.stage' && m === 'search_read') return ok([{ id: 1, name: 'New', sequence: 0 }, { id: 11, name: 'RFQ Received (TENDER)', sequence: 1 }, { id: 3, name: 'RFQ Received (JIH)', sequence: 2 }, { id: 12, name: 'Quotation (tender)', sequence: 3 }])
     if (model === 'crm.tag' && m === 'search') return ok(odoo.tags.filter((t) => t.name === a[0][0][2]).map((t) => t.id))
     if (model === 'crm.tag' && m === 'create') { odoo.tags.push({ id: odoo.tags.length + 1, ...a[0] }); return ok(odoo.tags.length) }
     return err(`fake odoo: ${model}.${m}`)
@@ -244,6 +245,24 @@ describe('approving', () => {
     expect(r.lead.crm_status).toBe('failed')
     expect(r.lead.crm_error).toMatch(/Omar \(omar@example\.com\) has no user in Odoo with the login nobody@example\.com/)
     expect(odoo.leads).toHaveLength(0)
+  })
+
+  it('lands on the Pipeline board, as an opportunity in the column for its phase', async () => {
+    state.crm = { ...connected }
+    const odoo = fakeOdoo()
+    await approveLead(depsOf(state, odoo), { workspaceId: WS, leadId: L1, user: LAYLA })
+    expect(odoo.leads[0]).toMatchObject({ type: 'opportunity', stage_id: 11 })
+    Object.assign(state.leads[1], { project_type: 'jih' })
+    await approveLead(depsOf(state, odoo), { workspaceId: WS, leadId: L2, user: LAYLA })
+    expect(odoo.leads[1]).toMatchObject({ type: 'opportunity', stage_id: 3 })
+  })
+
+  it('a lead with no phase starts in the first column', async () => {
+    state.crm = { ...connected }
+    Object.assign(state.leads[0], { project_type: '' })
+    const odoo = fakeOdoo()
+    await approveLead(depsOf(state, odoo), { workspaceId: WS, leadId: L1, user: LAYLA })
+    expect(odoo.leads[0].stage_id).toBe(1)
   })
 
   it('refuses a lead of another company', async () => {

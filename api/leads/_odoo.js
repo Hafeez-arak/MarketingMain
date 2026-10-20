@@ -112,15 +112,35 @@ export const leadUrl = (url, id) => `${url}/web#id=${id}&model=crm.lead&view_typ
  * (a push that died after Odoo saved it). Returns { id, url, existed }.
  * `values` comes from odooLeadValues (_crm.js); `ref` is our lead id.
  */
-export async function createLead(fetchFn, cfg, values, ref) {
+export async function createLead(fetchFn, cfg, values, ref, { pipeline = false, phase = '' } = {}) {
   const uid = await login(fetchFn, cfg)
   const [already] = await call(fetchFn, cfg, uid, 'crm.lead', 'search', [[['description', 'ilike', ref]]], { limit: 1, context: { active_test: false } })
   if (already) return { id: already, url: leadUrl(cfg.url, already), existed: true }
   const { tags = [], ...fields } = values
   const vals = { ...fields }
   if (tags.length) vals.tag_ids = [[6, 0, await tagIds(fetchFn, cfg, uid, tags)]]
+  // Straight onto the Pipeline board (the owner, 2026-10-20): an opportunity
+  // in the column for its phase, not a Lead waiting under the Leads menu.
+  if (pipeline) {
+    vals.type = 'opportunity'
+    const stage = await pipelineStage(fetchFn, cfg, uid, phase, vals.team_id)
+    if (stage) vals.stage_id = stage
+  }
   const id = await call(fetchFn, cfg, uid, 'crm.lead', 'create', [vals])
   return { id, url: leadUrl(cfg.url, id), existed: false }
+}
+
+/**
+ * The Pipeline column a new opportunity starts in: the first stage named for
+ * its phase ("RFQ Received (TENDER)" before "Quotation (tender)"), else the
+ * first stage ("New"). Won stages never; the team's own stages and the
+ * shared ones. null when Odoo has none.
+ */
+async function pipelineStage(fetchFn, cfg, uid, phase = '', teamId = null) {
+  const stages = await call(fetchFn, cfg, uid, 'crm.stage', 'search_read', [[['is_won', '=', false], '|', ['team_id', '=', false], ['team_id', '=', teamId || false]]], { fields: ['name', 'sequence'], order: 'sequence, id' })
+  if (!stages.length) return null
+  const word = { tender: /tender/i, jih: /\bjih\b/i, maintenance: /mainten/i }[phase]
+  return (word && stages.find((s) => word.test(s.name)))?.id || stages[0].id
 }
 
 /**

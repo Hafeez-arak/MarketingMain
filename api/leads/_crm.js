@@ -243,7 +243,7 @@ async function pushOne(deps, conn, lead, marks = {}) {
     // Unreadable is not a reason to hold the lead back.
     const history = cardRow ? await leadHistory(deps, conn, { ...lead, ...claimed }).catch(() => null) : null
     const values = { ...odooLeadValues({ ...lead, ...claimed }, { approvedBy: by, card: cardRow?.card || null, history, now: deps.now() }), user_id: owner, ...(conn.team_id ? { team_id: conn.team_id } : {}) }
-    const out = await createLead(deps.fetch, odooCfg(conn), values, lead.id)
+    const out = await createLead(deps.fetch, odooCfg(conn), values, lead.id, { pipeline: true, phase: projectOf({ ...lead, ...claimed }) })
     const [row] = await deps.db(`leads?id=eq.${lead.id}`, {
       method: 'PATCH', prefer: 'return=representation',
       body: { crm_status: 'sent', crm_id: String(out.id), crm_url: out.url, crm_error: '', crm_sent_at: deps.now().toISOString(), updated_at: deps.now().toISOString() },
