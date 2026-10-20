@@ -5,6 +5,7 @@ import { checkMail } from './_mail.js'
 import { runHealth } from './_health.js'
 import { supabaseStorage } from './_files.js'
 import { checkWebsite } from './_website.js'
+import { maybePullCards } from './_crmCard.js'
 
 // ─── The lead agent's real IO, in one place ────────────────────────────────
 // Used by api/leads/[action].js and, for the two things that must live in
@@ -133,5 +134,7 @@ export function leadDeps() {
   deps.checkMail = (args) => checkMail(deps, args)
   deps.website = (domain) => checkWebsite(deps, domain)
   deps.health = (args) => runHealth(deps, { pageUrl: `${APP_URL}/leads`, ...args })
+  // The battle cards read back from Odoo at 07:50 and 13:00 Riyadh (_crmCard.js).
+  deps.crmPull = (args) => maybePullCards(deps, args)
   return deps
 }

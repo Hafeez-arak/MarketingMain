@@ -18,6 +18,7 @@ import {
 } from '../../src/lib/leads/view.js'
 import { riyadhTime } from './_export.js'
 import { normalizeUrl, defaultDb, discoverDb, testConnection, createLead, findUserId } from './_odoo.js'
+import { pushCard } from './_crmCard.js'
 
 const isUuid = (v) => /^[0-9a-f-]{36}$/i.test(String(v || ''))
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
@@ -81,8 +82,19 @@ export async function crmConnection(deps, workspaceId) {
 /** What the admin page shows: never the key. */
 export async function crmStatus(deps, workspaceId) {
   const conn = await crmConnection(deps, workspaceId)
-  const waiting = await deps.db(`leads?workspace_id=eq.${workspaceId}&crm_status=in.(queued,failed)&select=crm_status`) || []
+  const [waiting, unsynced] = await Promise.all([
+    deps.db(`leads?workspace_id=eq.${workspaceId}&crm_status=in.(queued,failed)&select=crm_status`).then((r) => r || []),
+    deps.db(`lead_cards?workspace_id=eq.${workspaceId}&crm_sync_error=neq.&select=lead_id`).then((r) => r || []).catch(() => []),
+  ])
   return {
+    // The battle card in Odoo (2026-10-20): the team our leads go into, and
+    // the twice-daily read back.
+    teamId: conn?.team_id || null,
+    teamName: conn?.team_name || '',
+    lastPullAt: conn?.last_pull_at || null,
+    lastPullError: conn?.last_pull_error || '',
+    lastPullCounts: conn?.last_pull_counts || null,
+    cardsNotSynced: unsynced.length,
     connected: Boolean(conn?.ready),
     url: conn?.url || '',
     db: conn?.db || '',
@@ -194,12 +206,17 @@ async function pushOne(deps, conn, lead, marks = {}) {
   try {
     const by = await approverName(deps, claimed.approved_by)
     const owner = await odooOwner(deps, conn, claimed.workspace_id || lead.workspace_id || conn.workspace_id, claimed.assigned_to)
-    const values = { ...odooLeadValues({ ...lead, ...claimed }, { approvedBy: by }), user_id: owner }
+    // Into the team chosen on Agent settings (its leads carry the battle-card
+    // fields); with none chosen, Odoo picks as before.
+    const values = { ...odooLeadValues({ ...lead, ...claimed }, { approvedBy: by }), user_id: owner, ...(conn.team_id ? { team_id: conn.team_id } : {}) }
     const out = await createLead(deps.fetch, odooCfg(conn), values, lead.id)
     const [row] = await deps.db(`leads?id=eq.${lead.id}`, {
       method: 'PATCH', prefer: 'return=representation',
       body: { crm_status: 'sent', crm_id: String(out.id), crm_url: out.url, crm_error: '', crm_sent_at: deps.now().toISOString(), updated_at: deps.now().toISOString() },
     }) || []
+    // The whole battle card as fields on it, and a note in its history. A
+    // failure here is kept on the card and retried; the lead is in Odoo.
+    if (conn.team_id) await pushCard(deps, { conn, workspaceId: claimed.workspace_id || lead.workspace_id || conn.workspace_id, leadId: lead.id, title: `Battle card from the Arak leads platform${by ? `, approved by ${by}` : ''}.` })
     return row
   } catch (err) {
     const [row] = await deps.db(`leads?id=eq.${lead.id}`, {

@@ -137,6 +137,9 @@ export async function intakeWebsite(deps, { key, rows = [] }) {
   if (deps.checkMail) {
     try { mail = await deps.checkMail({ workspaceId, deadline: started + TOTAL_BUDGET_MS }) } catch (err) { mail = { error: String(err.message || err).slice(0, 300) } }
   }
+  // The battle cards read back from Odoo, when one of the two daily times
+  // (07:50, 13:00 Riyadh) has passed since the last read; else a no-op.
+  if (deps.crmPull) await deps.crmPull({ workspaceId }).catch(() => {})
   // Is everything still working? (at most every 10 minutes; see _health.js)
   if (deps.health) await deps.health({ workspaceId }).catch(() => {})
   return { status: 200, results, mail }

@@ -8,6 +8,7 @@ import { checkMail, emailFile, currentOutlookLink, emailAttachments, attachmentF
 import { exportLeads, applySheetDecisions } from './_export.js'
 import { approveLead, crmStatus, saveCrm, sendWaiting, disconnectCrm } from './_crm.js'
 import { openCard, saveCard, watchlist } from './_card.js'
+import { crmTeams, setCrmTeam, pullCards } from './_crmCard.js'
 import { assignLead, teamList, teamSave, teamCheckOdoo } from './_assign.js'
 import { addLead, trackLead, deleteLead } from './_pipeline.js'
 import { leadDeps, openRouterKey, hasDeploymentKey, describeKey, sendAlert } from './_deps.js'
@@ -504,6 +505,33 @@ const actions = {
     const out = await sendWaiting(deps, workspaceId)
     if (out.error) return fail(409, out.error)
     return { sent: out, crm: await crmStatus(deps, workspaceId) }
+  },
+
+  /** Odoo's sales teams, for choosing where our leads go (2026-10-20). */
+  async crm_teams({ workspaceId }) {
+    const out = await crmTeams(leadDeps(), workspaceId)
+    if (out.error) return fail(out.status || 409, out.error)
+    return out
+  },
+
+  /**
+   * The team our leads go into. Its leads get the battle-card fields (Odoo
+   * Properties), written now; Odoo refuses that without Sales: Administrator.
+   */
+  async crm_set_team({ workspaceId, body }) {
+    const deps = leadDeps()
+    const out = await setCrmTeam(deps, workspaceId, body.team_id)
+    if (out.error) return fail(out.status || 409, out.error)
+    return { crm: await crmStatus(deps, workspaceId), fieldsAdded: out.changed }
+  },
+
+  /** Read every pushed lead's battle card back from Odoo now (it also runs at 07:50 and 13:00). */
+  async crm_pull({ workspaceId }) {
+    const deps = leadDeps()
+    const out = await pullCards(deps, workspaceId)
+    if (out.error) return fail(409, out.error)
+    await db(`lead_crm?workspace_id=eq.${workspaceId}`, { method: 'PATCH', prefer: 'return=minimal', body: { last_pull_at: new Date().toISOString(), last_pull_error: '', last_pull_counts: out } })
+    return { pulled: out, crm: await crmStatus(deps, workspaceId) }
   },
 
   /** Forget the Odoo connection. Leads already sent keep their Odoo links. */
