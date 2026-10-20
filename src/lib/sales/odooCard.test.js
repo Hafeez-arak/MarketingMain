@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   PROPS, CALL_NOTE, cardToProps, propsFromRead, propsToCard, changedProps, mergeProps, mergeDefinition,
-  definitionCurrent, changeNote, callNotes, applyCallNotes, briefHtml, splitHistory, splitWalkAway, activityOf, sameActivity, lastSlot, pullDue,
+  definitionCurrent, changeNote, callNotes, applyCallNotes, briefHtml, historyFacts, splitHistory, splitWalkAway, activityOf, sameActivity, lastSlot, pullDue,
 } from './odooCard.js'
 
 // The battle card in Odoo, simplified (2026-10-20): a brief in Internal
@@ -60,63 +60,102 @@ describe('call notes: numbered answers, one line', () => {
   })
 })
 
-describe('the battle card in Internal Notes: the weapons', () => {
+describe('Odoo history in words', () => {
+  const NOW = new Date('2026-10-20T08:00:00Z')
+  const base = { matchedBy: 'email domain', companies: [{ id: 5, name: 'Example Dev Co' }], deals: [], orders: [] }
+
+  it('names the customer it matched and how, then orders, quotations and deals', () => {
+    const f = historyFacts({
+      ...base,
+      orders: [
+        { state: 'sale', amount_total: 85000, date_order: '2026-01-10 09:00:00', user_id: [69, 'Ammar Ahmed - Sales'] },
+        { state: 'draft', amount_total: 40000, date_order: '2025-11-01 09:00:00' },
+        { state: 'sale', amount_total: 325000, date_order: '2024-03-05 09:00:00' },
+      ],
+      deals: [
+        { active: true, probability: 100 },
+        { active: false, probability: 0, lost_reason_id: [3, 'Price'], date_closed: '2026-03-14 09:00:00' },
+      ],
+    }, NOW)
+    expect(f.lines).toEqual([
+      'In Odoo as Example Dev Co (matched by email domain).',
+      '2 orders since Mar 2024, SAR 410,000; last Jan 2026 (Ammar Ahmed - Sales).',
+      '1 quotation that did not become an order.',
+      'Deals: 1 won · 1 lost (last Mar 2026: Price) · 0 open.',
+    ])
+    expect(f.alert).toBe('')
+    expect(f.move).toBe('They went elsewhere on price last time (Mar 2026): open with a budget option, then the full offer.')
+  })
+
+  it('an open deal is the warning: probably the same enquiry when it is fresh, someone else\'s customer when older', () => {
+    const fresh = historyFacts({ ...base, deals: [{ active: true, probability: 10, create_date: '2026-10-15 07:00:00', user_id: [46, 'Haitham Khairi'] }] }, NOW)
+    expect(fresh.alert).toBe('Probably this same enquiry: Haitham Khairi opened a deal for them on 2026-10-15. Check before working it twice.')
+    const old = historyFacts({ ...base, deals: [{ active: true, probability: 20, create_date: '2026-02-01 07:00:00', user_id: [59, 'Mohamed Gamal'] }] }, NOW)
+    expect(old.alert).toBe('Mohamed Gamal already has an open deal with them (since Feb 2026). Talk to them before calling.')
+    expect(old.move).toBe('')
+  })
+
+  it('not found says so (never "new to us"); unreadable says nothing', () => {
+    expect(historyFacts({ matchedBy: null, deals: [], orders: [] }).lines[0]).toMatch(/^Not found in Odoo/)
+    expect(historyFacts(null)).toEqual({ lines: [], alert: '', move: '' })
+  })
+
+  it('bought before, or quoted often without an order: the move says what to do with that', () => {
+    expect(historyFacts({ ...base, orders: [{ state: 'sale', amount_total: 1, date_order: '2025-06-01 00:00:00', user_id: [1, 'Reda'] }] }, NOW).move)
+      .toBe('They have bought from us (last Jun 2025, Reda): name that order and ask how it went.')
+    expect(historyFacts({ ...base, orders: [1, 2, 3].map(() => ({ state: 'draft', amount_total: 1, date_order: '2025-06-01 00:00:00' })) }, NOW).move)
+      .toBe('We have quoted them 3 times without an order: ask what decides it this time.')
+  })
+})
+
+describe('the battle card: who they are, what to do, after the call', () => {
   const armed = {
     ...card,
-    customer: 'existing',
     history: [
-      'Existing customer (name match, confirm): Example Dev Co, 4 orders.',
       'Earlier enquiries from example-dev.sa: 3 Sep. Check they were answered.',
       'Tender quotes from email: 0 of 39 won. Find out if the main contract is awarded before a full estimate.',
-      'Lighting and control from one company is our edge: offer DALI / KNX with the fittings.',
+      'Lighting and control from one company is our edge.',
     ],
-    pushback: [
-      { objection: 'Just send a price.', answer: 'Send a budget price, not a full estimate. Ask when the award is due. Walk away if: Do not spend a full estimate on an unawarded bid.' },
-      { objection: 'Too expensive.', answer: 'Compare like for like: driver, warranty, controls.' },
-      { objection: 'Third one', answer: 'Not shown: two at most.' },
-    ],
+    pushback: [{ objection: 'Just send a price.', answer: 'Send a budget price, not a full estimate. Walk away if: an unawarded bid.' }],
   }
+  const history = { matchedBy: 'email domain', companies: [{ id: 5, name: 'Example Dev Co' }], orders: [], deals: [{ active: true, probability: 10, create_date: '2026-02-01 07:00:00', user_id: [59, 'Mohamed Gamal'] }] }
 
-  it('in order: the deal, what could blow up, the target, how we win, why us, ask first, if they say, don\'t', () => {
-    const html = briefHtml(armed, { project_type: 'tender' })
-    const order = ['⚔ BATTLE CARD', '⚠ Watch out', 'The target', 'How we win this one', 'Why us: name these', 'Ask first', 'If they say…', "Don&#39;t", 'After the call'].map((h) => h.replace('&#39;', "'"))
-    const at = order.map((h) => html.indexOf(h))
+  it('three parts, in order', () => {
+    const html = briefHtml(armed, { project_type: 'tender' }, history, new Date('2026-10-20T08:00:00Z'))
+    const at = ['⚔ BATTLE CARD', '1. Who they are', '2. What to do', '3. After the call'].map((h) => html.indexOf(h))
     expect(at.every((i) => i >= 0)).toBe(true)
     expect([...at].sort((a, b) => a - b)).toEqual(at)
-    expect(html).toContain('<b>⚔ BATTLE CARD</b> · Project quote · Tender · Existing customer · Strong fit')
+    expect(html).toContain('<b>⚔ BATTLE CARD</b> · Project quote · Tender · Strong fit')
   })
 
-  it('the account facts are warnings; the playbook lines are the tactics; the proof keeps what we did', () => {
-    const html = briefHtml(armed, {})
-    const watch = html.slice(html.indexOf('⚠ Watch out'), html.indexOf('The target'))
-    expect(watch).toContain('Existing customer (name match, confirm)')
-    expect(watch).toContain('Earlier enquiries from example-dev.sa')
-    const win = html.slice(html.indexOf('How we win'), html.indexOf('Why us'))
-    expect(win).toContain('0 of 39 won')
-    expect(win).toContain('Lighting and control from one company is our edge')
-    expect(html).toContain('Tower One, Riyadh — lighting control')
+  it('who they are: the warnings first (Odoo\'s open deal, earlier enquiries), the lead, then their history with us', () => {
+    const html = briefHtml(armed, {}, history, new Date('2026-10-20T08:00:00Z'))
+    const who = html.slice(html.indexOf('1. Who they are'), html.indexOf('2. What to do'))
+    expect(who.indexOf('⚠ Mohamed Gamal already has an open deal')).toBeLessThan(who.indexOf('<b>Who:</b>'))
+    expect(who).toContain('⚠ Earlier enquiries from example-dev.sa')
+    expect(who).toContain('<b>Brand · deadline:</b> Philips or equivalent: offer one of ours. · Two weeks')
+    expect(who).toContain('<b>With us:</b> In Odoo as Example Dev Co (matched by email domain).')
   })
 
-  it('every objection answer in full, two at most, and the walk-away under Don\'t', () => {
-    const html = briefHtml(armed, {})
-    expect(html).toContain('“Just send a price.” → Send a budget price, not a full estimate. Ask when the award is due.')
-    expect(html).toContain('“Too expensive.” → Compare like for like')
-    expect(html).not.toContain('Third one')
-    expect(html.slice(html.indexOf("Don't"))).toContain('Do not spend a full estimate on an unawarded bid.')
-    expect(html.slice(html.indexOf('If they say'), html.indexOf("Don't"))).not.toContain('Walk away')
+  it('what to do: two to four moves, most specific first', () => {
+    const html = briefHtml(armed, {}, null)
+    const moves = html.slice(html.indexOf('2. What to do'), html.indexOf('3. After the call')).match(/<li>/g)
+    expect(moves.length).toBeGreaterThanOrEqual(2)
+    expect(moves.length).toBeLessThanOrEqual(4)
+    expect(html).toContain('<li>Tender quotes from email: 0 of 39 won.')
+    expect(html).toContain('<li>Ask: 1) Is the main contract awarded? 2) Who is the consultant? 3) Budget?</li>')
+    expect(html).toContain('<li>Offer: Philips or equivalent: offer one of ours.</li>')
+    const priced = briefHtml(armed, {}, { matchedBy: 'email domain', companies: [], orders: [], deals: [{ active: false, probability: 0, lost_reason_id: [1, 'Price'], date_closed: '2026-03-01 00:00:00' }] })
+    expect(priced.slice(priced.indexOf('2. What to do'))).toMatch(/^2\. What to do<\/b><\/p><ul><li>They went elsewhere on price/)
   })
 
-  it('a new lead with no warnings shows no Watch out; escapes what people wrote; nothing without a card', () => {
-    const html = briefHtml({ ...card, facts: { ...card.facts, who: '<b>x</b>' }, history: ['New to us: no order and no earlier enquiry on record.'] }, {})
-    expect(html).not.toContain('Watch out')
-    expect(html).not.toContain('New to us: no order')
-    expect(html).toContain('&lt;b&gt;x&lt;/b&gt;')
+  it('escapes what people wrote; nothing without a card', () => {
+    expect(briefHtml({ ...card, facts: { ...card.facts, who: '<b>x</b>' } }, {})).toContain('&lt;b&gt;x&lt;/b&gt;')
     expect(briefHtml(null)).toBe('')
   })
 
   it('splits as the card builder writes them', () => {
     expect(splitWalkAway('Say this. Walk away if: That.')).toEqual({ say: 'Say this.', walk: 'That.' })
-    expect(splitWalkAway('Only this.')).toEqual({ say: 'Only this.', walk: '' })
     expect(splitHistory(['Parked account: X.', 'New to us: none.', 'A tactic.'])).toEqual({ alerts: ['Parked account: X.'], tactics: ['A tactic.'] })
   })
 })

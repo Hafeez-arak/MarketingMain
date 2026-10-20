@@ -284,3 +284,13 @@ describe('when the API key arrives', () => {
     expect(saved.crm).toMatchObject({ connected: false, lastError: 'Odoo did not accept that login and API key.' })
   })
 })
+
+describe('matching a company by name in Odoo', () => {
+  it('keeps the part that names the company, and refuses one too short to identify anyone', async () => {
+    const { companyCore } = await import('./_odoo.js')
+    expect(companyCore('Example Contracting Co. Ltd')).toBe('Example')
+    expect(companyCore('Nour Al-Riyadh Trading Est.')).toBe('Nour Al Riyadh')
+    expect(companyCore('ABC Co')).toBe('')
+    expect(companyCore('')).toBe('')
+  })
+})

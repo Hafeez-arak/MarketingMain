@@ -17,7 +17,7 @@ import {
   channelLabel, phonesOf, effectiveVerdict, projectOf,
 } from '../../src/lib/leads/view.js'
 import { riyadhTime } from './_export.js'
-import { normalizeUrl, defaultDb, discoverDb, testConnection, createLead, findUserId } from './_odoo.js'
+import { normalizeUrl, defaultDb, discoverDb, testConnection, createLead, findUserId, customerHistory } from './_odoo.js'
 import { pushCard } from './_crmCard.js'
 import { briefHtml } from '../../src/lib/sales/odooCard.js'
 
@@ -33,7 +33,7 @@ export const STUCK_MS = 5 * 60_000
  * message and the agent's questions go in the description, which also
  * carries our reference so the same lead is never created twice.
  */
-export function odooLeadValues(lead, { approvedBy = '', card = null } = {}) {
+export function odooLeadValues(lead, { approvedBy = '', card = null, history = null, now = new Date() } = {}) {
   const phones = phonesOf(lead)
   const v2 = (lead.criteria_version || 1) >= 2
   const what = lead.summary || lead.subject || 'Enquiry'
@@ -44,7 +44,7 @@ export function odooLeadValues(lead, { approvedBy = '', card = null } = {}) {
   // to read before the call, then their own words. The criteria are in the
   // brief already, so they are not repeated.
   const description = card ? [
-    briefHtml(card, lead),
+    briefHtml(card, lead, history, now),
     para('Came in', [channelLabel(lead), lead.mailbox, lead.source === 'email' && lead.folder ? FOLDER_LABEL[lead.folder] || lead.folder : '', riyadhTime(lead.received_at || lead.created_at)].filter(Boolean).join(' · ')),
     phones.length ? para(phones.length > 1 ? 'Numbers' : 'Number', phones.join(', ')) : '',
     message ? `<p><b>Their message:</b></p><blockquote>${esc(message).replace(/\n/g, '<br>')}</blockquote>` : '',
@@ -185,6 +185,16 @@ export async function odooOwner(deps, conn, workspaceId, userId) {
   return id
 }
 
+/**
+ * What Odoo knows about the lead's company: matched by their email domain
+ * (never ours, never a free address's domain) or company name.
+ */
+export async function leadHistory(deps, conn, lead) {
+  const boxes = await deps.db(`lead_mailboxes?workspace_id=eq.${lead.workspace_id || conn.workspace_id}&select=email,label`).catch(() => []) || []
+  const ownDomains = [...new Set(boxes.flatMap((b) => [b.email, b.label]).map((e) => String(e || '').split('@')[1]).filter(Boolean))]
+  return customerHistory(deps.fetch, odooCfg(conn), { email: lead.email || '', company: lead.company || '', freeEmail: lead.email_kind === 'free', ownDomains })
+}
+
 // ─── Approving and sending ─────────────────────────────────────────────────
 
 const LEAD_SELECT = 'id,source,received_at,created_at,name,company,email,phone,phones,subject,message,summary,ask_next,verdict,human_verdict,mailbox,folder,sender_type,source_check,project_type,request_type,philips,email_kind,criteria_version,human_project_type,project_final,approved_at,approved_by,assigned_to,stage,channel,crm_status,crm_id,crm_url,crm_error,crm_sent_at,updated_at'
@@ -221,7 +231,10 @@ async function pushOne(deps, conn, lead, marks = {}) {
     // fields); with none chosen, Odoo picks as before.
     // Its battle card (made when it was assigned) opens its Internal Notes.
     const [cardRow] = conn.team_id ? await deps.db(`lead_cards?lead_id=eq.${lead.id}&select=card`).catch(() => []) || [] : []
-    const values = { ...odooLeadValues({ ...lead, ...claimed }, { approvedBy: by, card: cardRow?.card || null }), user_id: owner, ...(conn.team_id ? { team_id: conn.team_id } : {}) }
+    // Their history with us, read from Odoo, for "who they are" on the card.
+    // Unreadable is not a reason to hold the lead back.
+    const history = cardRow ? await leadHistory(deps, conn, { ...lead, ...claimed }).catch(() => null) : null
+    const values = { ...odooLeadValues({ ...lead, ...claimed }, { approvedBy: by, card: cardRow?.card || null, history, now: deps.now() }), user_id: owner, ...(conn.team_id ? { team_id: conn.team_id } : {}) }
     const out = await createLead(deps.fetch, odooCfg(conn), values, lead.id)
     const [row] = await deps.db(`leads?id=eq.${lead.id}`, {
       method: 'PATCH', prefer: 'return=representation',
