@@ -58,6 +58,7 @@ function fakeOdoo({ salesAdmin = true } = {}) {
       return ok(true)
     }
     if (model === 'crm.lead' && m === 'message_post') { o.notes.push({ lead: a[0][0], ...kw }); return ok(1) }
+    if (model === 'crm.stage' && m === 'search_read') return ok([{ id: 1, name: 'New', sequence: 0 }, { id: 11, name: 'RFQ Received (TENDER)', sequence: 1 }, { id: 3, name: 'RFQ Received (JIH)', sequence: 2 }, { id: 12, name: 'Quotation (tender)', sequence: 3 }])
     if (model === 'crm.tag') return ok(m === 'search' ? [1] : 1)
     if (model === 'res.users') return ok([21])
     return err(`fake odoo: ${model}.${m}`)
