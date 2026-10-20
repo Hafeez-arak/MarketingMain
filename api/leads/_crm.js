@@ -44,7 +44,7 @@ export function odooLeadValues(lead, { approvedBy = '', card = null } = {}) {
   // to read before the call, then their own words. The criteria are in the
   // brief already, so they are not repeated.
   const description = card ? [
-    briefHtml(card),
+    briefHtml(card, lead),
     para('Came in', [channelLabel(lead), lead.mailbox, lead.source === 'email' && lead.folder ? FOLDER_LABEL[lead.folder] || lead.folder : '', riyadhTime(lead.received_at || lead.created_at)].filter(Boolean).join(' · ')),
     phones.length ? para(phones.length > 1 ? 'Numbers' : 'Number', phones.join(', ')) : '',
     message ? `<p><b>Their message:</b></p><blockquote>${esc(message).replace(/\n/g, '<br>')}</blockquote>` : '',

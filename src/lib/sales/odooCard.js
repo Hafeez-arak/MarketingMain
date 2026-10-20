@@ -3,8 +3,8 @@
 // card goes where it is used:
 //
 //   the prep      → the lead's Internal Notes (its description), written once
-//                   when it goes to Odoo: a short brief read before the call
-//                   (briefHtml). Our coaching lines stay on our platform.
+//                   when it goes to Odoo: the battle card itself, the weapons
+//                   for the call (briefHtml): tactics, proof, objections, walk-away.
 //   the outcome   → six fields on the lead (Odoo Properties of the team our
 //                   leads go into), synced both ways, Odoo the master:
 //                   decision, quote due, target price, who decides, who else
@@ -25,7 +25,8 @@
 //
 // Pure. No network.
 
-import { DECISIONS, CUSTOMER_LABEL, BAND_LABEL, normaliseLeadCard } from './leadCard.js'
+import { DECISIONS, CUSTOMER_LABEL, BAND_LABEL, CARD_KINDS, normaliseLeadCard } from './leadCard.js'
+import { projectOf } from '../leads/view.js'
 
 const str = (v) => String(v ?? '').trim()
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]))
@@ -163,47 +164,63 @@ export function activityOf(lead = {}) {
 /** Same activity? */
 export const sameActivity = (a, b) => (a?.summary || '') === (b?.summary || '') && (a?.date || '') === (b?.date || '')
 
-// ─── The prep: the brief in Internal Notes ─────────────────────────────────
-
-/**
- * An objection's answer for the brief: what to say (its first two
- * sentences), without the coaching ("Walk away if…", proof notes) that stays
- * on our platform's card.
- */
-export function shortAnswer(answer = '') {
-  const said = str(answer).split(/\s(?:Walk away if|Proof|Why)\b/)[0]
-  const sentences = said.match(/[^.!?]+[.!?]+/g) || [said]
-  return sentences.slice(0, 2).join('').trim()
-}
-
-/** "Naba Hospital, Riyadh — supply, testing…" → "Naba Hospital, Riyadh". */
-const projectName = (ref) => str(ref).split(' — ')[0]
+// ─── The battle card itself: Internal Notes ────────────────────────────────
+// The owner (2026-10-20): a battle card is the salesperson's weapons for the
+// fight, so this is the arsenal, ordered for the 30 seconds before the call
+// and short in every section: what kind of deal; what could blow up
+// (parked or existing account, earlier enquiries); the target; how we win
+// this one (the playbook's tactics matched to the lead); why us (proof
+// projects with what we did); what to ask first; the objections with what
+// to say; and when to walk away. The six fields below it are the scorecard.
 
 /**
  * The brief at the top of the lead's Internal Notes: what to know and ask
  * before the first call. HTML, every value escaped. '' with no card.
  */
-export function briefHtml(cardRaw) {
+export function briefHtml(cardRaw, lead = {}) {
   if (!cardRaw) return ''
   const c = normaliseLeadCard(cardRaw)
-  const line = (label, value) => (str(value) ? `<li><b>${esc(label)}:</b> ${esc(value).replace(/\n/g, '; ')}</li>` : '')
   const questions = c.ask.filter((a) => a.q !== CALL_NOTE)
-  const objection = c.pushback[0]
+  const { alerts, tactics } = splitHistory(c.history)
+  const fights = c.pushback.slice(0, 2).map((p) => ({ objection: p.objection, ...splitWalkAway(p.answer) }))
+  const donts = [...new Set(fights.map((f) => f.walk).filter(Boolean))]
+  const phase = PHASE_LABEL[projectOf(lead)] || ''
+
+  const section = (title, items) => (items.length ? `<p><b>${esc(title)}</b></p><ul>${items.map((i) => `<li>${i}</li>`).join('')}</ul>` : '')
+  const labelled = (label, value) => (str(value) ? `<b>${esc(label)}:</b> ${esc(value).replace(/\n/g, '; ')}` : '')
   return [
-    '<p><b>Battle card: before the call</b></p><ul>',
-    line('Who', c.facts.who),
-    c.customer !== 'new' ? line('Customer', CUSTOMER_LABEL[c.customer]) : '',
-    line('Wants', c.facts.wants),
-    line('Brand', c.facts.brand),
-    line('Deadline', c.facts.due),
-    c.fit.band ? line('Fit', `${BAND_LABEL[c.fit.band]}${c.fit.text ? `: ${c.fit.text.replace(/^[^:]*:\s*/, '')}` : ''}`) : '',
-    line('Proof to name', c.references.map(projectName).filter(Boolean).join(', ')),
-    questions.length ? `<li><b>Ask:</b> ${questions.map((a, i) => `${i + 1}) ${esc(a.q)}`).join(' ')}</li>` : '',
-    objection ? `<li><b>If they say</b> “${esc(objection.objection)}”: ${esc(shortAnswer(objection.answer))}</li>` : '',
-    '</ul>',
-    '<p><i>Answers go in Call notes as 1) … | 2) … | 3) …</i></p>',
+    `<p><b>⚔ BATTLE CARD</b> · ${esc([CARD_KINDS[c.kind], phase, CUSTOMER_LABEL[c.customer], BAND_LABEL[c.fit.band]].filter(Boolean).join(' · '))}</p>`,
+    section('⚠ Watch out', alerts.map(esc)),
+    section('The target', [
+      labelled('Who', c.facts.who), labelled('Wants', c.facts.wants), labelled('Brand', c.facts.brand), labelled('Deadline', c.facts.due),
+    ].filter(Boolean)),
+    section('How we win this one', tactics.slice(0, 3).map(esc)),
+    section('Why us: name these', c.references.slice(0, 3).map(esc)),
+    section('Ask first', questions.map((a, i) => `${i + 1}) ${esc(a.q)}`)),
+    section('If they say…', fights.map((f) => `“${esc(f.objection)}” → ${esc(f.say)}`)),
+    section("Don't", donts.map(esc)),
+    '<p><i>After the call: fill the Battle card fields below (answers in Call notes as 1) … | 2) … | 3) …) and the next step as a to-do.</i></p>',
   ].filter(Boolean).join('')
 }
+
+// What the card builder puts in `history`: facts about this account first,
+// then the playbook's tactics matched to the lead (src/lib/sales/leadCard.js).
+const ALERT = /^(Parked account|Existing customer|Earlier enquiries|We are a registered vendor)/i
+const PLAIN = /^New to us\b/i
+
+/** The card's history split: what to watch out for, and how to win. "New to us" is neither. */
+export function splitHistory(history = []) {
+  const lines = (Array.isArray(history) ? history : []).map(str).filter(Boolean)
+  return { alerts: lines.filter((l) => ALERT.test(l)), tactics: lines.filter((l) => !ALERT.test(l) && !PLAIN.test(l)) }
+}
+
+/** An objection's answer: what to say, and when to walk away (the Agent Brief adds it after "Walk away if:"). */
+export function splitWalkAway(answer = '') {
+  const [say, walk = ''] = str(answer).split(/\s*Walk away if:\s*/i)
+  return { say: str(say), walk: str(walk) }
+}
+
+const PHASE_LABEL = { jih: 'JIH', tender: 'Tender', maintenance: 'Maintenance' }
 
 // ─── History notes ─────────────────────────────────────────────────────────
 

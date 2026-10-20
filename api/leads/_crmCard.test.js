@@ -177,7 +177,7 @@ describe('approving sends the card with the lead', () => {
     expect(out.crm).toBe('sent')
     const odooLead = w.odoo.leads[900]
     expect(odooLead.team_id).toBe(TEAM)
-    expect(odooLead.description).toMatch(/^<p><b>Battle card: before the call<\/b><\/p>/)
+    expect(odooLead.description).toMatch(/^<p><b>⚔ BATTLE CARD<\/b>/)
     expect(odooLead.description).toContain('1) Is the main contract awarded?')
     expect(odooLead.description).toContain(`Lead Agent ref: ${L1}`)
     expect(w.odoo.writes).toEqual([]) // nothing filled yet, so no field write
