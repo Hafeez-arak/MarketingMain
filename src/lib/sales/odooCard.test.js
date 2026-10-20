@@ -120,33 +120,35 @@ describe('the battle card: who they are, what to do, after the call', () => {
   }
   const history = { matchedBy: 'email domain', companies: [{ id: 5, name: 'Example Dev Co' }], orders: [], deals: [{ active: true, probability: 10, create_date: '2026-02-01 07:00:00', user_id: [59, 'Mohamed Gamal'] }] }
 
-  it('three parts, in order', () => {
+  it('suggestions in two parts, then a pointer to the fields to record', () => {
     const html = briefHtml(armed, { project_type: 'tender' }, history, new Date('2026-10-20T08:00:00Z'))
-    const at = ['⚔ BATTLE CARD', '1. Who they are', '2. What to do', '3. After the call'].map((h) => html.indexOf(h))
+    const at = ['⚔ BATTLE CARD', '1. WHO THEY ARE', '2. WHAT TO DO', 'After the call, record'].map((h) => html.indexOf(h))
     expect(at.every((i) => i >= 0)).toBe(true)
     expect([...at].sort((a, b) => a - b)).toEqual(at)
     expect(html).toContain('<b>⚔ BATTLE CARD</b> · Project quote · Tender · Strong fit')
   })
 
-  it('who they are: the warnings first (Odoo\'s open deal, earlier enquiries), the lead, then their history with us', () => {
+  const rows = (html, from, to) => [...html.slice(html.indexOf(from), to ? html.indexOf(to) : undefined).matchAll(/<tr><td[^>]*><b>(.*?)<\/b><\/td><td[^>]*>(.*?)<\/td><\/tr>/g)].map((m) => [m[1], m[2]])
+
+  it('who they are: warnings first (Odoo\'s open deal, earlier enquiries), the lead, then their history with us', () => {
     const html = briefHtml(armed, {}, history, new Date('2026-10-20T08:00:00Z'))
-    const who = html.slice(html.indexOf('1. Who they are'), html.indexOf('2. What to do'))
-    expect(who.indexOf('⚠ Mohamed Gamal already has an open deal')).toBeLessThan(who.indexOf('<b>Who:</b>'))
-    expect(who).toContain('⚠ Earlier enquiries from example-dev.sa')
-    expect(who).toContain('<b>Brand · deadline:</b> Philips or equivalent: offer one of ours. · Two weeks')
-    expect(who).toContain('<b>With us:</b> In Odoo as Example Dev Co (matched by email domain).')
+    const who = rows(html, '1. WHO THEY ARE', '2. WHAT TO DO')
+    expect(who.map(([l]) => l)).toEqual(['⚠ Watch out', '⚠ Watch out', 'Who', 'Wants', 'Brand', 'Deadline', 'With us', ''])
+    expect(who[0][1]).toMatch(/^Mohamed Gamal already has an open deal/)
+    expect(who[1][1]).toMatch(/^Earlier enquiries from example-dev\.sa/)
+    expect(who[6][1]).toBe('In Odoo as Example Dev Co (matched by email domain).')
   })
 
-  it('what to do: two to four moves, most specific first', () => {
-    const html = briefHtml(armed, {}, null)
-    const moves = html.slice(html.indexOf('2. What to do'), html.indexOf('3. After the call')).match(/<li>/g)
-    expect(moves.length).toBeGreaterThanOrEqual(2)
-    expect(moves.length).toBeLessThanOrEqual(4)
-    expect(html).toContain('<li>Tender quotes from email: 0 of 39 won.')
-    expect(html).toContain('<li>Ask: 1) Is the main contract awarded? 2) Who is the consultant? 3) Budget?</li>')
-    expect(html).toContain('<li>Offer: Philips or equivalent: offer one of ours.</li>')
-    const priced = briefHtml(armed, {}, { matchedBy: 'email domain', companies: [], orders: [], deals: [{ active: false, probability: 0, lost_reason_id: [1, 'Price'], date_closed: '2026-03-01 00:00:00' }] })
-    expect(priced.slice(priced.indexOf('2. What to do'))).toMatch(/^2\. What to do<\/b><\/p><ul><li>They went elsewhere on price/)
+  it('what to do: two to four moves, most specific first, the questions always', () => {
+    const plain = rows(briefHtml(armed, {}, null), '2. WHAT TO DO')
+    expect(plain.map(([l]) => l)).toEqual(['Do first', 'Then', 'Ask', 'Offer'])
+    expect(plain[0][1]).toMatch(/^Tender quotes from email: 0 of 39 won/)
+    expect(plain[2][1]).toBe('1) Is the main contract awarded? 2) Who is the consultant? 3) Budget?')
+    const short = rows(briefHtml({ ...armed, history: [] }, {}, null), '2. WHAT TO DO')
+    expect(short.map(([l]) => l)).toEqual(['Ask', 'Offer', 'If they say'])
+    const priced = rows(briefHtml(armed, {}, { matchedBy: 'email domain', companies: [], orders: [], deals: [{ active: false, probability: 0, lost_reason_id: [1, 'Price'], date_closed: '2026-03-01 00:00:00' }] }), '2. WHAT TO DO')
+    expect(priced[0]).toEqual(['Do first', 'They went elsewhere on price last time (Mar 2026): open with a budget option, then the full offer.'])
+    expect(priced.length).toBeLessThanOrEqual(4)
   })
 
   it('escapes what people wrote; nothing without a card', () => {

@@ -42,13 +42,13 @@ const SEP = ' | '
 // The block on the lead form. Keys are stable: renaming a key loses the
 // values stored under it.
 export const PROPS = [
-  { name: 'la_sep_card', string: 'Battle card', type: 'separator' },
+  { name: 'la_sep_card', string: 'Battle card: record after the call', type: 'separator' },
   { name: 'la_decision', string: 'Decision', type: 'selection', selection: Object.entries(DECISIONS) },
   { name: 'la_quote_due', string: 'Quote due', type: 'date' },
   { name: 'la_target_price', string: 'Target price', type: 'char' },
   { name: 'la_decides', string: 'Who decides', type: 'char' },
   { name: 'la_competitors', string: 'Who else is quoting', type: 'char' },
-  { name: 'la_call_notes', string: 'Call notes (1) answer | 2) answer …)', type: 'char' },
+  { name: 'la_call_notes', string: 'Call notes', type: 'char' },
 ]
 
 const VALUE_PROPS = PROPS.filter((p) => p.type !== 'separator')
@@ -235,8 +235,8 @@ export function historyFacts(h, now = new Date()) {
 }
 
 /**
- * The battle card in the lead's Internal Notes: who they are, what to do
- * (2–4 moves), and where the after-call part goes. `history` is Odoo's, or
+ * The suggestions in the lead's Internal Notes: who they are, what to do
+ * (2–4 moves), as label | value rows; what to record is the Battle card block. `history` is Odoo's, or
  * null when it could not be read. HTML, every value escaped. '' with no card.
  */
 export function briefHtml(cardRaw, lead = {}, history = null, now = new Date()) {
@@ -248,34 +248,41 @@ export function briefHtml(cardRaw, lead = {}, history = null, now = new Date()) 
   const phase = PHASE_LABEL[projectOf(lead)] || ''
   const objection = c.pushback[0] ? { objection: c.pushback[0].objection, ...splitWalkAway(c.pushback[0].answer) } : null
 
-  // 2–4 moves, the most specific first: what Odoo says about them, the
-  // playbook's move for this kind of deal, what to ask, what to offer, and
-  // the likeliest pushback.
+  // 2–4 moves, the most specific first: what Odoo says about them, then the
+  // playbook's move for this kind of deal; what to ask always; then what to
+  // offer and the likeliest pushback while there is room.
+  const plays = [odoo.move, ...tactics].map(str).filter(Boolean)
+  const ask = questions.length ? questions.map((a, i) => `${i + 1}) ${a.q}`).join(' ') : ''
+  const extras = [
+    ['Offer', /offer|ours/i.test(c.facts.brand) ? c.facts.brand : ''],
+    ['If they say', objection ? `“${objection.objection}” → ${objection.say}` : ''],
+  ].filter(([, v]) => str(v))
+  const room = Math.max(0, 4 - (ask ? 1 : 0) - Math.min(plays.length, 2))
   const moves = [
-    odoo.move,
-    tactics[0],
-    questions.length ? `Ask: ${questions.map((a, i) => `${i + 1}) ${a.q}`).join(' ')}` : '',
-    /offer|ours/i.test(c.facts.brand) ? `Offer: ${c.facts.brand}` : '',
-    objection ? `If they say “${objection.objection}”: ${objection.say}` : '',
-  ].map(str).filter(Boolean).slice(0, 4)
+    ['Do first', plays[0]],
+    ['Then', plays[1]],
+    ['Ask', ask],
+    ...extras.slice(0, room),
+  ].filter(([, v]) => str(v))
 
-  const li = (items) => `<ul>${items.map((i) => `<li>${i}</li>`).join('')}</ul>`
-  const labelled = (label, value) => (str(value) ? `<b>${esc(label)}:</b> ${esc(value).replace(/\n/g, '; ')}` : '')
-  const warnings = [odoo.alert, ...alerts].filter(Boolean)
+  // Label | value rows: short to scan, and Odoo's editor keeps tables.
+  const row = (label, value) => `<tr><td style="padding:2px 14px 2px 0;white-space:nowrap;vertical-align:top"><b>${esc(label)}</b></td><td style="padding:2px 0">${esc(value).replace(/\n/g, '; ')}</td></tr>`
+  const table = (rows) => `<table><tbody>${rows.map(([l, v]) => row(l, v)).join('')}</tbody></table>`
+  const who = [
+    ...[odoo.alert, ...alerts].filter(Boolean).map((w) => ['⚠ Watch out', w]),
+    ['Who', c.facts.who],
+    ['Wants', c.facts.wants],
+    ['Brand', c.facts.brand],
+    ['Deadline', c.facts.due],
+    ...odoo.lines.map((l, i) => [i ? '' : 'With us', l]),
+  ].filter(([, v]) => str(v))
   return [
     `<p><b>⚔ BATTLE CARD</b> · ${esc([CARD_KINDS[c.kind], phase, BAND_LABEL[c.fit.band]].filter(Boolean).join(' · '))}</p>`,
-    '<p><b>1. Who they are</b></p>',
-    li([
-      ...warnings.map((w) => `⚠ ${esc(w)}`),
-      labelled('Who', c.facts.who),
-      labelled('Wants', c.facts.wants),
-      labelled('Brand · deadline', [c.facts.brand, c.facts.due].filter(Boolean).join(' · ')),
-      ...odoo.lines.map((l) => `<b>With us:</b> ${esc(l)}`),
-    ].filter(Boolean)),
-    '<p><b>2. What to do</b></p>',
-    li(moves.map(esc)),
-    '<p><b>3. After the call</b></p>',
-    '<p>Fill the Battle card fields on this lead (answers in Call notes as 1) … | 2) … | 3) …) and set the next step as a to-do.</p>',
+    '<p><b>1. WHO THEY ARE</b></p>',
+    table(who),
+    '<p><b>2. WHAT TO DO</b></p>',
+    table(moves),
+    '<p><i>After the call, record what you learned in the Battle card fields above (answers to the questions in Call notes, as 1) … | 2) …) and set the next step as a to-do.</i></p>',
   ].join('')
 }
 
