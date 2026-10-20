@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   PROPS, CALL_NOTE, cardToProps, propsFromRead, propsToCard, changedProps, mergeProps, mergeDefinition,
-  definitionCurrent, changeNote, callNotes, applyCallNotes, briefHtml, activityOf, sameActivity, lastSlot, pullDue,
+  definitionCurrent, changeNote, callNotes, applyCallNotes, briefHtml, splitHistory, splitWalkAway, activityOf, sameActivity, lastSlot, pullDue,
 } from './odooCard.js'
 
 // The battle card in Odoo, simplified (2026-10-20): a brief in Internal
@@ -60,22 +60,64 @@ describe('call notes: numbered answers, one line', () => {
   })
 })
 
-describe('the brief in Internal Notes', () => {
-  it('who, wants, brand, deadline, fit, proof, the numbered questions and the likely objection; no coaching lines', () => {
-    const html = briefHtml(card)
-    for (const bit of ['Example Dev · Contractor (verified)', 'Facade lighting · 20 floors; Sent: BOQ', 'Philips or equivalent', 'Two weeks',
-      'Strong fit: Offices, In our region.', 'Tower One, Riyadh, Palm Grand Hotel', '1) Is the main contract awarded? 2) Who is the consultant? 3) Budget?',
-      '“Just send a price.”: Budget price only; ask the award date.']) {
-      expect(html).toContain(bit)
-    }
-    expect(html).not.toContain('0 of 39')
+describe('the battle card in Internal Notes: the weapons', () => {
+  const armed = {
+    ...card,
+    customer: 'existing',
+    history: [
+      'Existing customer (name match, confirm): Example Dev Co, 4 orders.',
+      'Earlier enquiries from example-dev.sa: 3 Sep. Check they were answered.',
+      'Tender quotes from email: 0 of 39 won. Find out if the main contract is awarded before a full estimate.',
+      'Lighting and control from one company is our edge: offer DALI / KNX with the fittings.',
+    ],
+    pushback: [
+      { objection: 'Just send a price.', answer: 'Send a budget price, not a full estimate. Ask when the award is due. Walk away if: Do not spend a full estimate on an unawarded bid.' },
+      { objection: 'Too expensive.', answer: 'Compare like for like: driver, warranty, controls.' },
+      { objection: 'Third one', answer: 'Not shown: two at most.' },
+    ],
+  }
+
+  it('in order: the deal, what could blow up, the target, how we win, why us, ask first, if they say, don\'t', () => {
+    const html = briefHtml(armed, { project_type: 'tender' })
+    const order = ['⚔ BATTLE CARD', '⚠ Watch out', 'The target', 'How we win this one', 'Why us: name these', 'Ask first', 'If they say…', "Don&#39;t", 'After the call'].map((h) => h.replace('&#39;', "'"))
+    const at = order.map((h) => html.indexOf(h))
+    expect(at.every((i) => i >= 0)).toBe(true)
+    expect([...at].sort((a, b) => a - b)).toEqual(at)
+    expect(html).toContain('<b>⚔ BATTLE CARD</b> · Project quote · Tender · Existing customer · Strong fit')
+  })
+
+  it('the account facts are warnings; the playbook lines are the tactics; the proof keeps what we did', () => {
+    const html = briefHtml(armed, {})
+    const watch = html.slice(html.indexOf('⚠ Watch out'), html.indexOf('The target'))
+    expect(watch).toContain('Existing customer (name match, confirm)')
+    expect(watch).toContain('Earlier enquiries from example-dev.sa')
+    const win = html.slice(html.indexOf('How we win'), html.indexOf('Why us'))
+    expect(win).toContain('0 of 39 won')
+    expect(win).toContain('Lighting and control from one company is our edge')
+    expect(html).toContain('Tower One, Riyadh — lighting control')
+  })
+
+  it('every objection answer in full, two at most, and the walk-away under Don\'t', () => {
+    const html = briefHtml(armed, {})
+    expect(html).toContain('“Just send a price.” → Send a budget price, not a full estimate. Ask when the award is due.')
+    expect(html).toContain('“Too expensive.” → Compare like for like')
+    expect(html).not.toContain('Third one')
+    expect(html.slice(html.indexOf("Don't"))).toContain('Do not spend a full estimate on an unawarded bid.')
+    expect(html.slice(html.indexOf('If they say'), html.indexOf("Don't"))).not.toContain('Walk away')
+  })
+
+  it('a new lead with no warnings shows no Watch out; escapes what people wrote; nothing without a card', () => {
+    const html = briefHtml({ ...card, facts: { ...card.facts, who: '<b>x</b>' }, history: ['New to us: no order and no earlier enquiry on record.'] }, {})
+    expect(html).not.toContain('Watch out')
+    expect(html).not.toContain('New to us: no order')
+    expect(html).toContain('&lt;b&gt;x&lt;/b&gt;')
     expect(briefHtml(null)).toBe('')
   })
 
-  it('escapes what people wrote, and names a parked or existing customer', () => {
-    const html = briefHtml({ ...card, customer: 'parked', facts: { ...card.facts, who: '<b>x</b>' } })
-    expect(html).toContain('&lt;b&gt;x&lt;/b&gt;')
-    expect(html).toContain('<b>Customer:</b> Parked account')
+  it('splits as the card builder writes them', () => {
+    expect(splitWalkAway('Say this. Walk away if: That.')).toEqual({ say: 'Say this.', walk: 'That.' })
+    expect(splitWalkAway('Only this.')).toEqual({ say: 'Only this.', walk: '' })
+    expect(splitHistory(['Parked account: X.', 'New to us: none.', 'A tactic.'])).toEqual({ alerts: ['Parked account: X.'], tactics: ['A tactic.'] })
   })
 })
 
@@ -111,15 +153,6 @@ describe('changes', () => {
     expect(merged.slice(1).map((p) => p.name)).toEqual(PROPS.map((p) => p.name))
     expect(definitionCurrent(merged)).toBe(true)
     expect(definitionCurrent([theirs, ...PROPS, { name: 'la_who', string: 'old', type: 'char' }])).toBe(false)
-  })
-})
-
-describe('the objection in the brief', () => {
-  it('says what to answer, in two sentences at most, without the coaching', async () => {
-    const { shortAnswer } = await import('./odooCard.js')
-    expect(shortAnswer('Send a quick budget price, not a full estimate. Ask when the award is due and call that day. Find the other bidders and quote them too. Walk away if: Do not spend a full estimate.'))
-      .toBe('Send a quick budget price, not a full estimate. Ask when the award is due and call that day.')
-    expect(shortAnswer('Just one line without a stop')).toBe('Just one line without a stop')
   })
 })
 
