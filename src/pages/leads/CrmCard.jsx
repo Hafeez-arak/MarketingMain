@@ -19,6 +19,9 @@ const ODOO_DEFAULT = 'https://arak-co.odoo.com'
  */
 function CardSync({ workspaceId, crm, onChange, onError }) {
   const [teams, setTeams] = useState(null)
+  // Changing team takes the deals already sent along (one step to the real
+  // team, the owner, 2026-10-20); untick to leave them where they are.
+  const [moveSent, setMoveSent] = useState(true)
   const [busy, setBusy] = useState('')
   const [note, setNote] = useState('')
 
@@ -34,12 +37,15 @@ function CardSync({ workspaceId, crm, onChange, onError }) {
     const id = Number(e.target.value)
     if (!id) return
     setBusy('team'); setNote('')
-    const r = await leadsApi('crm_set_team', workspaceId, { team_id: id })
+    const r = await leadsApi('crm_set_team', workspaceId, { team_id: id, move_sent: moveSent && crm.sentCount > 0 })
     setBusy('')
     if (r.error) return onError(r.error)
     onChange(r.crm)
     setTeams(null)
-    setNote(r.fieldsAdded ? 'The battle-card fields were added to that team.' : 'That team already had the battle-card fields.')
+    setNote([
+      r.fieldsAdded ? 'The battle-card fields were added to that team.' : 'That team already had the battle-card fields.',
+      r.moved ? `${r.moved} deal${r.moved === 1 ? '' : 's'} already sent moved there too.` : '',
+    ].filter(Boolean).join(' '))
   }
 
   async function pullNow() {
@@ -58,6 +64,12 @@ function CardSync({ workspaceId, crm, onChange, onError }) {
         <span className="text-text-tertiary">Battle card in Odoo: </span>
         {crm.teamId ? <>leads go into <b>{crm.teamName || `team ${crm.teamId}`}</b>, with the card as fields.</> : <span className="text-amber-800 font-semibold">no team chosen, so leads go without the card.</span>}
       </p>
+      {teams && crm.sentCount > 0 && (
+        <label className="flex items-center gap-2 text-[11px] text-text-secondary">
+          <input type="checkbox" checked={moveSent} onChange={(e) => setMoveSent(e.target.checked)} />
+          Also move the {crm.sentCount} deal{crm.sentCount === 1 ? '' : 's'} already sent to the new team (their battle cards come along)
+        </label>
+      )}
       {teams ? (
         <select aria-label="Sales team in Odoo" defaultValue="" onChange={chooseTeam} disabled={busy === 'team'}
           className="w-full text-xs bg-white border border-border px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-amber-400">

@@ -188,6 +188,19 @@ export async function writeTeamDefinition(fetchFn, cfg, teamId, definition) {
   return true
 }
 
+/**
+ * Move deals into another team. Their battle-card values come along when
+ * that team already holds the same fields (Odoo keeps a value whose name is
+ * in the new team's definition), so the fields go on the team first.
+ */
+export async function moveLeadsToTeam(fetchFn, cfg, ids, teamId) {
+  const uid = await login(fetchFn, cfg)
+  for (let i = 0; i < ids.length; i += 100) {
+    await call(fetchFn, cfg, uid, 'crm.lead', 'write', [ids.slice(i, i + 100).map(Number), { team_id: Number(teamId) }])
+  }
+  return ids.length
+}
+
 /** A new sales team with these members. Needs Sales: Administrator. */
 export async function createTeam(fetchFn, cfg, name, memberIds = []) {
   const uid = await login(fetchFn, cfg)

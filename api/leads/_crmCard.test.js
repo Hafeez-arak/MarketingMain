@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { ensureTeamFields, pushCard, pullCards, maybePullCards, setCrmTeam, crmTeams } from './_crmCard.js'
 import { approveLead } from './_crm.js'
 import { saveCard } from './_card.js'
-import { PROPS } from '../../src/lib/sales/odooCard.js'
+import { PROPS, propsFromRead } from '../../src/lib/sales/odooCard.js'
+import { readLeadProps } from './_odoo.js'
 
 // The battle card in Odoo, both ways (2026-10-20), against a fake Odoo that
 // behaves like 18.0 where it matters: a lead's Properties are written WHOLE,
@@ -55,6 +56,7 @@ function fakeOdoo({ salesAdmin = true } = {}) {
         // Odoo 18 writes the set whole: what is not sent is gone.
         o.leads[a[0][0]].props = { ...a[1].lead_properties }
       }
+      if (a[1].team_id) for (const id of a[0]) o.leads[id].team_id = a[1].team_id
       return ok(true)
     }
     if (model === 'crm.lead' && m === 'message_post') { o.notes.push({ lead: a[0][0], ...kw }); return ok(1) }
@@ -135,7 +137,7 @@ function world({ salesAdmin = true, teamId = TEAM, sent = false } = {}) {
     leads: [{
       id: L1, workspace_id: WS, source: 'email', company: 'Example Dev', name: 'Khalid', email: 'k@example-dev.sa', summary: 'Facade lighting', subject: 'RFQ',
       verdict: 'qualified', human_verdict: null, criteria_version: 2, assigned_to: OMAR, approved_at: null, approved_by: null,
-      crm_status: sent ? 'sent' : null, crm_id: sent ? '900' : '', crm_url: '', crm_error: '', next_step: '', follow_up: null, updated_at: '2026-10-20T08:00:00Z',
+      crm_status: sent ? 'sent' : null, crm_id: sent ? '900' : '', crm_test: false, crm_url: '', crm_error: '', next_step: '', follow_up: null, updated_at: '2026-10-20T08:00:00Z',
     }],
     lead_cards: [{ lead_id: L1, workspace_id: WS, card: structuredClone(theCard), decision: '', quote_due: null, target_price: '', decides: '', competitors: '', crm_props: null, crm_sync_error: '', updated_at: '2026-10-20T08:00:00Z' }],
     user_access: [{ user_id: ARIF.id, email: 'arif@example.com', full_name: 'Arif' }, { user_id: OMAR, email: 'omar@example.com', full_name: 'Omar' }],
@@ -166,6 +168,29 @@ describe('the team carries the card fields', () => {
     expect((await setCrmTeam(ok.deps, WS, 10)).ok).toBe(true)
     expect(ok.tables.lead_crm[0]).toMatchObject({ team_id: 10, team_name: 'Projects' })
     expect((await crmTeams(ok.deps, WS)).current).toBe(10)
+  })
+})
+
+describe('moving to the real team is one step', () => {
+  it('choosing a new team can take the deals already sent along, their card values intact', async () => {
+    const w = world({ sent: true })
+    await ensureTeamFields(w.deps, { ...w.tables.lead_crm[0], apiKey: 'key', ready: true })
+    w.odoo.leads[900].props = { la_decision: 'park', la_call_notes: '1) Yes' }
+    const out = await setCrmTeam(w.deps, WS, 10, { moveSent: true })
+    expect(out).toMatchObject({ ok: true, moved: 1 })
+    expect(w.odoo.leads[900].team_id).toBe(10)
+    expect(w.tables.lead_crm[0]).toMatchObject({ team_id: 10, team_name: 'Projects' })
+    // The new team has the same fields, so Odoo shows the same values there.
+    expect(propsFromRead((await readLeadProps(w.deps.fetch, { url: 'https://erp.example.com', db: 'erp', login: 'agent', apiKey: 'key' }, ['900']))['900'].props)).toMatchObject({ la_decision: 'park', la_call_notes: '1) Yes' })
+  })
+
+  it('a test push is never moved; without the tick nothing moves', async () => {
+    const w = world({ sent: true })
+    w.tables.leads[0].crm_test = true
+    expect((await setCrmTeam(w.deps, WS, 10, { moveSent: true })).moved).toBe(0)
+    const w2 = world({ sent: true })
+    expect((await setCrmTeam(w2.deps, WS, 10)).moved).toBe(0)
+    expect(w2.odoo.leads[900].team_id).toBe(TEAM)
   })
 })
 
