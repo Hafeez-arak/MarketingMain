@@ -1,7 +1,8 @@
 # Auto-deploy for the n8n box: every minute, fast-forward this checkout to origin/main and apply the change.
 # Git runs on Windows (it has the GitHub login and matches this checkout's line endings); the Docker work runs in
 # WSL (apply.sh). It never touches a checkout that is on another branch or has uncommitted changes.
-# Started hidden at logon by the ArakMarketingAutoDeploy task (auto-deploy.vbs).
+# Started hidden every 5 minutes by the ArakMarketingAutoDeploy task (auto-deploy.vbs); the mutex below makes every
+# start after the first a no-op, so the task only matters when the loop has died.
 # Log: %LOCALAPPDATA%\ArakMarketing\auto-deploy.log
 # -Repo points it at another checkout (a first run from a copy that is not on main yet).
 param([switch]$Loop, [string]$Repo = (Join-Path $PSScriptRoot '..\..'))
