@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { rivalsPrompt, competitorLine, axesFor } from './lensPrompts.js'
+import { rivalsPrompt, competitorLine, axesFor, openingsPrompt, targetsPrompt } from './lensPrompts.js'
 
 describe('the watchlist note reaches the rivals lens', () => {
   const brand = { brandName: 'Arak', descriptor: 'lighting', audience: 'specifiers', geography: 'Riyadh' }
@@ -156,5 +156,38 @@ describe('plain language', () => {
     const p = rivalsPrompt(brand, { competitors: ['A'], notes: [] })
     expect(p).toContain('KNX')
     expect(p).toContain('are fine')
+  })
+})
+
+describe('late-hire mode (2026-10-20, Ghusn)', () => {
+  const brand = { brandName: 'X', descriptor: 'a trade hired near handover' }
+  const late = { stage: 'Near handover.', recurring: ['Yearly care contract'] }
+
+  it('openings: leads with handover and openings, never design stage, and adds existing sites', () => {
+    const p = openingsPrompt(brand, { motion: 'specification', late, fit: 'WHEN WE ARE HIRED: Near handover.' })
+    expect(p).toContain('buildings nearing completion')
+    expect(p).toContain('operation, maintenance or care')
+    expect(p).toContain('recurring basis (Yearly care contract)')
+    expect(p).not.toContain('Projects entering DESIGN')
+    expect(p).not.toContain('controls package')
+  })
+
+  it('openings: without a hire stage the specification order is untouched', () => {
+    const p = openingsPrompt(brand, { motion: 'specification', fit: 'PACKAGE SIZE: x' })
+    expect(p).toContain('Projects entering DESIGN or early procurement')
+    expect(p).toContain('the interiors, a fit-out floor, the')
+    expect(p).not.toContain('nearing completion')
+  })
+
+  it('targets: projects at the hire stage, plus existing sites as companies', () => {
+    const p = targetsPrompt(brand, { icp: 'ICP', late })
+    expect(p).toContain('at the stage under WHEN WE ARE HIRED')
+    expect(p).toContain('A SITE THAT ALREADY EXISTS')
+    expect(p).toContain('"Hotel 3 external works — main contractor X"')
+    expect(p).not.toContain('is in design, is in')
+  })
+
+  it('targets: no recurring offer means no existing-site bullet', () => {
+    expect(targetsPrompt(brand, { icp: 'ICP', late: { stage: 'Late.', recurring: [] } })).not.toContain('A SITE THAT ALREADY EXISTS')
   })
 })
