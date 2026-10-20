@@ -144,3 +144,55 @@ export async function setLeadOwner(fetchFn, cfg, leadId, userId) {
   await call(fetchFn, cfg, uid, 'crm.lead', 'write', [[Number(leadId)], { user_id: userId }])
   return true
 }
+
+// ─── The battle card as fields, and the lead's history (2026-10-20) ────────
+
+/** The sales teams, for choosing where our leads go. */
+export async function listTeams(fetchFn, cfg) {
+  const uid = await login(fetchFn, cfg)
+  return call(fetchFn, cfg, uid, 'crm.team', 'search_read', [[]], { fields: ['name', 'user_id', 'member_ids', 'use_leads'], order: 'name' })
+}
+
+/** A team's properties definition (the fields its leads carry). */
+export async function readTeamDefinition(fetchFn, cfg, teamId) {
+  const uid = await login(fetchFn, cfg)
+  const [team] = await call(fetchFn, cfg, uid, 'crm.team', 'read', [[Number(teamId)]], { fields: ['name', 'lead_properties_definition'] })
+  if (!team) throw new OdooError(`Sales team ${teamId} is not in Odoo.`)
+  return team
+}
+
+/** Write a team's properties definition. Needs Sales: Administrator. */
+export async function writeTeamDefinition(fetchFn, cfg, teamId, definition) {
+  const uid = await login(fetchFn, cfg)
+  await call(fetchFn, cfg, uid, 'crm.team', 'write', [[Number(teamId)], { lead_properties_definition: definition }])
+  return true
+}
+
+/** A new sales team with these members. Needs Sales: Administrator. */
+export async function createTeam(fetchFn, cfg, name, memberIds = []) {
+  const uid = await login(fetchFn, cfg)
+  return call(fetchFn, cfg, uid, 'crm.team', 'create', [{ name, use_leads: true, use_opportunities: true, member_ids: [[6, 0, memberIds.map(Number)]] }])
+}
+
+/** { odooLeadId: { props: [{ name, value, … }], teamId } } for these leads, archived ones too. */
+export async function readLeadProps(fetchFn, cfg, ids) {
+  if (!ids.length) return {}
+  const uid = await login(fetchFn, cfg)
+  const rows = await call(fetchFn, cfg, uid, 'crm.lead', 'read', [ids.map(Number)], { fields: ['lead_properties', 'team_id'], context: { active_test: false } })
+  return Object.fromEntries(rows.map((r) => [String(r.id), { props: r.lead_properties || [], teamId: Array.isArray(r.team_id) ? r.team_id[0] : null }]))
+}
+
+/** Write the lead's properties WHOLE ({ name: value }): Odoo replaces the set. */
+export async function writeLeadProps(fetchFn, cfg, leadId, values) {
+  const uid = await login(fetchFn, cfg)
+  await call(fetchFn, cfg, uid, 'crm.lead', 'write', [[Number(leadId)], { lead_properties: values }])
+  return true
+}
+
+/** An internal note in the lead's history (never emailed to the customer). */
+export async function postNote(fetchFn, cfg, leadId, html) {
+  const uid = await login(fetchFn, cfg)
+  return call(fetchFn, cfg, uid, 'crm.lead', 'message_post', [[Number(leadId)]], {
+    body: html, body_is_html: true, message_type: 'comment', subtype_xmlid: 'mail.mt_note',
+  })
+}

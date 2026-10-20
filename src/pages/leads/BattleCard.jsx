@@ -112,7 +112,8 @@ export default function BattleCard({ lead, workspaceId, onLeadChange }) {
     setBase(afterOf(r.card, nextLead))
     if (r.lead) onLeadChange?.(r.lead)
     setEditing(false)
-    setNote('Saved.')
+    // In Odoo already: the change went there too, or says why not (2026-10-20).
+    setNote(!r.odoo ? 'Saved.' : r.odoo.ok ? 'Saved, and sent to Odoo.' : `Saved here. Odoo did not take it yet (${r.odoo.error}); it is tried again at the next read.`)
   }
   function cancel() {
     setCard(savedCard); setAfter(base); setEditing(false); setNote('')
@@ -260,9 +261,11 @@ export default function BattleCard({ lead, workspaceId, onLeadChange }) {
           ? <Button size="xs" variant="ghost" onClick={cancel} disabled={saving}>Cancel</Button>
           : <Button size="xs" variant="secondary" onClick={() => { setEditing(true); setNote('') }}>Edit step 1 and the questions</Button>}
         {dirty && !saving && <span className="text-[11px] text-amber-800">Unsaved changes</span>}
-        {note && <span className={`text-[11px] ${note === 'Saved.' ? 'text-sage-700' : 'text-red-600'}`}>{note}</span>}
+        {note && <span className={`text-[11px] ${note.startsWith('Saved.') || note.startsWith('Saved, and') ? 'text-sage-700' : 'text-red-600'}`}>{note}</span>}
         <span className="text-[10px] text-text-tertiary ml-auto">
           Card made {when(row.built_at)}{row.updated_at && row.updated_at !== row.built_at ? ` · last saved ${when(row.updated_at)}` : ''}
+          {row.crm_synced_at || row.crm_pulled_at ? ` · Odoo in step ${when([row.crm_synced_at, row.crm_pulled_at].filter(Boolean).sort().pop())}` : ''}
+          {row.crm_sync_error ? ' · not in Odoo yet' : ''}
         </span>
       </div>
     </div>

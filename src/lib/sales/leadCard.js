@@ -281,7 +281,7 @@ export function buyerOf(lead = {}) {
 // Riyadh" would otherwise read as an office job in our region).
 const aboutText = (lead = {}) => [lead.subject, lead.summary, lead.details?.products, lead.details?.location, lead.details?.stage].map(str).join(' ')
 
-const BAND_LABEL = { strong: 'Strong fit', possible: 'Possible fit', weak: 'Weak fit' }
+export const BAND_LABEL = { strong: 'Strong fit', possible: 'Possible fit', weak: 'Weak fit' }
 
 /**
  * How well the lead fits the company's ICP, scored the way Sales → Targets
