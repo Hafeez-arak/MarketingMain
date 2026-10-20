@@ -64,7 +64,7 @@ window.fetch = async (url, init) => {
   // report is fed the same way production feeds it: a real research_runs
   // payload, captured from this workspace, findings and all.
   if (href.includes('research_runs')) {
-    return new Response(JSON.stringify(withLines(runs)), {
+    return new Response(JSON.stringify(window.location.hash === '#brief-none' ? [] : withLines(runs)), {
       status: 200, headers: { 'Content-Type': 'application/json' },
     })
   }
@@ -98,10 +98,87 @@ window.fetch = async (url, init) => {
       return new Response(JSON.stringify(rows), { status: 200, headers: { 'Content-Type': 'application/json' } })
     }
   }
+  // Research → Prospects (2026-10-20). Made-up companies; the search itself
+  // answers instantly with a canned summary and never reaches a model.
+  const prospects = prospectsRoute(href, init)
+  if (prospects) return prospects
   if (href.startsWith('/api') || href.includes('supabase')) {
     return new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } })
   }
   return realFetch(url, init)
+}
+
+// ── Prospects: made-up rows, in every status ──
+const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+const demoProspects = [
+  {
+    id: 'p1', status: 'new', segment: 'Hotels, resorts and serviced apartments', name: 'Palm Court Hotels', city: 'Riyadh',
+    website: 'https://palmcourt.example', sites: '4 hotels in Riyadh, each with an entrance garden and a pool deck',
+    fit: 'Guest-facing gardens at every hotel, kept by an outside contractor today.', offer: 'maintenance',
+    pitch: 'A yearly care contract for all four, starting before the winter season.', proof: 'Mövenpick is on our client list.',
+    ask_for: 'Director of engineering', email: 'engineering@palmcourt.example', phone: '+966 11 000 1111',
+    linkedin: 'https://www.linkedin.com/company/palmcourt-example', contact_source: 'https://palmcourt.example/contact',
+    source_url: 'https://hotels-directory.example/riyadh', confidence: 0.8, created_at: '2026-10-20T08:00:00Z',
+  },
+  {
+    id: 'p2', status: 'new', segment: 'Restaurant and retail chains with roadside or drive-through branches', name: 'سلسلة مطاعم الواحة',
+    city: 'Riyadh', website: '', sites: '22 branches, 9 with a drive-through', fit: 'Roadside branches with planted frontages.',
+    offer: 'upgrade', pitch: 'Bring the drive-through frontages back to one standard.', proof: '', ask_for: 'Projects and facilities team',
+    email: '', phone: '', linkedin: '', contact_source: '', source_url: 'https://maps-list.example/oasis', confidence: 0.45,
+    created_at: '2026-10-20T08:00:00Z',
+  },
+  {
+    id: 'p3', status: 'added', segment: 'Facility and property management companies', name: 'Northgate Facilities', city: 'Riyadh',
+    website: 'https://northgate.example', sites: 'Manages 30+ buildings', fit: 'Subcontracts landscape care across its sites.',
+    offer: 'maintenance', pitch: 'Partner for the landscape part of their contracts.', proof: '', ask_for: 'Procurement',
+    email: 'procurement@northgate.example', phone: '', linkedin: '', contact_source: 'https://northgate.example/contact',
+    source_url: 'https://northgate.example/about', confidence: 0.7, created_at: '2026-10-19T08:00:00Z',
+  },
+  {
+    id: 'p4', status: 'rejected', segment: 'Malls, offices and commercial complexes', name: 'Old Souq Centre', city: 'Riyadh',
+    website: '', sites: '', fit: 'No outdoor space.', offer: '', pitch: '', proof: '', ask_for: '', email: '', phone: '',
+    linkedin: '', contact_source: '', source_url: 'https://malls.example/list', confidence: 0.3, created_at: '2026-10-18T08:00:00Z',
+  },
+]
+const demoIcp = {
+  segments: [
+    { key: 'hotels', label: 'Hotels, resorts and serviced apartments', track: 'core' },
+    { key: 'chains', label: 'Restaurant and retail chains with roadside or drive-through branches', track: 'core' },
+    { key: 'fm', label: 'Facility and property management companies', track: 'core' },
+  ],
+  offers: [
+    { key: 'maintenance', label: 'Yearly care and maintenance contract', kind: 'recurring' },
+    { key: 'upgrade', label: 'Upgrade or bring back an existing landscape' },
+  ],
+}
+function prospectsRoute(href, init = {}) {
+  const method = init?.method || 'GET'
+  const empty = window.location.hash === '#brief-none'
+  if (href.includes('/api/agent/discover')) {
+    const body = JSON.parse(init?.body || '{}')
+    if (body.mode !== 'prospects') return null
+    return new Promise(resolve => setTimeout(() => resolve(json({
+      ok: true, found: 0, cost: 0.38, message: 'No new companies found. 3 we already had were left out.',
+      note: 'Made-up answer from the dev harness; no model was called.',
+    })), 1200))
+  }
+  if (href.includes('research_prospect_searches')) {
+    return json(empty ? [] : [{ id: 's1', segment: 'Hotels, resorts and serviced apartments', area: 'Riyadh', status: 'complete', added: 2, started_at: '2026-10-20T08:00:00Z' }])
+  }
+  if (href.includes('research_prospects')) {
+    if (method === 'PATCH') {
+      const id = /id=eq\.([^&]+)/.exec(href)?.[1]
+      return json({ ...demoProspects.find(p => p.id === id), ...JSON.parse(init.body || '{}') })
+    }
+    return json(empty ? [] : demoProspects)
+  }
+  // Add to outreach: nobody in Contacts yet, so a contact and a group are made.
+  if (href.includes('email_contacts')) return method === 'POST' ? json({ id: 'c-new' }) : json([])
+  if (href.includes('email_groups')) return method === 'POST' ? json({ id: 'g-new', name: 'Prospects' }) : json([])
+  if (href.includes('email_group_members')) return json([])
+  if (href.includes('brand_profile')) return json([{ target_personas: 'Hotels, resorts and hospitality operators: arrivals' }])
+  if (href.includes('sales_icp')) return json([{ config: demoIcp }])
+  return null
 }
 
 // ── `#brief-lines`: the report split by business line ──

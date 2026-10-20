@@ -373,6 +373,10 @@ function IcpTab({ icp: raw, updatedAt, error, onSave }) {
         <Input label="Built from" value={form.evidence} onChange={set('evidence')} />
         <Input label="Share of weekly search on the core track (%)" type="number" min={0} max={100} value={form.core} onChange={set('core')}
           hint="The rest goes to the broader track." />
+        <Textarea label="What we sell" rows={4} value={form.offers} onChange={set('offers')}
+          hint="One per line: name | one-off or recurring | note. Recurring means a yearly contract, e.g. maintenance. Prospects pick one of these." />
+        <Textarea label="When we are hired" rows={2} value={form.hire_stage} onChange={set('hire_stage')}
+          hint="When in a project's life buyers hire us, e.g. at design stage, or late, at external works. Research looks for projects at this stage." />
         <Textarea label="Segments" rows={8} value={form.segments} onChange={set('segments')}
           hint="One per line: name | core or broader | weight 1–3 | words that identify it, comma separated | note | share % (optional, e.g. 6-8)" />
         <div>
@@ -457,6 +461,10 @@ function IcpTab({ icp: raw, updatedAt, error, onSave }) {
           icp.share && `Our share of a project: ${icp.share.min === icp.share.max ? icp.share.min : `${icp.share.min}–${icp.share.max}`}%`,
           icp.share?.note,
           icp.regions.length && `Region: ${icp.regions.join(', ')}`,
+        ].filter(Boolean)} />
+        <IcpList title="What we sell, and when we are hired" items={[
+          ...icp.offers.map(o => `${o.label}${o.kind === 'recurring' ? ' (yearly)' : ''}${o.note ? ` — ${o.note}` : ''}`),
+          icp.hire_stage && `Hired: ${icp.hire_stage}`,
         ].filter(Boolean)} />
         <IcpList title="Ask these first" items={icp.ask_first} ordered />
         <IcpList title="Red flags" items={icp.red_flags.map(f => `${f.label}${f.advice ? ` — ${f.advice}` : ''}`)} />

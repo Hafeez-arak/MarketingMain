@@ -82,6 +82,10 @@ describe('the agent runs in Node, not in a bundle', () => {
     'src/lib/agent/intel.js',
     // The source sweep (2026-10-19): pure planning, and the half that calls out.
     'src/lib/agent/sourceSweep.js',
+    // Find prospects (2026-10-20): the pure half and the route half.
+    'src/lib/agent/prospects.js',
+    'api/agent/_prospects.js',
+    'api/agent/discover.js',
     // Reached by ownChannels.js and _investigate.js for LIVE_PLATFORMS. It is a
     // browser-utility module by location and a pure one by content — zero
     // imports — so it loads under Node, and this line is what keeps it that
