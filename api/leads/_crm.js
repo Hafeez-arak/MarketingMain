@@ -20,6 +20,7 @@ import { riyadhTime } from './_export.js'
 import { normalizeUrl, defaultDb, discoverDb, testConnection, createLead, findUserId, customerHistory } from './_odoo.js'
 import { pushCard } from './_crmCard.js'
 import { briefHtml } from '../../src/lib/sales/odooCard.js'
+import { matchAccount } from '../../src/lib/sales/leadCard.js'
 
 const isUuid = (v) => /^[0-9a-f-]{36}$/i.test(String(v || ''))
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
@@ -187,12 +188,19 @@ export async function odooOwner(deps, conn, workspaceId, userId) {
 
 /**
  * What Odoo knows about the lead's company: matched by their email domain
- * (never ours, never a free address's domain) or company name.
+ * (never ours, never a free address's domain), by Odoo's own name for them
+ * when our client list knows their domain, or by company name.
  */
 export async function leadHistory(deps, conn, lead) {
-  const boxes = await deps.db(`lead_mailboxes?workspace_id=eq.${lead.workspace_id || conn.workspace_id}&select=email,label`).catch(() => []) || []
-  const ownDomains = [...new Set(boxes.flatMap((b) => [b.email, b.label]).map((e) => String(e || '').split('@')[1]).filter(Boolean))]
-  return customerHistory(deps.fetch, odooCfg(conn), { email: lead.email || '', company: lead.company || '', freeEmail: lead.email_kind === 'free', ownDomains })
+  const ws = lead.workspace_id || conn.workspace_id
+  const [boxes, clients] = await Promise.all([
+    deps.db(`lead_mailboxes?workspace_id=eq.${ws}&select=email,label`).catch(() => []),
+    deps.db(`sales_accounts?workspace_id=eq.${ws}&domains=neq.%7B%7D&select=name,odoo_name,domains`).catch(() => []),
+  ])
+  const ownDomains = [...new Set((boxes || []).flatMap((b) => [b.email, b.label]).map((e) => String(e || '').split('@')[1]).filter(Boolean))]
+  const client = matchAccount(lead, clients || [])
+  const odooName = client?.matchedBy === 'domain' ? client.odoo_name || '' : ''
+  return customerHistory(deps.fetch, odooCfg(conn), { email: lead.email || '', company: lead.company || '', odooName, freeEmail: lead.email_kind === 'free', ownDomains })
 }
 
 // ─── Approving and sending ─────────────────────────────────────────────────

@@ -65,10 +65,14 @@ export async function findProspects(res, { workspaceId, body, userId }) {
     db(`sales_icp?workspace_id=eq.${workspaceId}&select=config&limit=1`),
     // Every status: a rejected company is what must not come back.
     db(`research_prospects?workspace_id=eq.${workspaceId}&select=name,name_key,website,domain`),
-    db(`sales_accounts?workspace_id=eq.${workspaceId}&select=name`).catch(() => []),
+    db(`sales_accounts?workspace_id=eq.${workspaceId}&select=name,domains`).catch(() => []),
   ])
   const icp = icpRows?.[0]?.config || null
-  const known = [...(prospectRowsNow || []), ...(accountRows || []).map(a => ({ name: a.name }))]
+  // Our clients are never prospects: by name, and by every domain they wrote from.
+  const known = [...(prospectRowsNow || []), ...(accountRows || []).flatMap(a => [
+    { name: a.name },
+    ...(Array.isArray(a.domains) ? a.domains : []).map(domain => ({ name: a.name, domain })),
+  ])]
 
   const [search] = await db('research_prospect_searches', {
     method: 'POST',
@@ -90,7 +94,7 @@ export async function findProspects(res, { workspaceId, body, userId }) {
     }
     const prompt = prospectsPrompt(brandFacts, {
       segment, area, count, icp, language: market.language || '',
-      known: known.map(k => k.name).filter(Boolean),
+      known: [...new Set(known.map(k => k.name).filter(Boolean))],
     })
 
     const deadline = Date.now() + BUDGET_MS

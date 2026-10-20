@@ -25,7 +25,7 @@ async function context(deps, workspaceId, lead) {
   const before = lead.received_at || lead.created_at
   const [icp, accounts, suppliers, profile, earlier, competitorBrands] = await Promise.all([
     deps.db(`sales_icp?workspace_id=eq.${workspaceId}&select=battle_cards,config`).then((r) => r || []).catch(() => []),
-    deps.db(`sales_accounts?workspace_id=eq.${workspaceId}&select=name,orders,value_sar,last_order,status`).then((r) => r || []).catch(() => []),
+    deps.db(`sales_accounts?workspace_id=eq.${workspaceId}&select=name,orders,value_sar,last_order,status,domains,sold_by`).then((r) => r || []).catch(() => []),
     deps.db(`brand_directory_rows?workspace_id=eq.${workspaceId}&section_key=eq.suppliers&select=data`).then((r) => r || []).catch(() => []),
     deps.db(`brand_profile?workspace_id=eq.${workspaceId}&select=company_facts,key_projects`).then((r) => r || []).catch(() => []),
     domain && before

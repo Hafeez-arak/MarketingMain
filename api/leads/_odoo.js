@@ -200,7 +200,7 @@ export async function writeLeadProps(fetchFn, cfg, leadId, values) {
  * name. Read only. `exclude` is the lead itself. Returns the raw rows; the
  * summing up is pure (historyLines in src/lib/sales/odooCard.js).
  */
-export async function customerHistory(fetchFn, cfg, { email = '', company = '', freeEmail = false, ownDomains = [], exclude = null } = {}) {
+export async function customerHistory(fetchFn, cfg, { email = '', company = '', odooName = '', freeEmail = false, ownDomains = [], exclude = null } = {}) {
   const addr = typeof email === 'string' ? email.trim().toLowerCase() : ''
   const own = new Set([...ownDomains.map((d) => String(d).toLowerCase()), ...PLACEHOLDER_DOMAINS])
   const domain = !freeEmail && addr.includes('@') && !own.has(addr.split('@')[1]) ? addr.split('@')[1] : ''
@@ -218,6 +218,10 @@ export async function customerHistory(fetchFn, cfg, { email = '', company = '', 
   let companies = []
   if (domain) { companies = await companiesFor(['email', '=ilike', `%@${domain}`]); if (companies.length) matchedBy = 'email domain' }
   else if (freeEmail && addr) { companies = await companiesFor(['email', '=ilike', addr]); if (companies.length) matchedBy = 'email' }
+  // Our client list knows the sender's domain and Odoo's own name for them
+  // (Odoo's customers rarely carry an email): that exact name, whole.
+  const exact = String(odooName || '').trim().replace(/[%_]/g, (c) => `\\${c}`)
+  if (!companies.length && exact) { companies = await companiesFor(['name', '=ilike', exact]); if (companies.length) matchedBy = 'our client list' }
   if (!companies.length && core) { companies = await companiesFor(['name', 'ilike', core]); if (companies.length) matchedBy = 'company name' }
   const leadEmail = domain ? ['email_from', '=ilike', `%@${domain}`] : null
   if (!companies.length && !leadEmail) return { matchedBy: null, companies: [], deals: [], orders: [] }

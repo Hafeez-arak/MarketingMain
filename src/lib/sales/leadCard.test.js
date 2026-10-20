@@ -57,6 +57,19 @@ describe('matchAccount', () => {
     expect(matchAccount({ company: 'Palm', email: 'x@abc.sa' }, ACCOUNTS)).toBeNull()
     expect(senderDomain({ email: 'x@Gmail.com' })).toBe('')
   })
+  it('knows a client by the domain they wrote from, before any name guess', () => {
+    const clients = [
+      { name: 'Example Dev Contracting', domains: [] },
+      { name: 'شركة حدود Hadd Contracting Co', domains: ['hadd.sa'], orders: 6, value_sar: 4048694, sold_by: 'Sam Lee' },
+    ]
+    expect(matchAccount({ company: 'Example Dev', email: 'pm@hadd.sa' }, clients)).toMatchObject({ orders: 6, matchedBy: 'domain' })
+    expect(matchAccount({ email: 'pm@mail.hadd.sa' }, clients)?.matchedBy).toBe('domain')
+    // A domain that only ends the same way is someone else.
+    expect(matchAccount({ email: 'pm@shadd.sa' }, clients)).toBeNull()
+    expect(matchAccount({ company: 'Example Dev', email: 'x@gmail.com' }, clients)?.matchedBy).toBe('name')
+    const c = buildLeadCard({ ...tender, email: 'pm@hadd.sa' }, { accounts: clients })
+    expect(c.history[0]).toBe('Existing customer: شركة حدود Hadd Contracting Co, 6 orders, SAR 4M, sold by Sam Lee.')
+  })
 })
 
 describe('reading the email without a model', () => {

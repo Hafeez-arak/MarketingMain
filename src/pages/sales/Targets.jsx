@@ -167,17 +167,24 @@ export default function Targets() {
 
 function AccountsTab({ rows = [], error, onChange }) {
   const [showParked, setShowParked] = useState(false)
+  const [prio, setPrio] = useState('all')
   if (error) return <p className="px-4 py-10 text-sm text-red-600 text-center">Could not load the accounts: {error}</p>
-  const shown = rows.filter(r => showParked || !['won', 'parked'].includes(r.status))
+  const open = rows.filter(r => showParked || !['won', 'parked'].includes(r.status))
+  const shown = open.filter(r => prio === 'all' || String(r.priority) === prio)
   if (!rows.length) return <p className="px-4 py-10 text-sm text-text-tertiary text-center">No accounts loaded yet.</p>
+  const prioTabs = [{ key: 'all', label: `All (${open.length})` },
+    ...['1', '2', '3'].map(p => ({ key: p, label: `P${p} (${open.filter(r => String(r.priority) === p).length})` }))]
   return (
     <div>
-      <div className="px-4 py-2 flex items-center justify-between gap-3 text-[11px] text-text-tertiary">
-        <span>Existing customers win about three times as often as new ones. Priority 1 first, largest first.</span>
-        <label className="flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
+      <div className="px-4 py-2 flex items-center justify-between gap-3 flex-wrap">
+        <SubTabs items={prioTabs} value={prio} onChange={setPrio} />
+        <label className="flex items-center gap-1.5 cursor-pointer whitespace-nowrap text-[11px] text-text-tertiary">
           <input type="checkbox" checked={showParked} onChange={e => setShowParked(e.target.checked)} /> Show won and parked
         </label>
       </div>
+      <p className="px-4 pb-2 text-[11px] text-text-tertiary">
+        Every client we have closed a job with. Existing customers win about three times as often as new ones. Priority 1 first, largest first.
+      </p>
       <ul className="divide-y divide-border border-t border-border">
         {shown.map(a => <AccountRow key={a.id} a={a} onChange={onChange} />)}
       </ul>
@@ -197,7 +204,7 @@ function AccountRow({ a, onChange }) {
         </div>
         <p className="text-[11px] text-text-tertiary mt-1 tabular-nums">
           {[a.orders != null && `${a.orders} order${a.orders === 1 ? '' : 's'}`, formatAmount(a.value_sar),
-            a.last_order && `last ${dateLabel(a.last_order)}`, a.bought && `bought ${a.bought}`,
+            a.last_order && `last ${dateLabel(a.last_order)}`, a.bought && `bought ${a.bought}`, a.sold_by && `sold by ${a.sold_by}`,
             a.open_deals ? `${a.open_deals} open CRM deal${a.open_deals === 1 ? '' : 's'} (${formatAmount(a.open_value_sar)})` : '']
             .filter(Boolean).join(' · ')}
         </p>

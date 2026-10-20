@@ -294,3 +294,36 @@ describe('matching a company by name in Odoo', () => {
     expect(companyCore('')).toBe('')
   })
 })
+
+describe('their history, when Odoo\'s contacts carry no email', () => {
+  // A tiny Odoo: one customer with no email on file and one order.
+  const fakeOdoo = (asked) => async (_url, init) => {
+    const { params } = JSON.parse(init.body)
+    if (params.service === 'common') return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: 7 }))
+    const [, , , model, method, args] = params.args
+    asked.push([model, method, JSON.stringify(args)])
+    const ok = (result) => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result }))
+    if (model === 'res.partner' && method === 'search_read') {
+      const [[field, op, value]] = args[0]
+      return ok(field === 'name' && op === '=ilike' && value === 'Hadd Contracting (HC) 100\\%' ? [{ id: 42, commercial_partner_id: [42, 'x'] }] : [])
+    }
+    if (model === 'res.partner' && method === 'read') return ok([{ id: 42, name: 'Hadd Contracting (HC) 100%' }])
+    if (model === 'sale.order') return ok([{ state: 'sale', amount_total: 1000, date_order: '2026-01-02 10:00:00', user_id: [3, 'Sam'] }])
+    return ok([])
+  }
+  const cfg = { url: 'https://arak-co.odoo.com', db: 'arak-co', login: 'x', apiKey: 'k' }
+
+  it('finds them by the name our client list keeps for them, whole', async () => {
+    const { customerHistory } = await import('./_odoo.js')
+    const asked = []
+    const h = await customerHistory(fakeOdoo(asked), cfg, { email: 'pm@hadd.sa', company: 'HC', odooName: 'Hadd Contracting (HC) 100%' })
+    expect(h.matchedBy).toBe('our client list')
+    expect(h.companies).toEqual([{ id: 42, name: 'Hadd Contracting (HC) 100%' }])
+    expect(h.orders).toHaveLength(1)
+  })
+  it('without that name, a domain Odoo does not know finds no customer', async () => {
+    const { customerHistory } = await import('./_odoo.js')
+    const h = await customerHistory(fakeOdoo([]), cfg, { email: 'pm@hadd.sa', company: 'HC' })
+    expect(h.companies).toEqual([])
+  })
+})
