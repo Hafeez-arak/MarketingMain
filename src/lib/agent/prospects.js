@@ -26,6 +26,9 @@ import { normaliseIcp, icpPromptText } from '../sales/icp.js'
 /** Never more than this from one search. A wall of names gets ignored wholesale. */
 export const MAX_PROSPECTS = 15
 export const DEFAULT_COUNT = 10
+// Names the prompt lists as already ours (every previous client is ~140 of
+// them, ~2k tokens); the rest are still dropped in code by cleanProspects.
+const KNOWN_IN_PROMPT = 300
 
 export const PROSPECT_STATUSES = {
   new: 'To review',
@@ -218,7 +221,7 @@ export function prospectsPrompt(brand = {}, {
     '- confidence — honest. A company you are 50% sure fits is a 0.5, not left out.',
     '',
     known.length
-      ? `ALREADY ON OUR LIST — do not return these, in any spelling:\n${known.slice(0, 120).map(k => `- ${k}`).join('\n')}`
+      ? `ALREADY ON OUR LIST — do not return these, in any spelling:\n${known.slice(0, KNOWN_IN_PROMPT).map(k => `- ${k}`).join('\n')}`
       : null,
     known.length ? '' : null,
     'Write in plain English: short sentences, everyday words. The readers use English as a second',

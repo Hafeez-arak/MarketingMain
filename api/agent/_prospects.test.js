@@ -119,6 +119,16 @@ describe('findProspects', () => {
     expect(call.deadline).toBeGreaterThan(Date.now())
   })
 
+  it('never proposes one of our clients, even under another name, by the domain they wrote from', async () => {
+    route = c => (c.path.startsWith('sales_accounts') ? [{ name: 'Alpha Group Holding', domains: ['alpha.example'] }] : base(c))
+    modelAnswer = answer([prospect({ name: 'Alpha Hotels' })])
+    const res = fakeRes()
+    await findProspects(res, { workspaceId: WS, body: { segment: 'Hotels' }, userId: 'u-1' })
+    expect(writes()).toHaveLength(0)
+    expect(res.body.message).toMatch(/1 we already had was left out/)
+    expect(modelCalls[0].messages[0].content.match(/- Alpha Group Holding/g)).toHaveLength(1)
+  })
+
   it('records a failed call as failed, never as an empty market', async () => {
     modelAnswer = { ok: false, cost: 0.05, error: 'overloaded' }
     const res = fakeRes()
