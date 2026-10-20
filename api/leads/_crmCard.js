@@ -1,32 +1,35 @@
-// ─── The battle card in Odoo, both ways (2026-10-20) ───────────────────────
-// The owner's decisions: every lead pushed to Odoo carries the whole card as
-// fields on the lead (Properties of the sales team the leads go into); a
-// change saved here is written to Odoo at once, with a note in the lead's
-// history saying who changed what; Odoo is the master, read back twice a day
-// (07:50 and 13:00 Riyadh) through the five-minute heartbeat, and what it
-// holds replaces ours.
+// ─── The battle card in Odoo, both ways (2026-10-20, simplified) ───────────
+// The owner's decisions: everything in Odoo, kept simple (see
+// src/lib/sales/odooCard.js for where each part goes): the prep is the brief
+// in the lead's Internal Notes, written once when it is pushed (_crm.js);
+// the outcome is six fields on the lead; the next step is an Odoo Activity.
+// A change saved here is written to Odoo at once, with one line in the lead's
+// history; Odoo is the master, read back twice a day (07:50 and 13:00 Riyadh)
+// through the five-minute heartbeat, and what changed there replaces ours.
 //
-// Which fields changed where is decided against a snapshot of the values as
-// last synced (lead_cards.crm_props): a save here writes only the fields
-// changed here since, so it never undoes an edit made in Odoo meanwhile; a
-// read from Odoo takes the fields that differ from the snapshot.
+// What changed where is decided against a snapshot of the values as last
+// synced (lead_cards.crm_props: the six fields, plus `act`, the activity): a
+// save here writes only what changed here since, so it never undoes an edit
+// made in Odoo meanwhile; a read takes only what changed in Odoo.
 //
-// The mapping is pure, in src/lib/sales/odooCard.js; the Odoo calls are in
-// _odoo.js. Nothing here fails an approval or a save: a failed write is kept
-// on the card (crm_sync_error) and tried again before the next read.
+// Nothing here fails an approval or a save: a failed write is kept on the
+// card (crm_sync_error) and tried again before the next read.
 
 import {
   cardToProps, propsFromRead, propsToCard, changedProps, mergeProps, changeNote,
-  mergeDefinition, definitionCurrent, pullDue, lastSlot, PREFIX,
+  mergeDefinition, definitionCurrent, pullDue, lastSlot, activityOf, sameActivity, PREFIX,
 } from '../../src/lib/sales/odooCard.js'
-import { listTeams, readTeamDefinition, writeTeamDefinition, readLeadProps, writeLeadProps, postNote } from './_odoo.js'
+import {
+  listTeams, readTeamDefinition, writeTeamDefinition, readLeadProps, writeLeadProps, postNote,
+  createActivity, writeActivity, doneActivity, readActivities,
+} from './_odoo.js'
 import { crmConnection, odooCfg } from './_crm.js'
 import { openCard } from './_card.js'
 
 const isUuid = (v) => /^[0-9a-f-]{36}$/i.test(String(v || ''))
 const errText = (err) => String(err?.message || err).slice(0, 400)
 
-const CARD_SYNC_COLUMNS = 'lead_id,card,decision,quote_due,target_price,decides,competitors,crm_props,crm_sync_error'
+const CARD_SYNC_COLUMNS = 'lead_id,card,decision,quote_due,target_price,decides,competitors,crm_props,crm_sync_error,crm_activity_id'
 const LEAD_SYNC_COLUMNS = 'id,crm_id,crm_status,next_step,follow_up'
 
 /** "Ammar Ahmed" (or the address) for the history note. */
@@ -36,9 +39,12 @@ async function personName(deps, userId) {
   return u ? u.full_name || u.email : ''
 }
 
+const snapshotOf = (row) => (row?.crm_props && typeof row.crm_props === 'object' ? row.crm_props : {})
+const onlyOurs = (values) => Object.fromEntries(Object.entries(values || {}).filter(([k]) => k.startsWith(PREFIX)).map(([k, v]) => [k, v || false]))
+
 /**
- * Make sure the team our leads go into carries the battle-card fields. Ours
- * are rewritten to the current version; anyone else's are kept. Needs Sales:
+ * Make sure the team our leads go into carries the card fields: ours
+ * rewritten to the current version, anyone else's kept. Needs Sales:
  * Administrator in Odoo. Returns { ok, changed } or throws Odoo's words.
  */
 export async function ensureTeamFields(deps, conn) {
@@ -62,8 +68,8 @@ export async function crmTeams(deps, workspaceId) {
 
 /**
  * Send our leads into this Odoo team from now on, after giving the team the
- * battle-card fields. A team Odoo will not let us add them to (no Sales:
- * Administrator right) is not chosen: its leads would arrive without a card.
+ * card fields. A team Odoo will not let us add them to (no Sales:
+ * Administrator right) is not chosen: its leads would arrive without them.
  * Returns { ok, changed } or { status, error }.
  */
 export async function setCrmTeam(deps, workspaceId, teamId) {
@@ -86,10 +92,28 @@ export async function setCrmTeam(deps, workspaceId, teamId) {
 }
 
 /**
+ * The next step as the lead's activity: created, moved, or marked done
+ * when it was cleared here. Returns the activity id now held (or null).
+ */
+async function syncActivity(deps, cfg, { crmId, activityId, act, ownerId }) {
+  const open = activityId ? (await readActivities(deps.fetch, cfg, [activityId]))[String(activityId)] : null
+  if (!act) {
+    if (open) await doneActivity(deps.fetch, cfg, activityId, 'Cleared on the Arak leads platform.')
+    return null
+  }
+  if (open) {
+    await writeActivity(deps.fetch, cfg, activityId, { summary: act.summary, date: act.date, userId: ownerId })
+    return activityId
+  }
+  return createActivity(deps.fetch, cfg, crmId, { summary: act.summary, date: act.date, userId: ownerId })
+}
+
+/**
  * Write the lead's card to its Odoo lead: the fields changed here since the
- * last sync (all of them the first time), merged into what Odoo holds now,
- * and a note in its history. `title` names a first push.
- * Returns { ok, changed: [names] } or { ok: false, error }; never throws.
+ * last sync (all filled ones the first time), merged into what Odoo holds
+ * now; the next step as its activity; one line in its history. `title` marks
+ * the first push, whose note is just that line.
+ * Returns { ok, changed: [names], activity } or { ok: false, error }; never throws.
  */
 export async function pushCard(deps, { conn, workspaceId, leadId, by = '', title = '' }) {
   try {
@@ -103,32 +127,42 @@ export async function pushCard(deps, { conn, workspaceId, leadId, by = '', title
       ;[row] = await deps.db(`lead_cards?lead_id=eq.${leadId}&workspace_id=eq.${workspaceId}&select=${CARD_SYNC_COLUMNS}`) || []
     }
     if (!row) return { ok: false, error: 'This lead has no battle card.' }
-    const ours = cardToProps(row.card, row, lead)
-    const snapshot = row.crm_props && typeof row.crm_props === 'object' ? row.crm_props : {}
+
+    const ours = cardToProps(row.card, row)
+    const snapshot = snapshotOf(row)
     const names = changedProps(snapshot, ours)
-    if (!names.length) {
+    const act = activityOf(lead)
+    const actChanged = !sameActivity(snapshot.act || null, act)
+    // The first push always leaves its line in the history, even with
+    // nothing filled yet; later saves only when something changed.
+    if (!names.length && !actChanged && !title) {
       if (row.crm_sync_error) await deps.db(`lead_cards?lead_id=eq.${leadId}`, { method: 'PATCH', prefer: 'return=minimal', body: { crm_sync_error: '' } })
       return { ok: true, changed: [] }
     }
+
     const cfg = odooCfg(conn)
     const now = (await readLeadProps(deps.fetch, cfg, [lead.crm_id]))[String(lead.crm_id)]
-    const odooNow = Object.fromEntries((now?.props || []).filter((p) => p.type !== 'separator').map((p) => [p.name, Array.isArray(p.value) ? p.value[0] : p.value]))
-    const merged = mergeProps(odooNow, ours, names)
-    await writeLeadProps(deps.fetch, cfg, lead.crm_id, merged)
-    const filled = names.filter((k) => ours[k])
-    await postNote(deps.fetch, cfg, lead.crm_id, changeNote(title ? filled : names, ours, by, title)).catch(() => null)
+    let merged = onlyOurs(snapshot)
+    if (names.length) {
+      const odooNow = Object.fromEntries((now?.props || []).filter((p) => p.type !== 'separator').map((p) => [p.name, Array.isArray(p.value) ? p.value[0] : p.value]))
+      merged = mergeProps(odooNow, ours, names)
+      await writeLeadProps(deps.fetch, cfg, lead.crm_id, merged)
+    }
+    let activityId = row.crm_activity_id || null
+    if (actChanged) activityId = await syncActivity(deps, cfg, { crmId: lead.crm_id, activityId, act, ownerId: now?.userId })
+
+    const note = title ? `<p>${String(title).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))}</p>` : changeNote(names, ours, by, actChanged ? act : undefined)
+    await postNote(deps.fetch, cfg, lead.crm_id, note).catch(() => null)
     await deps.db(`lead_cards?lead_id=eq.${leadId}`, {
       method: 'PATCH', prefer: 'return=minimal',
-      body: { crm_props: onlyOurs(merged), crm_synced_at: deps.now().toISOString(), crm_sync_error: '' },
+      body: { crm_props: { ...onlyOurs(merged), act }, crm_activity_id: activityId, crm_synced_at: deps.now().toISOString(), crm_sync_error: '' },
     })
-    return { ok: true, changed: names }
+    return { ok: true, changed: [...names, ...(actChanged ? ['next_step'] : [])], activity: activityId }
   } catch (err) {
     await deps.db(`lead_cards?lead_id=eq.${leadId}`, { method: 'PATCH', prefer: 'return=minimal', body: { crm_sync_error: errText(err) } }).catch(() => null)
     return { ok: false, error: errText(err) }
   }
 }
-
-const onlyOurs = (values) => Object.fromEntries(Object.entries(values || {}).filter(([k]) => k.startsWith(PREFIX)).map(([k, v]) => [k, v || false]))
 
 /** A card saved here, for a lead already in Odoo: write it there now. */
 export async function pushCardAfterSave(deps, { workspaceId, leadId, user }) {
@@ -138,10 +172,11 @@ export async function pushCardAfterSave(deps, { workspaceId, leadId, user }) {
 }
 
 /**
- * Read every pushed lead's card back from Odoo. Odoo is the master: a field
- * that differs from the last synced value was changed there, and replaces
- * ours. Writes still waiting (an earlier failure) are sent first, so a
- * change made here is never lost to the read.
+ * Read every pushed lead's card back from Odoo. Odoo is the master: what
+ * differs from the last synced value was changed there, and replaces ours;
+ * the activity done or deleted there clears our next step. Writes still
+ * waiting (an earlier failure) are sent first, so a change made here is
+ * never lost to the read.
  * Returns { read, updated, failed }.
  */
 export async function pullCards(deps, workspaceId, { conn = null } = {}) {
@@ -165,6 +200,8 @@ export async function pullCards(deps, workspaceId, { conn = null } = {}) {
   for (let i = 0; i < leads.length; i += 100) {
     const batch = leads.slice(i, i + 100)
     const got = await readLeadProps(deps.fetch, cfg, batch.map((l) => l.crm_id))
+    const actIds = batch.map((l) => cardOf.get(l.id)?.crm_activity_id).filter(Boolean)
+    const acts = await readActivities(deps.fetch, cfg, actIds)
     for (const lead of batch) {
       const row = cardOf.get(lead.id)
       const odoo = got[String(lead.crm_id)]
@@ -172,20 +209,29 @@ export async function pullCards(deps, workspaceId, { conn = null } = {}) {
       const theirs = propsFromRead(odoo.props)
       if (!Object.keys(theirs).length) continue // that team has no card fields
       read++
-      const snapshot = row.crm_props && typeof row.crm_props === 'object' ? row.crm_props : {}
+      const snapshot = snapshotOf(row)
       const names = changedProps(snapshot, theirs)
-      if (!names.length) continue
+      // The activity as Odoo holds it now: gone means done (or deleted) there.
+      const theirAct = row.crm_activity_id ? acts[String(row.crm_activity_id)] || null : snapshot.act || null
+      const actChanged = !sameActivity(snapshot.act || null, theirAct)
+      if (!names.length && !actChanged) continue
+      const now = deps.now().toISOString()
       // Only what changed in Odoo: a change made here that has not reached
       // Odoo yet (its write failed again above) stays, and goes next time.
       const fromOdoo = Object.fromEntries(names.map((k) => [k, theirs[k]]))
-      const next = propsToCard(fromOdoo, row.card, row, lead)
-      const now = deps.now().toISOString()
+      const next = propsToCard(fromOdoo, row.card, row)
       await deps.db(`lead_cards?lead_id=eq.${lead.id}`, {
         method: 'PATCH', prefer: 'return=minimal',
-        body: { card: next.card, ...next.after, crm_props: { ...snapshot, ...fromOdoo }, crm_pulled_at: now, updated_at: now, updated_by: null },
+        body: {
+          card: next.card, ...next.after, crm_props: { ...snapshot, ...fromOdoo, act: theirAct },
+          crm_activity_id: theirAct ? row.crm_activity_id : null, crm_pulled_at: now, updated_at: now, updated_by: null,
+        },
       })
-      if (next.track.next_step !== (lead.next_step || '') || (next.track.follow_up || null) !== (lead.follow_up || null)) {
-        await deps.db(`leads?id=eq.${lead.id}`, { method: 'PATCH', prefer: 'return=minimal', body: { ...next.track, updated_at: now } })
+      if (actChanged) {
+        await deps.db(`leads?id=eq.${lead.id}`, {
+          method: 'PATCH', prefer: 'return=minimal',
+          body: { next_step: theirAct ? theirAct.summary : '', follow_up: theirAct ? theirAct.date : null, updated_at: now },
+        })
       }
       updated++
     }

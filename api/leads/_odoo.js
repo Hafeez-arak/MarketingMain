@@ -178,8 +178,10 @@ export async function createTeam(fetchFn, cfg, name, memberIds = []) {
 export async function readLeadProps(fetchFn, cfg, ids) {
   if (!ids.length) return {}
   const uid = await login(fetchFn, cfg)
-  const rows = await call(fetchFn, cfg, uid, 'crm.lead', 'read', [ids.map(Number)], { fields: ['lead_properties', 'team_id'], context: { active_test: false } })
-  return Object.fromEntries(rows.map((r) => [String(r.id), { props: r.lead_properties || [], teamId: Array.isArray(r.team_id) ? r.team_id[0] : null }]))
+  const rows = await call(fetchFn, cfg, uid, 'crm.lead', 'read', [ids.map(Number)], { fields: ['lead_properties', 'team_id', 'user_id'], context: { active_test: false } })
+  return Object.fromEntries(rows.map((r) => [String(r.id), {
+    props: r.lead_properties || [], teamId: Array.isArray(r.team_id) ? r.team_id[0] : null, userId: Array.isArray(r.user_id) ? r.user_id[0] : null,
+  }]))
 }
 
 /** Write the lead's properties WHOLE ({ name: value }): Odoo replaces the set. */
@@ -187,6 +189,51 @@ export async function writeLeadProps(fetchFn, cfg, leadId, values) {
   const uid = await login(fetchFn, cfg)
   await call(fetchFn, cfg, uid, 'crm.lead', 'write', [[Number(leadId)], { lead_properties: values }])
   return true
+}
+
+// ─── The next step as an Activity (a to-do with a due date) ────────────────
+
+/** The ids an activity on a lead needs: crm.lead's model id and the To-Do type. */
+async function activityRefs(fetchFn, cfg, uid) {
+  const [model] = await call(fetchFn, cfg, uid, 'ir.model', 'search', [[['model', '=', 'crm.lead']]], { limit: 1 })
+  const [todo] = await call(fetchFn, cfg, uid, 'mail.activity.type', 'search', [['|', ['name', '=', 'To-Do'], ['name', '=', 'To Do']]], { limit: 1 })
+  const type = todo || (await call(fetchFn, cfg, uid, 'mail.activity.type', 'search', [[['res_model', '=', false]]], { limit: 1 }))[0]
+  if (!model || !type) throw new OdooError('Odoo has no To-Do activity type to schedule the next step with.')
+  return { modelId: model, typeId: type }
+}
+
+/** Schedule the next step on the lead for this Odoo user. Returns the activity id. */
+export async function createActivity(fetchFn, cfg, leadId, { summary, date, userId }) {
+  const uid = await login(fetchFn, cfg)
+  const { modelId, typeId } = await activityRefs(fetchFn, cfg, uid)
+  return call(fetchFn, cfg, uid, 'mail.activity', 'create', [{
+    res_model_id: modelId, res_id: Number(leadId), activity_type_id: typeId,
+    summary, date_deadline: date || new Date().toISOString().slice(0, 10), ...(userId ? { user_id: userId } : {}),
+  }])
+}
+
+/** Change an open activity's text, date or person. */
+export async function writeActivity(fetchFn, cfg, id, { summary, date, userId }) {
+  const uid = await login(fetchFn, cfg)
+  await call(fetchFn, cfg, uid, 'mail.activity', 'write', [[Number(id)], {
+    summary, date_deadline: date || new Date().toISOString().slice(0, 10), ...(userId ? { user_id: userId } : {}),
+  }])
+  return true
+}
+
+/** Mark an activity done (it leaves the to-do list; Odoo logs it on the lead). */
+export async function doneActivity(fetchFn, cfg, id, feedback = '') {
+  const uid = await login(fetchFn, cfg)
+  await call(fetchFn, cfg, uid, 'mail.activity', 'action_feedback', [[Number(id)]], { feedback })
+  return true
+}
+
+/** { id: { summary, date } } for the activities still open; done ones are gone. */
+export async function readActivities(fetchFn, cfg, ids) {
+  if (!ids.length) return {}
+  const uid = await login(fetchFn, cfg)
+  const rows = await call(fetchFn, cfg, uid, 'mail.activity', 'search_read', [[['id', 'in', ids.map(Number)]]], { fields: ['summary', 'date_deadline'] })
+  return Object.fromEntries(rows.map((r) => [String(r.id), { summary: r.summary || '', date: r.date_deadline || null }]))
 }
 
 /** An internal note in the lead's history (never emailed to the customer). */
