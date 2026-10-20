@@ -4,6 +4,7 @@ import { Card, Button, Empty, PillSelect, Skeleton } from '../../components/ui/i
 import { AgentSteering } from '../../components/AgentSteering'
 import { SendIdeasToPlan } from '../../components/SendIdeasToPlan'
 import { RunProgress } from '../../components/RunProgress'
+import { ProspectsPanel } from './ProspectsPanel'
 import { useAuth } from '../../store/auth'
 import {
   partitionByClock, deadlineLabel, lensStates, pct, marketDirection,
@@ -714,6 +715,7 @@ const TAB_DEFS = [
   { key: 'do', label: 'Do next', chip: n => (n === 1 ? 'thing to do next' : 'things to do next') },
   { key: 'content', label: 'Content & website', chip: n => (n === 1 ? 'content idea' : 'content ideas') },
   { key: 'leads', label: 'Leads & tenders', chip: n => (n === 1 ? 'open lead or tender' : 'open leads and tenders') },
+  { key: 'prospects', label: 'Prospects', chip: null },
   { key: 'competitors', label: 'Competitors', chip: n => (n === 1 ? 'competitor move' : 'competitor moves') },
   { key: 'market', label: 'Market & events', chip: n => (n === 1 ? 'market item or event' : 'market items and events') },
   { key: 'method', label: 'Sources & method', chip: null },
@@ -875,6 +877,8 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
   // same route and renderer as the Analytics tab so the two never drift apart.
   const [explain, setExplain] = useState({ state: 'idle', points: [], error: '', cost: 0, capped: false, forRun: null })
   const [saveNote, setSaveNote] = useState('')
+  // Companies to review, reported by the Prospects section once it has loaded.
+  const [prospectCount, setProspectCount] = useState(null)
   const detailRef = useRef(null)
   const [active, setActive] = useState(null)
 
@@ -1015,6 +1019,9 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
       leads: show('sales') && (!storeLoaded || visibleSales.open.length > 0 || sales.closed.length > 0),
       competitors: compCount > 0 || showDirection || theirs.length > 0 || (show('newcomp') && (!storeLoaded || candidates.length > 0)),
       market: marketCount > 0 || (showEvents && !storeLoaded),
+      // Not in the sales app: finding prospects is a paid search, and sales
+      // seats only read research.
+      prospects: !readOnly,
       method: true,
     }
     // A tab whose total still waits on the store shows a placeholder, not a
@@ -1024,6 +1031,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
       do: doCount, content: contentCount, leads: leadsCount,
       competitors: pending && show('newcomp') ? null : compCount,
       market: pending && showEvents ? null : marketCount,
+      prospects: prospectCount,
       method: sources.length,
     }
     // The glance card's chips name one kind of thing each, so they count only
@@ -1036,7 +1044,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
     }))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [team, storeLoaded, visibleTop, visibleSales, sales.closed, visibleMoves, proposedCandidates, candidates, plan,
-    showSearch, searchCount, ours, theirs, showDirection, showEvents, events, visibleNotes, world, poles, sources])
+    showSearch, searchCount, ours, theirs, showDirection, showEvents, events, visibleNotes, world, poles, sources, prospectCount])
 
   // ?section= still opens the page at a section, so an old link lands where
   // it pointed. Read once: scrolling afterwards is the reader's business.
@@ -1104,13 +1112,23 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
 
   if (!runs.length) {
     return (
-      <Card>
-        <Empty
-          title="No research yet"
-          description="Research looks for leads, events, competitor activity and market news for this brand. Each week it reports what changed since the last time."
-          action={readOnly ? null : <Button onClick={onRun} disabled={running}>Run research</Button>}
-        />
-      </Card>
+      <div className="space-y-5">
+        <Card>
+          <Empty
+            title="No research yet"
+            description="Research looks for leads, events, competitor activity and market news for this brand. Each week it reports what changed since the last time."
+            action={readOnly ? null : <Button onClick={onRun} disabled={running}>Run research</Button>}
+          />
+        </Card>
+        {/* Prospects need no research run: a search starts from the Brand
+            Brain and what the person types. */}
+        {!readOnly && (
+          <section id={sectionId('prospects')} className="space-y-4">
+            <h2 className="text-lg font-semibold text-text">Prospects</h2>
+            <ProspectsPanel workspaceId={activeWorkspaceId} accessToken={accessToken} />
+          </section>
+        )}
+      </div>
     )
   }
 
@@ -1365,6 +1383,11 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
                 </p>
               )}
             </Part>
+        </Section>
+
+        {/* Prospects */}
+        <Section tab={tabOf('prospects')}>
+            <ProspectsPanel workspaceId={activeWorkspaceId} accessToken={accessToken} onCount={setProspectCount} />
         </Section>
 
         {/* Competitors */}

@@ -130,6 +130,29 @@ export function normaliseIcp(raw = {}) {
     pains: list(c.pains)
       .map(p => ({ pain: str(p?.pain), angle: str(p?.angle) }))
       .filter(p => p.pain),
+    // ── WHAT WE SELL, AND WHEN WE ARE HIRED ──
+    //
+    // Added 2026-10-20 for Ghusn. Arak's ICP assumed one kind of sale: a
+    // package on a project, specified at design stage. A landscape company
+    // sells that too, but is hired late (external works, near handover), and
+    // its steadiest money is a yearly maintenance contract with a site that
+    // already exists. Without these two lines the openings lens chased
+    // design-stage projects for a business that cannot be specified there,
+    // and nothing anywhere knew that a recurring contract was on offer.
+    //
+    //   offers      what we sell, each one-off or recurring. The prospect
+    //               search picks one per company by key.
+    //   hire_stage  when in a project's life buyers hire us. When written it
+    //               outranks the generic stage order in the openings lens.
+    offers: list(c.offers)
+      .map(o => ({
+        key: str(o?.key) || slug(o?.label),
+        label: str(o?.label) || str(o?.key),
+        kind: o?.kind === 'recurring' ? 'recurring' : 'one_off',
+        note: str(o?.note),
+      }))
+      .filter(o => o.key),
+    hire_stage: str(c.hire_stage),
   }
 }
 
@@ -368,6 +391,9 @@ export function icpPromptText(rawIcp = {}) {
     seg('core').length ? `CORE TRACK — what our own history says we win:\n${seg('core').join('\n')}` : '',
     seg('broader').length ? `BROADER TRACK — where we want to grow:\n${seg('broader').join('\n')}` : '',
     buyers.length ? `BUYERS:\n${buyers.join('\n')}` : '',
+    icp.offers.length
+      ? `WHAT WE SELL:\n${icp.offers.map(o => `- ${o.label}${o.kind === 'recurring' ? ' (recurring: a yearly contract)' : ''}${o.note ? ` — ${o.note}` : ''}`).join('\n')}`
+      : '',
     icpFitText(icp),
     icp.red_flags.length
       ? `RED FLAGS (still report the target, but name the flag):\n${icp.red_flags.map(f => `- ${f.label}${f.advice ? ` — ${f.advice}` : ''}`).join('\n')}`
@@ -386,6 +412,9 @@ export function icpFitText(rawIcp = {}) {
   const icp = normaliseIcp(rawIcp)
   const { sweet_max, ok_max, currency, note } = icp.size
   return [
+    icp.hire_stage
+      ? `WHEN WE ARE HIRED: ${icp.hire_stage} Look for projects at THIS stage; it outranks any general advice about which stage is worth most.`
+      : '',
     sweet_max || ok_max
       ? `PACKAGE SIZE: best under ${formatAmount(sweet_max, currency) || '—'}; fine up to ${formatAmount(ok_max, currency) || '—'}.${note ? ` ${note}` : ''}`
       : '',
@@ -468,6 +497,8 @@ export function icpToForm(raw = {}) {
     ask_first: icp.ask_first.join('\n'),
     win_levers: icp.win_levers.join('\n'),
     pains: icp.pains.map(p => [p.pain, p.angle].join(' | ')).join('\n'),
+    offers: icp.offers.map(o => [o.label, o.kind === 'recurring' ? 'recurring' : 'one-off', o.note].join(' | ').replace(/( \| )+$/, '')).join('\n'),
+    hire_stage: icp.hire_stage,
   }
 }
 
@@ -480,7 +511,9 @@ export function icpToForm(raw = {}) {
  * then placed by their words instead — which is what renaming should mean.
  */
 export function formToIcp(form = {}, previous = {}) {
-  const keyByLabel = new Map(normaliseIcp(previous).segments.map(s => [lower(s.label), s.key]))
+  const prev = normaliseIcp(previous)
+  const keyByLabel = new Map(prev.segments.map(s => [lower(s.label), s.key]))
+  const offerKeyByLabel = new Map(prev.offers.map(o => [lower(o.label), o.key]))
   return normaliseIcp({
     summary: form.summary,
     evidence: form.evidence,
@@ -505,5 +538,10 @@ export function formToIcp(form = {}, previous = {}) {
       const [pain, angle] = parts(l)
       return { pain, angle }
     }),
+    offers: linesOf(form.offers).map(l => {
+      const [label, kind, note] = parts(l)
+      return { key: offerKeyByLabel.get(lower(label)) || '', label, kind: /recur|year|annual|month/i.test(kind || '') ? 'recurring' : 'one_off', note }
+    }),
+    hire_stage: form.hire_stage,
   })
 }

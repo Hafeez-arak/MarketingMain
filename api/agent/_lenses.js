@@ -387,7 +387,7 @@ const webTools = ({ searches = 0, fetches = null } = {}) => (searches > 0
  * `found` joins the citation allow-list: a URL these tools returned was really
  * returned, exactly like a web_search result.
  */
-function backupWeb(lens, deadline = null) {
+export function backupWeb(lens, deadline = null) {
   if (!(lens?.budget?.searches > 0) || !webConfigured()) return null
   const found = new Set()
   const stats = { searches: 0, reads: 0, failed: 0, servedBy: new Set(), notes: [] }

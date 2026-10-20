@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   normaliseIcp, scoreTarget, parseAmount, formatAmount, icpPromptText, rankTargets, hasIcp, icpToForm, formToIcp,
-  packageEstimate, parseShare,
+  packageEstimate, parseShare, icpFitText,
 } from './icp'
 
 // A made-up ICP. The real one is data in the database, never in this
@@ -211,5 +211,46 @@ describe('the page and the lens read the same ICP', () => {
     expect(text).toContain('[segment key: hotels]')
     expect(text).toContain('[buyer key: contractor_bidding]')
     expect(text).toMatch(/best under 500k SAR/)
+  })
+})
+
+describe('offers and when we are hired (2026-10-20)', () => {
+  const raw = {
+    summary: 'x',
+    offers: [{ label: 'Yearly care contract', kind: 'recurring', note: 'n' }, { key: 'build', label: 'Design and build' }],
+    hire_stage: 'Late, near handover.',
+  }
+
+  it('normalises offers, defaulting to one-off and slugging a missing key', () => {
+    const icp = normaliseIcp(raw)
+    expect(icp.offers).toEqual([
+      { key: 'yearly_care_contract', label: 'Yearly care contract', kind: 'recurring', note: 'n' },
+      { key: 'build', label: 'Design and build', kind: 'one_off', note: '' },
+    ])
+    expect(icp.hire_stage).toBe('Late, near handover.')
+  })
+
+  it('puts the hire stage in the fit text the openings lens reads, ahead of size', () => {
+    const text = icpFitText(raw)
+    expect(text.startsWith('WHEN WE ARE HIRED: Late, near handover.')).toBe(true)
+    expect(text).toMatch(/outranks any general advice/)
+  })
+
+  it('lists what we sell in the targets prompt', () => {
+    expect(icpPromptText(raw)).toContain('- Yearly care contract (recurring: a yearly contract) — n')
+  })
+
+  it('round-trips through the editor and keeps an offer key across a save', () => {
+    const form = icpToForm(raw)
+    expect(form.offers).toBe('Yearly care contract | recurring | n\nDesign and build | one-off')
+    const back = formToIcp(form, raw)
+    expect(back.offers.map(o => [o.key, o.kind])).toEqual([['yearly_care_contract', 'recurring'], ['build', 'one_off']])
+    expect(back.hire_stage).toBe('Late, near handover.')
+  })
+
+  it('leaves an older ICP without them untouched', () => {
+    const icp = normaliseIcp({ summary: 'x' })
+    expect(icp.offers).toEqual([])
+    expect(icpFitText({ summary: 'x' })).toBe('')
   })
 })
