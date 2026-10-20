@@ -530,9 +530,9 @@ const actions = {
    */
   async crm_set_team({ workspaceId, body }) {
     const deps = leadDeps()
-    const out = await setCrmTeam(deps, workspaceId, body.team_id)
+    const out = await setCrmTeam(deps, workspaceId, body.team_id, { moveSent: body.move_sent === true })
     if (out.error) return fail(out.status || 409, out.error)
-    return { crm: await crmStatus(deps, workspaceId), fieldsAdded: out.changed }
+    return { crm: await crmStatus(deps, workspaceId), fieldsAdded: out.changed, moved: out.moved }
   },
 
   /** Read every pushed lead's battle card back from Odoo now (it also runs at 07:50 and 13:00). */

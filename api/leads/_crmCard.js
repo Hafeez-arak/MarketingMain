@@ -20,7 +20,7 @@ import {
   mergeDefinition, definitionCurrent, pullDue, lastSlot, activityOf, sameActivity, PREFIX,
 } from '../../src/lib/sales/odooCard.js'
 import {
-  listTeams, readTeamDefinition, writeTeamDefinition, readLeadProps, writeLeadProps, postNote,
+  listTeams, readTeamDefinition, writeTeamDefinition, readLeadProps, writeLeadProps, postNote, moveLeadsToTeam,
   createActivity, writeActivity, doneActivity, readActivities,
 } from './_odoo.js'
 import { crmConnection, odooCfg } from './_crm.js'
@@ -72,7 +72,7 @@ export async function crmTeams(deps, workspaceId) {
  * Administrator right) is not chosen: its leads would arrive without them.
  * Returns { ok, changed } or { status, error }.
  */
-export async function setCrmTeam(deps, workspaceId, teamId) {
+export async function setCrmTeam(deps, workspaceId, teamId, { moveSent = false } = {}) {
   const conn = await crmConnection(deps, workspaceId)
   if (!conn?.ready) return { status: 409, error: 'Connect Odoo first.' }
   const id = Number(teamId)
@@ -85,10 +85,27 @@ export async function setCrmTeam(deps, workspaceId, teamId) {
   } catch (err) {
     return { status: 409, error: `Odoo did not let us add the battle-card fields to that team: ${errText(err)} (the Odoo user needs Sales: Administrator).` }
   }
+  // One step to the real team (the owner, 2026-10-20): the deals we already
+  // sent can come along, card values and all (the team has the fields now).
+  let moved = 0
+  if (moveSent) {
+    const sent = await deps.db(`leads?workspace_id=eq.${workspaceId}&crm_status=eq.sent&crm_id=neq.&crm_test=eq.false&select=crm_id`) || []
+    try {
+      moved = await moveLeadsToTeam(deps.fetch, odooCfg(conn), sent.map((l) => l.crm_id), id)
+    } catch (err) {
+      return { status: 409, error: `The team is not changed: Odoo did not let us move the deals already sent: ${errText(err)}` }
+    }
+  }
   await deps.db(`lead_crm?workspace_id=eq.${workspaceId}`, {
     method: 'PATCH', prefer: 'return=minimal', body: { team_id: id, team_name: name, updated_at: deps.now().toISOString() },
   })
-  return { ok: true, changed }
+  return { ok: true, changed, moved }
+}
+
+/** How many deals we have sent to Odoo (tests aside): what a team change can take along. */
+export async function sentCount(deps, workspaceId) {
+  const rows = await deps.db(`leads?workspace_id=eq.${workspaceId}&crm_status=eq.sent&crm_id=neq.&crm_test=eq.false&select=id`).catch(() => []) || []
+  return rows.length
 }
 
 /**

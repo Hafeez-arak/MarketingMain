@@ -371,6 +371,18 @@ Saved here, a card goes to Odoo at once; changed in Odoo, it comes back here
 at 07:50 and 13:00 (Odoo wins). Choosing the team needs Sales: Administrator
 for the Odoo user. With no team chosen, leads go without the card.
 
+**Moving to the real team later is one step.** Today (2026-10-20) the team is
+**SMART**, the owner's choice until the sales team says which one they want.
+To switch: **Change team** → tick "Also move the N deals already sent" (on by
+default) → pick the team. The new team gets the fields first, then the deals
+already sent move there with their battle-card values; new approvals go
+there from then on. Test pushes ("Test only") are never moved.
+
+**Test only.** The access admin can approve an unassigned lead with "Test
+only": it goes to the Pipeline owned by the Odoo connection's own user, with
+no salesperson and nothing forwarded, marked TEST (leads.crm_test), to be
+taken out of Odoo afterwards.
+
 ## 8. Assigning a lead, and forwarding its email
 
 A sales admin (or the access admin) gives each lead to one person, at any

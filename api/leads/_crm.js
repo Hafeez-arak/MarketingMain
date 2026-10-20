@@ -95,9 +95,10 @@ export async function crmConnection(deps, workspaceId) {
 /** What the admin page shows: never the key. */
 export async function crmStatus(deps, workspaceId) {
   const conn = await crmConnection(deps, workspaceId)
-  const [waiting, unsynced] = await Promise.all([
+  const [waiting, unsynced, sent] = await Promise.all([
     deps.db(`leads?workspace_id=eq.${workspaceId}&crm_status=in.(queued,failed)&select=crm_status`).then((r) => r || []),
     deps.db(`lead_cards?workspace_id=eq.${workspaceId}&crm_sync_error=neq.&select=lead_id`).then((r) => r || []).catch(() => []),
+    deps.db(`leads?workspace_id=eq.${workspaceId}&crm_status=eq.sent&crm_id=neq.&crm_test=eq.false&select=id`).then((r) => r || []).catch(() => []),
   ])
   return {
     // The battle card in Odoo (2026-10-20): the team our leads go into, and
@@ -108,6 +109,8 @@ export async function crmStatus(deps, workspaceId) {
     lastPullError: conn?.last_pull_error || '',
     lastPullCounts: conn?.last_pull_counts || null,
     cardsNotSynced: unsynced.length,
+    // Deals already in Odoo (tests aside): a team change can move them along.
+    sentCount: sent.length,
     connected: Boolean(conn?.ready),
     url: conn?.url || '',
     db: conn?.db || '',
