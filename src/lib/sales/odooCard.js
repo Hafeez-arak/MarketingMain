@@ -25,7 +25,7 @@
 //
 // Pure. No network.
 
-import { DECISIONS, CUSTOMER_LABEL, BAND_LABEL, CARD_KINDS, normaliseLeadCard } from './leadCard.js'
+import { DECISIONS, BAND_LABEL, CARD_KINDS, normaliseLeadCard } from './leadCard.js'
 import { projectOf } from '../leads/view.js'
 
 const str = (v) => String(v ?? '').trim()
@@ -165,42 +165,118 @@ export function activityOf(lead = {}) {
 export const sameActivity = (a, b) => (a?.summary || '') === (b?.summary || '') && (a?.date || '') === (b?.date || '')
 
 // ─── The battle card itself: Internal Notes ────────────────────────────────
-// The owner (2026-10-20): a battle card is the salesperson's weapons for the
-// fight, so this is the arsenal, ordered for the 30 seconds before the call
-// and short in every section: what kind of deal; what could blow up
-// (parked or existing account, earlier enquiries); the target; how we win
-// this one (the playbook's tactics matched to the lead); why us (proof
-// projects with what we did); what to ask first; the objections with what
-// to say; and when to walk away. The six fields below it are the scorecard.
+// The owner's shape (2026-10-20, after two tries): three parts and no more.
+//   1. Who they are: the lead, before the call, from what we hold, with
+//      their history with us read from Odoo itself (orders, quotations,
+//      deals won and lost, and an open deal someone already has).
+//   2. What to do: 2–4 lines of moves (what to ask, what to quote or offer).
+//   3. After the call: the six fields and the to-do (below the notes).
+
+/** "2026-03-14 09:00:00" → "Mar 2026". */
+const monthYear = (d) => {
+  const t = new Date(`${String(d || '').slice(0, 10)}T00:00:00Z`)
+  return Number.isNaN(t.getTime()) ? '' : t.toLocaleString('en-GB', { month: 'short', year: 'numeric', timeZone: 'UTC' })
+}
+const sar = (n) => `SAR ${Math.round(Number(n) || 0).toLocaleString('en-US')}`
+const ownerOf = (row) => (Array.isArray(row?.user_id) ? row.user_id[1] : '')
 
 /**
- * The brief at the top of the lead's Internal Notes: what to know and ask
- * before the first call. HTML, every value escaped. '' with no card.
+ * Their history with us, from Odoo (customerHistory in api/leads/_odoo.js),
+ * in words: lines for "who they are", a warning when someone already has an
+ * open deal with them, and the one move it suggests.
+ * Returns { lines, alert, move }.
  */
-export function briefHtml(cardRaw, lead = {}) {
+export function historyFacts(h, now = new Date()) {
+  if (!h) return { lines: [], alert: '', move: '' }
+  if (!h.matchedBy) return { lines: ['Not found in Odoo (no customer with their email domain or company name).'], alert: '', move: '' }
+  const lines = []
+  const names = (h.companies || []).map((c) => c.name).filter(Boolean)
+  lines.push(names.length
+    ? `In Odoo as ${names.join(' / ')} (matched by ${h.matchedBy}).`
+    : `Found in Odoo by their ${h.matchedBy} (deals only, no customer record).`)
+
+  const orders = (h.orders || []).filter((o) => o.state === 'sale')
+  const quotes = (h.orders || []).filter((o) => o.state !== 'sale')
+  if (orders.length) {
+    const total = orders.reduce((s, o) => s + (Number(o.amount_total) || 0), 0)
+    const first = orders[orders.length - 1]
+    lines.push(`${orders.length} order${orders.length === 1 ? '' : 's'} since ${monthYear(first.date_order)}, ${sar(total)}; last ${monthYear(orders[0].date_order)}${ownerOf(orders[0]) ? ` (${ownerOf(orders[0])})` : ''}.`)
+  }
+  if (quotes.length) lines.push(`${quotes.length} quotation${quotes.length === 1 ? '' : 's'} that did not become an order.`)
+
+  const deals = h.deals || []
+  const won = deals.filter((d) => d.active && d.probability === 100)
+  const lost = deals.filter((d) => !d.active && d.probability === 0)
+  const open = deals.filter((d) => d.active && d.probability > 0 && d.probability < 100)
+  const lastLost = lost[0]
+  const reason = Array.isArray(lastLost?.lost_reason_id) ? lastLost.lost_reason_id[1] : ''
+  if (deals.length) {
+    lines.push(`Deals: ${won.length} won · ${lost.length} lost${lastLost ? ` (last ${monthYear(lastLost.date_closed || lastLost.create_date)}${reason ? `: ${reason}` : ''})` : ''} · ${open.length} open.`)
+  }
+
+  let alert = ''
+  if (open.length) {
+    const newest = open[0]
+    const days = (now.getTime() - new Date(`${String(newest.create_date).replace(' ', 'T')}Z`).getTime()) / 86_400_000
+    const owners = [...new Set(open.map(ownerOf).filter(Boolean))].join(', ') || 'someone'
+    alert = days <= 14
+      ? `Probably this same enquiry: ${owners} opened a deal for them on ${String(newest.create_date).slice(0, 10)}. Check before working it twice.`
+      : `${owners} already ha${owners.includes(',') ? 've' : 's'} an open deal with them (since ${monthYear(newest.create_date)}). Talk to them before calling.`
+  }
+
+  let move = ''
+  if (!open.length) {
+    if (/price|expensive|cost|budget|cheaper/i.test(reason)) move = `They went elsewhere on price last time (${monthYear(lastLost.date_closed || lastLost.create_date)}): open with a budget option, then the full offer.`
+    else if (orders.length) move = `They have bought from us (last ${monthYear(orders[0].date_order)}${ownerOf(orders[0]) ? `, ${ownerOf(orders[0])}` : ''}): name that order and ask how it went.`
+    else if (quotes.length >= 3) move = `We have quoted them ${quotes.length} times without an order: ask what decides it this time.`
+    else if (reason) move = `Lost last time: ${reason}. Find out early if that still stands.`
+  }
+  return { lines, alert, move }
+}
+
+/**
+ * The battle card in the lead's Internal Notes: who they are, what to do
+ * (2–4 moves), and where the after-call part goes. `history` is Odoo's, or
+ * null when it could not be read. HTML, every value escaped. '' with no card.
+ */
+export function briefHtml(cardRaw, lead = {}, history = null, now = new Date()) {
   if (!cardRaw) return ''
   const c = normaliseLeadCard(cardRaw)
   const questions = c.ask.filter((a) => a.q !== CALL_NOTE)
   const { alerts, tactics } = splitHistory(c.history)
-  const fights = c.pushback.slice(0, 2).map((p) => ({ objection: p.objection, ...splitWalkAway(p.answer) }))
-  const donts = [...new Set(fights.map((f) => f.walk).filter(Boolean))]
+  const odoo = historyFacts(history, now)
   const phase = PHASE_LABEL[projectOf(lead)] || ''
+  const objection = c.pushback[0] ? { objection: c.pushback[0].objection, ...splitWalkAway(c.pushback[0].answer) } : null
 
-  const section = (title, items) => (items.length ? `<p><b>${esc(title)}</b></p><ul>${items.map((i) => `<li>${i}</li>`).join('')}</ul>` : '')
+  // 2–4 moves, the most specific first: what Odoo says about them, the
+  // playbook's move for this kind of deal, what to ask, what to offer, and
+  // the likeliest pushback.
+  const moves = [
+    odoo.move,
+    tactics[0],
+    questions.length ? `Ask: ${questions.map((a, i) => `${i + 1}) ${a.q}`).join(' ')}` : '',
+    /offer|ours/i.test(c.facts.brand) ? `Offer: ${c.facts.brand}` : '',
+    objection ? `If they say “${objection.objection}”: ${objection.say}` : '',
+  ].map(str).filter(Boolean).slice(0, 4)
+
+  const li = (items) => `<ul>${items.map((i) => `<li>${i}</li>`).join('')}</ul>`
   const labelled = (label, value) => (str(value) ? `<b>${esc(label)}:</b> ${esc(value).replace(/\n/g, '; ')}` : '')
+  const warnings = [odoo.alert, ...alerts].filter(Boolean)
   return [
-    `<p><b>⚔ BATTLE CARD</b> · ${esc([CARD_KINDS[c.kind], phase, CUSTOMER_LABEL[c.customer], BAND_LABEL[c.fit.band]].filter(Boolean).join(' · '))}</p>`,
-    section('⚠ Watch out', alerts.map(esc)),
-    section('The target', [
-      labelled('Who', c.facts.who), labelled('Wants', c.facts.wants), labelled('Brand', c.facts.brand), labelled('Deadline', c.facts.due),
+    `<p><b>⚔ BATTLE CARD</b> · ${esc([CARD_KINDS[c.kind], phase, BAND_LABEL[c.fit.band]].filter(Boolean).join(' · '))}</p>`,
+    '<p><b>1. Who they are</b></p>',
+    li([
+      ...warnings.map((w) => `⚠ ${esc(w)}`),
+      labelled('Who', c.facts.who),
+      labelled('Wants', c.facts.wants),
+      labelled('Brand · deadline', [c.facts.brand, c.facts.due].filter(Boolean).join(' · ')),
+      ...odoo.lines.map((l) => `<b>With us:</b> ${esc(l)}`),
     ].filter(Boolean)),
-    section('How we win this one', tactics.slice(0, 3).map(esc)),
-    section('Why us: name these', c.references.slice(0, 3).map(esc)),
-    section('Ask first', questions.map((a, i) => `${i + 1}) ${esc(a.q)}`)),
-    section('If they say…', fights.map((f) => `“${esc(f.objection)}” → ${esc(f.say)}`)),
-    section("Don't", donts.map(esc)),
-    '<p><i>After the call: fill the Battle card fields below (answers in Call notes as 1) … | 2) … | 3) …) and the next step as a to-do.</i></p>',
-  ].filter(Boolean).join('')
+    '<p><b>2. What to do</b></p>',
+    li(moves.map(esc)),
+    '<p><b>3. After the call</b></p>',
+    '<p>Fill the Battle card fields on this lead (answers in Call notes as 1) … | 2) … | 3) …) and set the next step as a to-do.</p>',
+  ].join('')
 }
 
 // What the card builder puts in `history`: facts about this account first,

@@ -191,6 +191,75 @@ export async function writeLeadProps(fetchFn, cfg, leadId, values) {
   return true
 }
 
+// ─── Their history with us, for the battle card (2026-10-20) ───────────────
+
+/**
+ * Everything Odoo knows about this customer: their past deals (won, lost and
+ * why, open) and their quotations and orders. Found by their email domain,
+ * or by the exact email for a free address (gmail…), or by the exact company
+ * name. Read only. `exclude` is the lead itself. Returns the raw rows; the
+ * summing up is pure (historyLines in src/lib/sales/odooCard.js).
+ */
+export async function customerHistory(fetchFn, cfg, { email = '', company = '', freeEmail = false, ownDomains = [], exclude = null } = {}) {
+  const addr = typeof email === 'string' ? email.trim().toLowerCase() : ''
+  const own = new Set([...ownDomains.map((d) => String(d).toLowerCase()), ...PLACEHOLDER_DOMAINS])
+  const domain = !freeEmail && addr.includes('@') && !own.has(addr.split('@')[1]) ? addr.split('@')[1] : ''
+  const core = companyCore(company)
+  const uid = await login(fetchFn, cfg)
+  // Companies (commercial partners) behind the contacts matching a condition;
+  // more than MAX_COMPANIES means the key is shared or a placeholder
+  // ("@1234.com" sits on 37 customers), so it identifies no one.
+  const companiesFor = async (cond) => {
+    const rows = await call(fetchFn, cfg, uid, 'res.partner', 'search_read', [[cond]], { fields: ['commercial_partner_id'], limit: 60, context: { active_test: false } })
+    const ids = [...new Set(rows.map((p) => (Array.isArray(p.commercial_partner_id) ? p.commercial_partner_id[0] : p.id)))]
+    return ids.length && ids.length <= MAX_COMPANIES ? ids : []
+  }
+  let matchedBy = null
+  let companies = []
+  if (domain) { companies = await companiesFor(['email', '=ilike', `%@${domain}`]); if (companies.length) matchedBy = 'email domain' }
+  else if (freeEmail && addr) { companies = await companiesFor(['email', '=ilike', addr]); if (companies.length) matchedBy = 'email' }
+  if (!companies.length && core) { companies = await companiesFor(['name', 'ilike', core]); if (companies.length) matchedBy = 'company name' }
+  const leadEmail = domain ? ['email_from', '=ilike', `%@${domain}`] : null
+  if (!companies.length && !leadEmail) return { matchedBy: null, companies: [], deals: [], orders: [] }
+  const anyOf = (conds) => [...Array(conds.length - 1).fill('|'), ...conds]
+  const dealDomain = anyOf([companies.length ? ['partner_id', 'child_of', companies] : null, leadEmail].filter(Boolean))
+  const names = companies.length ? await call(fetchFn, cfg, uid, 'res.partner', 'read', [companies], { fields: ['name'] }) : []
+  const [deals, orders] = await Promise.all([
+    dealDomain.length
+      ? call(fetchFn, cfg, uid, 'crm.lead', 'search_read', [[...dealDomain, ...(exclude ? [['id', '!=', Number(exclude)]] : [])]], {
+          fields: ['active', 'probability', 'stage_id', 'lost_reason_id', 'date_closed', 'create_date', 'expected_revenue', 'user_id'],
+          order: 'create_date desc', limit: 100, context: { active_test: false },
+        })
+      : [],
+    companies.length
+      ? call(fetchFn, cfg, uid, 'sale.order', 'search_read', [[['partner_id', 'child_of', companies], ['state', '!=', 'cancel']]], {
+          fields: ['state', 'amount_total', 'date_order', 'user_id'], order: 'date_order desc', limit: 200,
+        })
+      : [],
+  ])
+  if (!companies.length && deals.length) matchedBy = 'email domain'
+  return { matchedBy: deals.length || orders.length ? matchedBy : null, companies: names.map((n) => ({ id: n.id, name: n.name })), deals, orders }
+}
+
+/**
+ * Domains that name no company: reserved test domains, and the made-up ones
+ * typed into Odoo when a contact's real email was unknown (2026-10-20:
+ * "@1234.com" on 37 customers, "@123.com" and "@abc.com" on 7 each).
+ */
+export const PLACEHOLDER_DOMAINS = ['example.com', 'example.org', 'example.net', 'test.com', 'domain.com', 'email.com', 'mail.com', '123.com', '1234.com', '12345.com', 'abc.com', 'xyz.com', 'none.com', 'na.com']
+
+/** More companies than this behind one email domain or name: it identifies no one. */
+const MAX_COMPANIES = 3
+
+// Words that say what kind of company it is, not which one.
+const COMPANY_WORDS = /\b(co|company|corp|corporation|est|establishment|llc|ltd|limited|inc|trading|contracting|contractors?|group|holding|international|intl|for|and|the|of|ksa|saudi|arabia|w\.?l\.?l|l\.?l\.?c)\b/gi
+
+/** "Example Contracting Co. Ltd" → "Example". '' when too little is left to identify anyone. */
+export function companyCore(name = '') {
+  const core = String(name || '').replace(/[().,&/\\-]+/g, ' ').replace(COMPANY_WORDS, ' ').replace(/\s+/g, ' ').trim()
+  return core.length >= 5 ? core : ''
+}
+
 // ─── The next step as an Activity (a to-do with a due date) ────────────────
 
 /** The ids an activity on a lead needs: crm.lead's model id and the To-Do type. */
