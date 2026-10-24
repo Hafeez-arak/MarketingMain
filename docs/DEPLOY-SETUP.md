@@ -45,8 +45,11 @@ Set the same value in **both** places, or posting and analytics disagree:
 1. **Vercel** → project `marketing-main` → Settings → Environment Variables →
    add `ZERNIO_WORKSPACE_KEYS` (Production), then redeploy.
 2. **The n8n box** → add the line `ZERNIO_WORKSPACE_KEYS=…` to
-   `n8n/docker/.env`, then `git pull && ./n8n/redeploy.sh --all`. The
-   Publish and Sync workflows read it; the agent container reads it too.
+   `n8n/docker/.env`, then recreate the containers so they read it:
+   `cd n8n/docker && docker compose up -d`. `redeploy.sh` is not enough on
+   its own: it ends in `docker compose restart`, which keeps the old
+   environment. The Publish and Sync workflows read the key; the agent
+   container reads it too.
 
 A company's Zernio profile and accounts live inside its own Zernio account.
 Set the key **before** anyone connects that company's accounts. If you move
