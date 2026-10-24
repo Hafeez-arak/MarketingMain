@@ -1,5 +1,5 @@
 import {
-  createZernio, normalizeAccount, ownedByProfile, profileIdOf,
+  createZernio, zernioKeyFor, normalizeAccount, ownedByProfile, profileIdOf,
   CONNECT_SPECS, CONNECTABLE, explainZernioError, ZernioError, qs, analyticsPlan, followerPlan, retryRateLimited,
   syncAccountPosts, feedPlan, mergeFeedPages, FEED_MAX_PAGES,
 } from './_zernio.js'
@@ -28,7 +28,6 @@ import { mayDisconnect, protectionReason } from '../../src/lib/platformSafety.js
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''
 const SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 const ANON_KEY     = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || ''
-const ZERNIO_KEY   = process.env.ZERNIO_API_KEY || ''
 
 // The actions this route answers. DERIVED from `handlers` rather than listed,
 // because the two lists drifted the moment one was added: `followers` was
@@ -974,13 +973,14 @@ export default async function handler(req, res) {
       error: 'SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not set on this deployment.',
     })
   }
-  if (!ZERNIO_KEY) {
+  const body = req.body && typeof req.body === 'object' ? req.body : {}
+  const workspaceId = String(body.workspace_id || '').trim()
+  // The workspace's own Zernio account when it has one, else the shared one.
+  const zernioKey = zernioKeyFor(workspaceId, process.env)
+  if (!zernioKey) {
     console.error('[config] ZERNIO_API_KEY is not set on this deployment')
     return res.status(503).json({ ok: false, error: 'Accounts can’t be connected right now. Contact your admin.' })
   }
-
-  const body = req.body && typeof req.body === 'object' ? req.body : {}
-  const workspaceId = String(body.workspace_id || '').trim()
   const token = bearerOf(req)
 
   // Sign-in and membership are checked at the same time rather than in turn:
@@ -1008,7 +1008,7 @@ export default async function handler(req, res) {
       return res.status(403).json({ ok: false, error: 'You do not have access to that workspace.' })
     }
 
-    const z = createZernio({ apiKey: ZERNIO_KEY })
+    const z = createZernio({ apiKey: zernioKey })
     const profileId = await ensureProfile(z, ws)
     const out = await handlers[action](z, { ws, profileId, body })
 
