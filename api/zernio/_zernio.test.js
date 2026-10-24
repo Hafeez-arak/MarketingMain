@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   profileIdOf, ownedByProfile, normalizeAccount, qs, followerCountOf,
-  createZernio, ZernioError, CONNECT_SPECS, explainZernioError, syncAccountPosts,
+  createZernio, zernioKeyFor, ZernioError, CONNECT_SPECS, explainZernioError, syncAccountPosts,
 } from './_zernio.js'
 
 // ─── The bug that caused this rebuild, pinned ──────────────────────────────
@@ -542,5 +542,36 @@ describe('syncAccountPosts', () => {
     const out = await syncAccountPosts(z, [page('bad'), page('li1')], { retry: noRetry })
     expect(out[0]).toMatchObject({ ok: false, error: 'Rate limit exceeded.' })
     expect(out[1]).toMatchObject({ ok: true, recent_posts: 3 })
+  })
+})
+
+// ─── Which key a workspace uses ────────────────────────────────────────────
+describe('zernioKeyFor', () => {
+  const GHUSN = 'c688dfbe-9d93-4a88-adbb-605e8b81e8f8'
+  const env = {
+    ZERNIO_API_KEY: 'shared',
+    ZERNIO_WORKSPACE_KEYS: ` other=key-x ;\n${GHUSN.toUpperCase()} = ghusn-key , broken, =nokey`,
+  }
+
+  it('gives a listed workspace its own key, whatever the case or spacing', () => {
+    expect(zernioKeyFor(GHUSN, env)).toBe('ghusn-key')
+  })
+
+  it('gives everyone else the shared key', () => {
+    expect(zernioKeyFor('00000000-0000-0000-0000-000000000001', env)).toBe('shared')
+    expect(zernioKeyFor('', env)).toBe('shared')
+    expect(zernioKeyFor(GHUSN, { ZERNIO_API_KEY: 'shared' })).toBe('shared')
+  })
+
+  it('keeps the part after the first = whole, since keys may contain one', () => {
+    expect(zernioKeyFor('ws', { ZERNIO_WORKSPACE_KEYS: 'ws=abc==' })).toBe('abc==')
+  })
+
+  it('falls back to the shared key when a listed entry is empty', () => {
+    expect(zernioKeyFor('ws', { ZERNIO_API_KEY: 'shared', ZERNIO_WORKSPACE_KEYS: 'ws=' })).toBe('shared')
+  })
+
+  it('is empty when nothing is set', () => {
+    expect(zernioKeyFor('ws', {})).toBe('')
   })
 })

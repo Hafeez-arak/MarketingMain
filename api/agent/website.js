@@ -1,7 +1,7 @@
 import { callerId, callerMayUseWorkspace, db, isConfigured } from './_supabase.js'
 import { searchConfig } from '../../src/lib/agent/searchConsole.js'
 import { ga4Config, bioLink, siteOrigin, SOCIAL_PLATFORMS } from '../../src/lib/agent/ga4.js'
-import { createZernio } from '../zernio/_zernio.js'
+import { createZernio, zernioKeyFor } from '../zernio/_zernio.js'
 import { zernioProfileFor, accountInsights, MAX_INSIGHT_DAYS } from './_zernioLive.js'
 import { fetchWebsiteData, fetchSitemaps } from './_searchConsole.js'
 import { fetchGa4Data } from './_ga4.js'
@@ -91,7 +91,7 @@ async function fetchBioTaps(workspaceId, days) {
         'so there is no tap count for this one. Choose a shorter window to see it.',
     }
   }
-  const key = process.env.ZERNIO_API_KEY || ''
+  const key = zernioKeyFor(workspaceId, process.env)
   if (!key) {
     console.error('[config] ZERNIO_API_KEY is not set on this deployment')
     return { ok: false, error: 'This isn’t available right now. Contact your admin.' }

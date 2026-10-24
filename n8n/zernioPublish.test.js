@@ -364,3 +364,25 @@ describe('mixed media carousels', () => {
     expect(sent).toHaveLength(0)
   })
 })
+
+describe('per-workspace Zernio keys', () => {
+  it('publishes with the workspace key when ZERNIO_WORKSPACE_KEYS lists it', async () => {
+    const auth = []
+    const routes = [
+      ['/api/v1/accounts', async ({ headers }) => {
+        auth.push(headers.Authorization)
+        return { statusCode: 200, body: { accounts: [{ _id: 'acc_1', platform: 'instagram', isActive: true }] } }
+      }],
+      ['/api/v1/posts', async ({ headers }) => {
+        auth.push(headers.Authorization)
+        return { statusCode: 200, body: { post: { _id: 'zpost_1' }, _id: 'zpost_1' } }
+      }],
+    ]
+    await runCodeNode(PUBLISH, {
+      env: { ...ENV, ZERNIO_WORKSPACE_KEYS: `other-ws=nope, ${WS}=own-key` },
+      input: { body: { ...base, platform: 'instagram' } }, postgrest: db(), routes,
+    })
+    expect(auth.length).toBeGreaterThan(0)
+    expect(new Set(auth)).toEqual(new Set(['Bearer own-key']))
+  })
+})

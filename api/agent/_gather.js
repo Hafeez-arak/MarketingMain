@@ -7,7 +7,7 @@ import { tokenHealth, worthSurfacing } from '../../src/lib/agent/tokenHealth.js'
 import { ownChannels, priorPeriod } from '../../src/lib/agent/ownChannels.js'
 import { readAccounts, readOwnPosts, readAnalyticsFor } from './_ownData.js'
 import { postAnalytics, linkedinPageInsights } from './_zernioLive.js'
-import { createZernio } from '../zernio/_zernio.js'
+import { createZernio, zernioKeyFor } from '../zernio/_zernio.js'
 
 // ─── Stage 0, the IO half ──────────────────────────────────────────────────
 // Ported from the n8n Gather node. The arithmetic lives in
@@ -106,7 +106,7 @@ async function connectedAccounts(workspaceId) {
  * Never throws, and never fails the run: without it the run still has every
  * post the app published, and the gap is named in `zernio_note`.
  */
-export async function gatherZernioOwn(accounts, period, { apiKey = process.env.ZERNIO_API_KEY || '' } = {}) {
+export async function gatherZernioOwn(accounts, period, { apiKey = '' } = {}) {
   const none = note => ({ external: [], pageInsights: {}, note })
   if (!apiKey) {
     console.error('[config] ZERNIO_API_KEY is not set on this deployment')
@@ -166,7 +166,7 @@ export async function gatherOwnChannels(workspaceId, period) {
     const from = prior?.start || period?.start
     const all = await readOwnPosts(workspaceId, { from })
     const analytics = await readAnalyticsFor(workspaceId, all)
-    const zernio = await gatherZernioOwn(accounts, period)
+    const zernio = await gatherZernioOwn(accounts, period, { apiKey: zernioKeyFor(workspaceId, process.env) })
 
     const own = ownChannels({
       accounts: accounts || [], posts: all, analytics: analytics || [], period, prior,

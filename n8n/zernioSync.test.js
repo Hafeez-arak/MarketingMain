@@ -130,3 +130,25 @@ describe('mirroring accounts into workspaces', () => {
     expect(pg.tables.social_accounts).toHaveLength(0)
   })
 })
+
+// ─── A company with its own Zernio account ─────────────────────────────────
+// ZERNIO_WORKSPACE_KEYS gives a workspace its own key. Its profile lives in
+// that other Zernio account, so asking with the shared key would read nothing.
+describe('per-workspace Zernio keys', () => {
+  it('reads each workspace with its own key, and the rest with the shared one', async () => {
+    const keyByProfile = {}
+    const routes = [['/api/v1/accounts', async ({ url, headers }) => {
+      const profileId = new URL(url).searchParams.get('profileId') || ''
+      keyByProfile[profileId] = headers.Authorization
+      return { statusCode: 200, body: { accounts: ACCOUNTS[profileId] || [], hasAnalyticsAccess: false } }
+    }]]
+    await runCodeNode(SYNC, {
+      env: { ...ENV, ZERNIO_WORKSPACE_KEYS: `${WS_B}=key-for-b` },
+      input: { body: {} }, postgrest: twoWorkspaces(), routes,
+    })
+    expect(keyByProfile).toEqual({
+      [PROFILE_A]: 'Bearer stub-zernio-key',
+      [PROFILE_B]: 'Bearer key-for-b',
+    })
+  })
+})
