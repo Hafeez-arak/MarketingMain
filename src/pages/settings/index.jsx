@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabaseClient'
 import { createCompany, fetchAllAccess } from '../../lib/access'
 import { Card, Button, PageHeader, Skeleton } from '../../components/ui/index'
 import { fetchSpend, setCap, projectedMonth } from '../../lib/aiSpend'
+import { collectCompanyFiles, removeCompanyFiles } from '../../lib/workspaceFiles'
 
 // ─── Settings ──────────────────────────────────────────────────────────────
 // A "company" == a Supabase workspace. This section reads/writes the REAL
@@ -78,9 +79,21 @@ export function Settings() {
 
   async function handleDelete(id) {
     setBusy(true); setError('')
+    // Files first, while the company's studio sessions still exist to say
+    // which render folders are its. If they can't be listed, stop here:
+    // deleting anyway would leave files nothing points at any more.
+    let files
+    try {
+      files = await collectCompanyFiles(supabase, id)
+    } catch (err) {
+      setError(`Nothing was deleted: the company's files could not be listed (${err.message}). Try again.`)
+      setBusy(false); setConfirmDelete(null); return
+    }
     // FK on delete cascade wipes members + all workspace-scoped data.
     const { error: e } = await supabase.from('workspaces').delete().eq('id', id)
     if (e) { setError(e.message); setBusy(false); setConfirmDelete(null); return }
+    const { failed } = await removeCompanyFiles(supabase.storage, files)
+    if (failed) setError(`The company was deleted, but ${failed} of its file${failed === 1 ? '' : 's'} could not be removed from storage.`)
     if (id === activeId) {
       const next = workspaces.find(w => w.id !== id)
       if (next) switchWorkspace(next.id)
@@ -263,7 +276,7 @@ export function Settings() {
           <div className="bg-white rounded-2xl shadow-dropdown w-full max-w-sm border border-border animate-fade-scale p-6 space-y-4">
             <h3 className="font-semibold text-text text-sm">Delete "{confirmDelete.name}"?</h3>
             <p className="text-sm text-text-secondary leading-relaxed">
-              All content, posts, campaigns, brand brain, and settings for this company will be permanently removed.
+              All content, posts, campaigns, brand brain, settings and uploaded files for this company will be permanently removed.
             </p>
             <div className="flex gap-3 pt-1">
               <Button variant="secondary" className="flex-1 justify-center" onClick={() => setConfirmDelete(null)}>Cancel</Button>
