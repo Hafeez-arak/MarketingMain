@@ -1,5 +1,5 @@
 import { supabase } from '../supabaseClient'
-import { readModels, readSyncState } from '../odooMirror'
+import { readMoneyRecords, readSyncState } from '../odooMirror'
 import { projectBoard, settingsOf, STAGE_KEYS, PROJECT_MODELS } from './projects'
 import { financeFacts } from '../finance/finance'
 
@@ -19,7 +19,7 @@ const must = ({ data, error }) => { if (error) throw new Error(error.message); r
 /** Everything the projects board needs, and the board itself. */
 export async function loadTechnical(workspaceId) {
   const [records, sync, log, submittals, updates, settingsRow, people, myOdooUid] = await Promise.all([
-    readModels(workspaceId, [...MODELS, ...MONEY]),
+    readMoneyRecords(workspaceId, { with: MODELS }),
     readSyncState(workspaceId),
     supabase.from('project_stage_log').select('*').eq('workspace_id', workspaceId).order('entered_at').then(must),
     supabase.from('project_submittals').select('*').eq('workspace_id', workspaceId).order('round').then(must),

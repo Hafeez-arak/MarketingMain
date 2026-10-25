@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { financeFacts, plannedMargin, MARGIN_RED_POINTS } from './finance.js'
+import { financeFacts, plannedMargin, MARGIN_RED_POINTS, monthReadFrom } from './finance.js'
 import { fakeOdooData } from '../../../dev/v2db/fakeOdoo.js'
 
 // The fake Odoo's dates are relative to the moment it is built, so these
@@ -81,5 +81,37 @@ describe('plannedMargin', () => {
     expect(plannedMargin({ margin_percent: 0.284 })).toBe(28.4)
     expect(plannedMargin({ margin: 50, amount_untaxed: 200 })).toBe(25)
     expect(plannedMargin({ margin_percent: false, margin: false })).toBeNull()
+  })
+})
+
+describe('the narrow read gives the same facts (odooMoneyRecords, 2026-10-25)', () => {
+  it('analytic lines summed per account (income, cost) give the same margins as the lines', () => {
+    const records = {
+      'sale.order': [{ id: 1, name: 'S001', state: 'sale', amount_total: 1000, margin: 300, amount_untaxed: 1000, project_id: [7, 'P'] }],
+      'project.project': [{ id: 7, name: 'P', active: true, account_id: [70, 'A'] }, { id: 8, name: 'Q', active: true, account_id: [80, 'B'] }],
+      'account.analytic.line': [
+        { account_id: [70, 'A'], amount: 600 }, { account_id: [70, 'A'], amount: 400 }, { account_id: [70, 'A'], amount: -250 },
+        { account_id: [70, 'A'], amount: -0 }, { account_id: [80, 'B'], amount: -90 }, { account_id: false, amount: 55 },
+      ],
+    }
+    // What odoo_analytic_totals returns: per account, the positives and the negatives.
+    const totals = new Map()
+    for (const l of records['account.analytic.line']) {
+      if (!Array.isArray(l.account_id)) continue
+      const t = totals.get(l.account_id[0]) || { income: 0, cost: 0 }
+      if (l.amount >= 0) t.income += l.amount; else t.cost += -l.amount
+      totals.set(l.account_id[0], t)
+    }
+    const summed = [...totals].flatMap(([a, t]) => [{ account_id: [a], amount: t.income }, { account_id: [a], amount: -t.cost }])
+    const opts = { now: Date.UTC(2026, 9, 25), models: ['account.analytic.line', 'sale.order'], url: '' }
+    expect(financeFacts({ ...records, 'account.analytic.line': summed }, opts)).toEqual(financeFacts(records, opts))
+    expect(financeFacts(records, opts).projects.find(p => p.id === 7)).toMatchObject({ income: 1000, cost: 250 })
+  })
+
+  it('monthReadFrom starts a day before the month does in Riyadh', () => {
+    // 2026-10-31 22:30 UTC is already 1 November in Riyadh, which began at
+    // 21:00 UTC on the 31st; a day earlier is the 30th (a safe superset).
+    expect(monthReadFrom(Date.UTC(2026, 9, 31, 22, 30))).toBe('2026-10-30')
+    expect(monthReadFrom(Date.UTC(2026, 9, 25, 12))).toBe('2026-09-29')
   })
 })

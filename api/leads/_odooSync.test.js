@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { syncOdoo, readMirror } from './_odooSync.js'
+import { readChanged } from './_odoo.js'
 import { fakeOdooFetch, fakeOdooData, FAKE, matches } from '../../dev/v2db/fakeOdoo.js'
 import { odooFacts } from '../../src/lib/control/odoo.js'
 
@@ -56,7 +57,7 @@ describe('syncOdoo', () => {
     expect(st.records.size).toBe(5 + 3 + 5 + 6 + 7 + 3 + 9 + 9 + 6 + 6 + 2 + 5 + 3)
     // A field Arak adds in Odoo Studio is read by its name.
     expect(st.records.get('project.project:402').data.x_studio_consultant).toBe('Example Design Consultants')
-    expect(st.sync.cursors['crm.lead']).toMatch(/^\d{4}-\d{2}-\d{2} [\d:]+\|\d+$/)
+    expect(st.sync.cursors['crm.lead']).toMatch(/^\d{4}-\d{2}-\d{2} [\d:]+\|-?\d+$/)
     expect(st.sync.last_error).toBe('')
   })
 
@@ -114,6 +115,19 @@ describe('syncOdoo', () => {
     expect(pr).not.toHaveProperty('account_id')
   })
 
+  it('a field kept to a group this user is not in is dropped, not the whole model (Arak\'s Odoo, 2026-10-25)', async () => {
+    const odoo = fakeOdooData()
+    odoo.__denied = { 'project.project': ['stage_id'] }
+    const { st, deps } = world(odoo)
+    const out = await syncOdoo(deps, { workspaceId: WS, force: true })
+    expect(out.error).toBeUndefined()
+    expect(out.synced['project.project']).toMatchObject({ changed: 6, denied: ['stage_id'] })
+    expect(st.records.get('project.project:401').data).not.toHaveProperty('stage_id')
+    expect(st.records.get('project.project:401').data.name).toBeTruthy()
+    expect(st.sync.counts['project.project'].denied).toEqual(['stage_id'])
+    expect(st.sync.last_error).toBe('')
+  })
+
   it('a field this Odoo lacks fails the read, as the real one does', async () => {
     const { deps } = world()
     const f = deps.fetch
@@ -127,5 +141,53 @@ describe('syncOdoo', () => {
     const out = await syncOdoo(deps, { workspaceId: WS, force: true })
     expect(out.error).toBeUndefined()
     expect(out.technical.error).toMatch(/monitor down/)
+  })
+})
+
+describe('readChanged: the cursor at whole seconds (Arak\'s invoices, 2026-10-25)', () => {
+  // Odoo keeps fractions of a second but hands back whole seconds. 130
+  // records share one second, their fractions running against their ids, with
+  // records before and after; pages of 50.
+  const busy = () => {
+    const rows = []
+    for (let i = 0; i < 130; i++) rows.push({ id: 1000 + i, name: `INV/${i}`, write_date: `2025-06-18 10:52:44.${String(999999 - i * 7000).padStart(6, '0')}` })
+    for (let i = 0; i < 30; i++) rows.push({ id: 10 + i, name: `old ${i}`, write_date: `2025-06-17 09:00:${String(i).padStart(2, '0')}.5` })
+    for (let i = 0; i < 40; i++) rows.push({ id: 5000 + i, name: `new ${i}`, write_date: `2025-06-19 08:00:${String(i % 60).padStart(2, '0')}.25` })
+    return { 'account.move': rows }
+  }
+  const cfg = { url: 'http://127.0.0.1:8069', db: FAKE.db, login: FAKE.login, apiKey: FAKE.apiKey }
+
+  it('reads every record once in one round', async () => {
+    const out = await readChanged(fakeOdooFetch(busy()), cfg, 'account.move', { fields: ['name'], pageSize: 50, maxPages: 50 })
+    const ids = out.rows.map(r => r.id)
+    expect(out.done).toBe(true)
+    expect(new Set(ids).size).toBe(200)
+    expect(ids.length).toBe(200)
+    expect(out.cursor).toBe('2025-06-19 08:00:39|-1')
+  })
+
+  it('gets there across rounds of one page each, never repeating or skipping', async () => {
+    const fetch = fakeOdooFetch(busy())
+    const seen = []
+    let cursor = ''
+    for (let round = 0; round < 30; round++) {
+      const [since = '', sinceId = 0] = cursor.split('|')
+      const out = await readChanged(fetch, cfg, 'account.move', { fields: ['name'], since, sinceId, pageSize: 50, maxPages: 1 })
+      seen.push(...out.rows.map(r => r.id))
+      cursor = out.cursor || cursor
+      if (out.done) break
+    }
+    expect(new Set(seen).size).toBe(200)
+    expect(seen.length).toBe(200)
+  })
+
+  it('a later round reads only what changed after the cursor', async () => {
+    const data = busy()
+    const fetch = fakeOdooFetch(data)
+    const first = await readChanged(fetch, cfg, 'account.move', { fields: ['name'], pageSize: 50, maxPages: 50 })
+    data['account.move'].push({ id: 9001, name: 'late', write_date: '2025-06-20 00:00:00.1' })
+    const [since, sinceId] = first.cursor.split('|')
+    const next = await readChanged(fetch, cfg, 'account.move', { fields: ['name'], since, sinceId, pageSize: 50 })
+    expect(next.rows.map(r => r.id)).toEqual([9001])
   })
 })

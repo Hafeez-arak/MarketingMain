@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient'
+import { monthReadFrom, projectOrder } from './finance/finance'
 
 // ─── The Odoo mirror, read from the browser (v2) ───────────────────────────
 // 2026-10-19. odoo_records holds what the hourly round read from Odoo
@@ -28,6 +29,37 @@ export async function readModels(workspaceId, models) {
     for (const r of data || []) records[r.model].push(r.data)
     if (!data || data.length < PAGE) return records
   }
+}
+
+/**
+ * The money models, as financeFacts needs them, without reading them whole
+ * (2026-10-25: Arak's Odoo has 23,562 invoices and 56,230 analytic lines,
+ * which never finished loading). Payments, sales orders and projects are
+ * small and read as they are. Invoices come from the database narrowed to the
+ * ones the math uses (odoo_finance_moves), and analytic lines as one income
+ * and one cost line per account (odoo_analytic_totals), which sum the same.
+ * Who may read money is checked there: CEO or Finance, else none.
+ */
+export async function readMoneyRecords(workspaceId, { now = Date.now(), with: also = [] } = {}) {
+  const records = await readModels(workspaceId, [...new Set(['account.payment', 'sale.order', 'project.project', ...also])])
+  const orders = records['sale.order'] || []
+  const byId = new Map(orders.map(o => [o.id, o]))
+  const origins = [...new Set((records['project.project'] || []).map(p => projectOrder(p, orders, byId)?.name).filter(Boolean))]
+  const moves = []
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase.rpc('odoo_finance_moves', { ws: workspaceId, month_start: monthReadFrom(now), origins }).range(from, from + PAGE - 1)
+    if (error) throw new Error(error.message)
+    moves.push(...(data || []))
+    if (!data || data.length < PAGE) break
+  }
+  const { data: totals, error } = await supabase.rpc('odoo_analytic_totals', { ws: workspaceId })
+  if (error) throw new Error(error.message)
+  records['account.move'] = moves
+  records['account.analytic.line'] = (totals || []).flatMap(t => [
+    { account_id: [t.account_id], amount: Number(t.income) || 0 },
+    { account_id: [t.account_id], amount: -(Number(t.cost) || 0) },
+  ])
+  return records
 }
 
 /** When the mirror last read Odoo, which apps it found, the Odoo address, and any error. null before the first round. */

@@ -81,8 +81,8 @@ export async function syncOdoo(deps, { workspaceId, force = false }) {
     // 3. What changed, model by model.
     for (const model of Object.keys(SYNC_MODELS).filter(m => models.includes(m))) {
       const spec = SYNC_MODELS[model]
-      // "write_date|id" of the last record read (a bare date from an older
-      // round is read as id 0).
+      // "second|id": the second read up to, and the last id read inside it
+      // (-1 = all of it). See readChanged.
       const [since = '', sinceId = 0] = spec.full ? [] : String(cursors[model] || '').split('|')
       // Optional fields only where this Odoo has them: asking for one it
       // lacks fails the whole read.
@@ -96,7 +96,7 @@ export async function syncOdoo(deps, { workspaceId, force = false }) {
           ...(re ? have.filter(f => re.test(f)) : []),
         ])]
       }
-      const { rows, done } = await readChanged(deps.fetch, cfg, model, { fields, domain: spec.domain || [], since, sinceId })
+      const { rows, done, cursor, denied } = await readAllowed(deps, cfg, model, { fields, domain: spec.domain || [], since, sinceId })
       for (let i = 0; i < rows.length; i += 500) {
         await deps.db('odoo_records?on_conflict=workspace_id,model,odoo_id', {
           method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal',
@@ -105,8 +105,10 @@ export async function syncOdoo(deps, { workspaceId, force = false }) {
           })),
         })
       }
-      if (rows.length && !spec.full) cursors[model] = `${rows[rows.length - 1].write_date}|${rows[rows.length - 1].id}`
-      synced[model] = { changed: rows.length, done }
+      if (!spec.full && cursor) cursors[model] = cursor
+      // Fields Odoo would not let this user read are named, so a page that
+      // shows nothing for them can say why (stored in odoo_sync.counts).
+      synced[model] = { changed: rows.length, done, ...(denied.length ? { denied } : {}) }
     }
     // 4. Done.
     await deps.db(`odoo_sync?${ws(workspaceId)}`, {
@@ -124,6 +126,35 @@ export async function syncOdoo(deps, { workspaceId, force = false }) {
     const error = String(err?.message || err).slice(0, 400)
     await deps.db(`odoo_sync?${ws(workspaceId)}`, { method: 'PATCH', prefer: 'return=minimal', body: { last_error: error, updated_at: deps.now().toISOString() } })
     return { error }
+  }
+}
+
+// Odoo's words when a field is kept to a group this user is not in. It lists
+// the field in fields_get but refuses to read it, and the refusal fails the
+// whole read. Found live 2026-10-25: project.project's stage_id needs
+// "Use Stages on Project", which Arak's AI Agent user does not have.
+const DENIED = /do not have enough rights to access the field/i
+export const deniedFieldsIn = (message = '') => DENIED.test(message)
+  ? [...String(message).matchAll(/^- ([a-z_][a-z0-9_]*)/gim)].map(m => m[1])
+  : []
+
+/**
+ * readChanged, minus any field this user may not read: each refused field is
+ * dropped and the read asked again, so one locked field costs that field,
+ * not the model. `denied` lists what was dropped.
+ */
+async function readAllowed(deps, cfg, model, opts) {
+  let fields = opts.fields
+  const denied = []
+  for (;;) {
+    try {
+      return { ...(await readChanged(deps.fetch, cfg, model, { ...opts, fields })), denied }
+    } catch (err) {
+      const locked = deniedFieldsIn(err?.message).filter(f => fields.includes(f))
+      if (!locked.length) throw err
+      denied.push(...locked)
+      fields = fields.filter(f => !locked.includes(f))
+    }
   }
 }
 

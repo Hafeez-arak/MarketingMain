@@ -47,7 +47,8 @@ rm -rf "$data"; mkdir -p "$data"
 psql_db -At -c "select string_agg(relname, ' ' order by relname) from pg_class where relnamespace='public'::regnamespace and relkind='r'" > "$data/_tables.txt"
 psql_db -At -c "select json_object_agg(table_name, cols) from (select table_name, json_agg(column_name order by ordinal_position) cols from information_schema.columns where table_schema='public' and is_generated='NEVER' and table_name in (select relname from pg_class where relnamespace='public'::regnamespace and relkind='r') group by table_name) x" > "$data/_columns.json"
 node "$here/export.mjs" "$envfile" "$data" "$data/_tables.txt"
-node "$here/load.mjs" "$data" "$data/_columns.json" "$data/_load.sql"
+local_key="$(grep '^SUPABASE_SERVICE_ROLE_KEY=' "$repo/.env.v2" | cut -d= -f2- | tr -d "\"'")"
+node "$here/load.mjs" "$data" "$data/_columns.json" "$data/_load.sql" "$local_key"
 psql_db -f - < "$data/_load.sql" >/dev/null
 
 echo "4. checking"

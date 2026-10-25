@@ -1,5 +1,5 @@
 // ─── Turn the exported rows into one SQL file for the local database ───────
-//   node dev/v2db/prod-copy/load.mjs <dump dir> <columns.json> <out.sql>
+//   node dev/v2db/prod-copy/load.mjs <dump dir> <columns.json> <out.sql> <local service key>
 //
 // One transaction with session_replication_role = replica: no trigger fires
 // (no welcome rows, no notifications) and foreign keys are not re-checked,
@@ -7,11 +7,13 @@
 //
 // Two rows are changed on the way in, so a click in the local app can never
 // reach a production service: the n8n box URL is blanked (n8n writes to the
-// live database) and the Odoo connection loses its key and URL.
+// live database) and the Odoo connection points at the read-only gatekeeper.
 
 import fs from 'node:fs'
+import { sealSecret } from '../../../api/email/_secrets.js'
 
-const [dir, colsPath, outPath] = process.argv.slice(2)
+const [dir, colsPath, outPath, localServiceKey] = process.argv.slice(2)
+if (!localServiceKey) throw new Error('load.mjs needs the LOCAL service key (sealed secrets are sealed with it)')
 const columns = JSON.parse(fs.readFileSync(colsPath, 'utf8'))
 const LOCAL_PASSWORD = 'arak-v2-local'
 const tag = '$prodcopy$'
@@ -24,7 +26,9 @@ const lit = (v) => {
 
 const LOCAL_ONLY = {
   app_config: (r) => (r.key === 'n8n_base_url' ? { ...r, value: '' } : r),
-  lead_crm: (r) => ({ ...r, api_key: '', url: 'https://odoo-disconnected.invalid', last_error: 'Disconnected in the local copy: it pointed at the real Odoo.' }),
+  // Odoo goes through the local read-only gatekeeper (dev/v2db/odooReadOnly.mjs),
+  // which holds the real key from the export and refuses every write.
+  lead_crm: (r) => ({ ...r, api_key: sealSecret('local-read-only', localServiceKey), url: 'http://127.0.0.1:8791', last_error: '' }),
 }
 
 let sql = 'begin;\nset local session_replication_role = replica;\n'

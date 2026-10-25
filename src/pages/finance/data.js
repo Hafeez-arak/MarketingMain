@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useAuth } from '../../store/auth'
-import { readModels, readSyncState } from '../../lib/odooMirror'
+import { readMoneyRecords, readSyncState } from '../../lib/odooMirror'
 import { financeFacts, OVERDUE_DAYS, MARGIN_RED_POINTS } from '../../lib/finance/finance'
 import { arDays } from '../../lib/i18n'
 
 // The Finance pages' words and data (kept apart from the components so fast
 // refresh keeps working).
 
-const MODELS = ['account.move', 'account.payment', 'account.analytic.line', 'sale.order', 'project.project']
 
 export const FW = {
   en: {
@@ -60,7 +59,7 @@ export function useFinance() {
   const [state, setState] = useState({ data: undefined, error: null })
   const load = useCallback(() => {
     if (!ws) return
-    Promise.all([readModels(ws, MODELS), readSyncState(ws)])
+    Promise.all([readMoneyRecords(ws), readSyncState(ws)])
       .then(([records, sync]) => setState({ data: { sync, facts: sync?.last_ok_at ? financeFacts(records, { now: Date.now(), models: sync.models || [], url: sync.odoo_url || '' }) : null }, error: null }))
       .catch(err => setState({ data: null, error: String(err.message || err) }))
   }, [ws])

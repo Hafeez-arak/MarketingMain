@@ -421,6 +421,17 @@ function isolateV2() {
   }
   for (const key of V2_OUTSIDE_KEYS) if (!(key in v2)) delete process.env[key]
   for (const [key, value] of Object.entries(v2)) process.env[key] = value
+  // Zernio through the local read-only gatekeeper (2026-10-25): the app sees
+  // the real accounts and numbers, and every write stops on this Mac. The
+  // real key lives in the gatekeeper, never in the app.
+  delete process.env.ZERNIO_WORKSPACE_KEYS
+  if (!('ZERNIO_API_KEY' in v2)) {
+    process.env.ZERNIO_API_KEY = 'local-read-only'
+    process.env.ZERNIO_BASE_URL = 'http://127.0.0.1:8790/api/v1'
+  }
+  if (process.env.ZERNIO_API_KEY && !/^http:\/\/127\.0\.0\.1:\d+\//.test(process.env.ZERNIO_BASE_URL || '')) {
+    throw new Error('v2 mode: Zernio must go through the local read-only gatekeeper (dev/v2db/zernioReadOnly.mjs).')
+  }
   return v2
 }
 

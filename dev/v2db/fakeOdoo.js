@@ -82,7 +82,7 @@ export function handle(data, { service, method, args }) {
     const names = Object.keys(data).map(m => ({ id: m.length, model: m }))
     return names.filter(r => matches(r, fnArgs[0] || []))
   }
-  if (!data[model]) throw new Error(`Object ${model} doesn't exist`)
+  if (!data[model] || model === '__denied') throw new Error(`Object ${model} doesn't exist`)
   // A model's fields are whatever its records carry (an empty model checks
   // nothing). Asking for one it lacks fails as Odoo's does, so the mirror's
   // optional fields are tested for real.
@@ -91,6 +91,14 @@ export function handle(data, { service, method, args }) {
   if (data[model].length && kw.fields) {
     const unknown = kw.fields.find(f => !schema.has(f))
     if (unknown) throw new Error(`Invalid field '${unknown}' on model '${model}'`)
+    // A field kept to a group the connection's user is not in (data.__denied,
+    // { model: [field] }). The real one, 2026-10-25: project.project's stage_id
+    // needs "Use Stages on Project", which Arak's AI Agent user lacks. Odoo
+    // lists such a field in fields_get but refuses to read it, in these words.
+    const denied = (data.__denied?.[model] || []).filter(f => kw.fields.includes(f))
+    if (denied.length) {
+      throw new Error(`You do not have enough rights to access the fields "${denied.join(',')}" on Project (${model}). Please contact your system administrator.\n\nOperation: read\nUser: ${uid}\nFields:\n${denied.map(f => `- ${f} (allowed for groups 'Technical / Use Stages on Project')`).join('\n')}`)
+    }
   }
   const activeTest = kw.context?.active_test !== false
   let rows = data[model].filter(r => !activeTest || r.active !== false).filter(r => matches(r, fnArgs[0] || []))
@@ -99,7 +107,10 @@ export function handle(data, { service, method, args }) {
   rows = order(rows, kw.order || 'id')
   if (kw.limit) rows = rows.slice(0, kw.limit)
   if (fn === 'search') return rows.map(r => r.id)
-  if (fn === 'search_read') return rows.map(r => (kw.fields ? Object.fromEntries(['id', ...kw.fields].map(f => [f, r[f] ?? false])) : { ...r }))
+  // Odoo keeps write_date's fractions of a second (compared with them, sorted
+  // by them) but hands back whole seconds; so does this.
+  const whole = (r) => (typeof r.write_date === 'string' ? { ...r, write_date: r.write_date.slice(0, 19) } : r)
+  if (fn === 'search_read') return rows.map(whole).map(r => (kw.fields ? Object.fromEntries(['id', ...kw.fields].map(f => [f, r[f] ?? false])) : { ...r }))
   throw new Error(`fake Odoo: ${model}.${fn} is not supported`)
 }
 

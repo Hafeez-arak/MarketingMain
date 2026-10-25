@@ -40,6 +40,19 @@ const monthStart = now => {
   return Date.UTC(r.getUTCFullYear(), r.getUTCMonth(), 1) - RIYADH
 }
 
+/**
+ * The first invoice_date Finance needs whole: the day before this month
+ * starts in Riyadh (a day early, so no time zone can lose an invoice; the
+ * math filters exactly). For the database's narrow read (odooMoneyRecords).
+ */
+export const monthReadFrom = (now = Date.now()) =>
+  new Date(monthStart(typeof now === 'number' ? now : now.getTime()) - 86_400_000).toISOString().slice(0, 10)
+
+/** Each project's sales order, as financeFacts finds it (null when none). */
+export function projectOrder(p, orders = [], orderById = new Map(orders.map(o => [o.id, o]))) {
+  return orderById.get(m2oId(p.sale_order_id)) || orders.find(o => m2oId(o.project_id) === p.id && o.state !== 'cancel') || null
+}
+
 export const AGING = [
   { key: '0_30', max: 30, en: '0–30 days', ar: '٠–٣٠ يومًا' },
   { key: '31_60', max: 60, en: '31–60 days', ar: '٣١–٦٠ يومًا' },
@@ -129,7 +142,7 @@ export function financeFacts(records = {}, { now = Date.now(), models = [], url 
   const projects = (records['project.project'] || [])
     .filter(p => p.active !== false)
     .map(p => {
-      const so = orderById.get(m2oId(p.sale_order_id)) || orders.find(o => m2oId(o.project_id) === p.id && o.state !== 'cancel') || null
+      const so = projectOrder(p, orders, orderById)
       const own = so ? [...invoices, ...refunds].filter(m => origins(m).includes(so.name)) : []
       const sign = m => (m.move_type === 'out_refund' ? -1 : 1)
       const invoiced = own.reduce((s, m) => s + sign(m) * num(m.amount_total), 0)

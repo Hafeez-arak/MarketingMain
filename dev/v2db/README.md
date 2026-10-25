@@ -317,3 +317,29 @@ dev/v2db/prod-copy/copy-production.sh        # reads the main checkout's .env
 The structure was compared with production before the first load (one
 md5 over every public table's columns, types, nullability and defaults):
 identical, 82 tables.
+
+### Outside services, read only (2026-10-25)
+
+So the local copy shows what production shows, without being able to change
+anything outside this Mac, two small gatekeepers stand in for the outside
+services. Run both next to the app:
+
+```sh
+node dev/v2db/zernioReadOnly.mjs     # :8790  Instagram/LinkedIn via Zernio
+node dev/v2db/odooReadOnly.mjs       # :8791  arak-co.odoo.com
+npx vite --mode v2 --port 5180       # the app
+```
+
+- **Zernio.** `vite --mode v2` gives the app a dummy key and points
+  `ZERNIO_BASE_URL` at :8790. The gatekeeper holds the real key from the main
+  `.env`, passes GET requests and refuses every other method. Real accounts
+  and numbers show, so the screens show the same buttons as production (Post
+  Queue's Schedule and Post now). A click that would post gets "Local copy:
+  nothing is sent". Publishing goes through n8n anyway, and its address is
+  blank locally.
+- **Odoo.** The copy points `lead_crm` at :8791 with a dummy key. The
+  gatekeeper opens the export's sealed key with production's service key and
+  forwards only reads (search_read, read, search, search_count, fields_get…).
+  It refuses create, write, unlink, message_post and the rest. Fill the
+  mirror after each copy (about 10 rounds the first time):
+  `for i in $(seq 10); do node dev/v2db/odoo-round.mjs; done`.

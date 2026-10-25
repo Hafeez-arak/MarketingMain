@@ -189,35 +189,65 @@ export async function fieldNames(fetchFn, cfg, model) {
   return Object.keys(out || {})
 }
 
+/** "YYYY-MM-DD HH:MM:SS" one second later (Odoo's datetimes are UTC). */
+export function nextSecond(stamp) {
+  const t = Date.parse(`${String(stamp).slice(0, 19).replace(' ', 'T')}Z`)
+  return new Date(t + 1000).toISOString().slice(0, 19).replace('T', ' ')
+}
+
 /**
- * Every record of a model changed after `since` (Odoo's write_date, UTC
- * "YYYY-MM-DD HH:MM:SS"), oldest change first, a page at a time. Archived
- * records too (active_test off): a lost deal is archived in Odoo, and a
- * mirror that never saw it would count it as still open.
+ * Every record of a model changed since the cursor, a page at a time, oldest
+ * change first. Archived records too (active_test off): a lost deal is
+ * archived in Odoo, and a mirror that never saw it would count it as still
+ * open.
+ *
+ * The cursor is a SECOND and how far into it we are: `since` ("YYYY-MM-DD
+ * HH:MM:SS") with `sinceId`, the last id read inside that second, or -1 when
+ * the whole second is read. Seconds, because Odoo stores write_date with
+ * fractions but hands it back without them (found 2026-10-25: 500 of Arak's
+ * invoices share 2025-06-18 10:52:44, imported together). Comparing the
+ * whole-second value with = matches none of them and > matches all of them
+ * again, so a (write_date, id) cursor re-read the same 500 forever.
+ *
+ * So one second is read in id order (inside a second, write_date order says
+ * nothing useful about ids), and pages after it in write_date order keep only
+ * the seconds they hold completely: the last second of a full page is left
+ * for the next page to read by id. A busy second neither repeats nor skips.
  */
 export async function readChanged(fetchFn, cfg, model, { fields, domain = [], since = '', sinceId = 0, pageSize = 500, maxPages = 20 } = {}) {
   const uid = await login(fetchFn, cfg)
+  const want = [...new Set([...fields, 'id', 'write_date'])]
+  const read = (where, order) => call(fetchFn, cfg, uid, model, 'search_read', [[...where, ...domain]], {
+    fields: want, order, limit: pageSize, context: { active_test: false },
+  })
+  const second = (r) => String(r.write_date || '').slice(0, 19)
   const out = []
-  // The cursor is the last record read: its write_date AND its id, so the
-  // next round starts after it rather than at its second.
-  let cursor = since
+  let cursor = since ? String(since).slice(0, 19) : ''
   let lastId = Number(sinceId) || 0
   for (let page = 0; page < maxPages; page++) {
-    // (write_date > cursor) or (write_date = cursor and id > lastId): a page
-    // boundary inside one second's changes neither repeats nor skips a row.
-    const after = cursor
-      ? ['|', ['write_date', '>', cursor], '&', ['write_date', '=', cursor], ['id', '>', lastId]]
-      : []
-    const rows = await call(fetchFn, cfg, uid, model, 'search_read', [[...after, ...domain]], {
-      fields: [...new Set([...fields, 'id', 'write_date'])], order: 'write_date asc, id asc', limit: pageSize,
-      context: { active_test: false },
-    })
-    out.push(...rows)
-    if (rows.length < pageSize) return { rows: out, done: true }
-    cursor = rows[rows.length - 1].write_date
-    lastId = rows[rows.length - 1].id
+    // 1. Finish the second the cursor is in, by id.
+    if (cursor && lastId !== -1) {
+      const rows = await read([['write_date', '>=', cursor], ['write_date', '<', nextSecond(cursor)], ['id', '>', lastId]], 'id asc')
+      out.push(...rows)
+      if (rows.length === pageSize) { lastId = rows[rows.length - 1].id; continue }
+      lastId = -1
+      continue
+    }
+    // 2. The seconds after it, oldest first.
+    const rows = await read(cursor ? [['write_date', '>=', nextSecond(cursor)]] : [], 'write_date asc, id asc')
+    if (rows.length < pageSize) {
+      out.push(...rows)
+      if (rows.length) cursor = second(rows[rows.length - 1])
+      return { rows: out, done: true, cursor: cursor ? `${cursor}|-1` : '' }
+    }
+    // A full page: its last second may go on past it, so that second is
+    // left for step 1 (from its start) and only the seconds before it count.
+    const last = second(rows[rows.length - 1])
+    out.push(...rows.filter(r => second(r) < last))
+    cursor = last
+    lastId = 0
   }
-  return { rows: out, done: false }
+  return { rows: out, done: false, cursor: cursor ? `${cursor}|${lastId}` : '' }
 }
 
 // ─── The battle card as fields, and the lead's history (2026-10-20) ────────
