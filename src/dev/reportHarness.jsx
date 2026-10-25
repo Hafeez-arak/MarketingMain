@@ -64,7 +64,7 @@ window.fetch = async (url, init) => {
   // report is fed the same way production feeds it: a real research_runs
   // payload, captured from this workspace, findings and all.
   if (href.includes('research_runs')) {
-    return new Response(JSON.stringify(window.location.hash === '#brief-none' ? [] : withLines(runs)), {
+    return new Response(JSON.stringify(window.location.hash === '#brief-none' ? [] : withOldRefs(withLines(runs))), {
       status: 200, headers: { 'Content-Type': 'application/json' },
     })
   }
@@ -210,6 +210,37 @@ function withLines(rows) {
   }))
 }
 
+// ── `#brief-refs` / `#research-refs`: a brief stored before refs were stripped ──
+//
+// Until 2026-10-25 the synthesis wrote its internal refs into its sentences —
+// "Huda is buying presence (F19, F23, F32)." — and the page printed them. The
+// captured run happens to be clean, so this seeds every written sentence the
+// way those reports looked, to show the page strips them at render time while
+// the structured refs (and so the sources and idea bindings) still work.
+// Dev-only, applied to a copy.
+function withOldRefs(rows) {
+  if (!/^#(brief|research)-refs$/.test(window.location.hash)) return rows
+  const tag = (o, keys, cite) => ({ ...o, ...Object.fromEntries(keys.filter(k => o?.[k]).map(k => [k, `${o[k]} ${cite}`])) })
+  return rows.map(r => {
+    const b = r.report || {}
+    return {
+      ...r,
+      report: {
+        ...b,
+        headline: `${b.headline} (F3, F7)`,
+        top_three: (b.top_three || []).map(t => tag(t, ['finding', 'action'], '(F19, F23, F32)')),
+        competitor_moves: (b.competitor_moves || []).map(m => tag(m, ['what_changed', 'picture', 'effect_on_us'], '(F2; S1)')),
+        competitor_board: (b.competitor_board || []).map(c => tag(c, ['read'], '(see F4)')),
+        market_direction: (b.market_direction || []).map(m => tag(m, ['movement', 'so_what'], '(F12)')),
+        gaps: (b.gaps || []).map(g => tag(g, ['gap', 'our_position', 'suggested_response'], '(S2)')),
+        proposed_rules: (b.proposed_rules || []).map(x => tag(x, ['rule', 'detail'], '(F5, F6)')),
+        proposed_ideas: (b.proposed_ideas || []).map(i => tag(i, ['angle', 'rationale'], `(see ${i.answers || 'F1'})`)),
+        unanswered: (b.unanswered || []).map(u => (typeof u === 'string' ? `${u} (F9)` : u)),
+      },
+    }
+  })
+}
+
 // The live watchlist as it stands, so the business view can be looked at
 // against real identities rather than invented ones. Dev-only.
 const C = (subject, domain, lines, kinds, city, resolution = 'company', status = 'active') =>
@@ -297,7 +328,7 @@ function demoStore() {
 // Which report to mount. `#research` on the URL, so both can be looked at
 // without editing this file — and so the research one can be reached at all,
 // since it is the half with the real brief behind it.
-const route = window.location.hash === '#research' ? '/insights/report'
+const route = window.location.hash.startsWith('#research') ? '/insights/report'
   : window.location.hash.startsWith('#business') ? '/insights/business'
     : window.location.hash.startsWith('#brief') ? '/insights'
       : '/analytics/report'
