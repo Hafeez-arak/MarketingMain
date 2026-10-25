@@ -37,3 +37,6 @@ public/dev-clip*.mp4
 # Supabase CLI scratch (v2 runs its stack from dev/v2db)
 supabase/.temp/
 dev/v2db/supabase/.branches/
+
+# The local copy of production rows (dev/v2db/prod-copy): never committed
+dev/v2db/prod-copy/data/

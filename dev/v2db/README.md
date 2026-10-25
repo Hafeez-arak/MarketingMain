@@ -276,3 +276,44 @@ mirror and project tables. The CEO reads Marketing but cannot change it;
 the sales manager reads only the research Sales uses; Sara sees projects
 401, 403 and 405 and can record only on hers; Finance reads invoices and no
 project tasks; the sales team reads only what their app shows.
+
+## Real data: a local copy of production (2026-10-25)
+
+The owner's call: v2 is checked locally against the real rows before it goes
+anywhere near production. One command rebuilds the local database as a copy
+of production with v2's own migrations on top:
+
+```sh
+dev/v2db/prod-copy/copy-production.sh        # reads the main checkout's .env
+```
+
+- Production is only read (GET requests through PostgREST with the service
+  key, and the auth admin API). The rows land in `dev/v2db/prod-copy/data/`
+  (git-ignored) and in the local Docker database.
+- Order matters. The script builds production's structure first (the
+  baseline plus every migration on `origin/main`), then loads the rows, then
+  applies v2's own migrations (the files on this branch that are not on main).
+  Several v2 migrations fill their tables from existing rows (section access
+  from today's roles), so they have to run after the data.
+- After loading, it compares every table's row count with what was read and
+  checks every foreign key, because the load runs with triggers off.
+- **Kept out on purpose:**
+  - The secret tables (`email_mailbox_secrets`, `lead_mailbox_secrets`,
+    `lead_agent_secrets`) are not copied.
+  - `app_config.n8n_base_url` is blanked, because n8n writes to the live
+    database.
+  - The Odoo connection (`lead_crm`) loses its key and URL. Odoo-backed
+    screens (Technical, Finance, CEO tiles, battle-card history) read as "not
+    connected".
+  - `vite --mode v2` already drops the keys for Zernio, Resend, OpenRouter and
+    the other outside services, so live social numbers read as "did not
+    report".
+- **Signing in.** Everyone signs in with their real email and the local
+  password `arak-v2-local`. The auth admin API returns no password hashes, so
+  real passwords are not copied.
+- **Images.** Uploaded files stay in production Storage. Pages that show them
+  by their public URL still load them, read only.
+
+The structure was compared with production before the first load (one
+md5 over every public table's columns, types, nullability and defaults):
+identical, 82 tables.
