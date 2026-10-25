@@ -33,7 +33,7 @@ import { similarity } from './agent/memory'
 import {
   sameName, nameKey, daysTo, cleanDate, isOpenOpportunity, CLOSED_STATUSES, SOCIAL_CHANNELS,
 } from './agent/intel'
-import { ownChannelRows, actionPlan, pct } from './researchBrief'
+import { ownChannelRows, actionPlan, pct, readableReport } from './researchBrief'
 import { isRunFault, isLabel } from './agent/runFaults.js'
 
 /**
@@ -851,7 +851,9 @@ export function openItems({ runs = [], limit = 10, lookback = 6 } = {}) {
   const items = []
   for (const run of complete) {
     const date = String(run.started_at || '').slice(0, 10)
-    for (const raw of run.report.unanswered || []) {
+    // Older runs are read straight from the history, so their refs are
+    // stripped here the same way the selected report's are.
+    for (const raw of readableReport(run.report).unanswered || []) {
       const text = flat(raw)
       if (!text || isRunFault(text) || isLabel(text)) continue
       // Similarity, not equality: the same blocker is written a little

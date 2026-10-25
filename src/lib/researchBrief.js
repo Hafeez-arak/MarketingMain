@@ -23,6 +23,15 @@
 
 import { rankFindings, daysLeft, lensByKey, isTechnicalOnly } from './agent/lenses'
 import { num } from './agent/num'
+import { cleanBriefProse } from './agent/refs'
+
+/**
+ * The stored report as a reader should see it. Briefs stored before
+ * 2026-10-25 still carry refs like "(F19, F23, F32)" inside their sentences,
+ * which no screen can resolve; this strips them at render time so old reports
+ * read the same as new ones. Structured refs are untouched.
+ */
+export const readableReport = report => cleanBriefProse(report || {})
 
 /** A run that is still going. Anything else is terminal. */
 export const isRunning = run => run?.status === 'running'

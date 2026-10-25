@@ -7,7 +7,7 @@ import { RunProgress } from '../../components/RunProgress'
 import { ProspectsPanel } from './ProspectsPanel'
 import { useAuth } from '../../store/auth'
 import {
-  partitionByClock, deadlineLabel, lensStates, pct, marketDirection,
+  partitionByClock, deadlineLabel, lensStates, pct, marketDirection, readableReport,
 } from '../../lib/researchBrief'
 import {
   TEAMS, sectionVisible, forTeam, topThree, salesRows, competitorMoves, movesByLine,
@@ -843,7 +843,7 @@ function Section({ tab, children }) {
  */
 export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRun, running, now, readOnly = false }) {
   const { activeWorkspaceId, accessToken } = useAuth()
-  const report = useMemo(() => run?.report || {}, [run])
+  const report = useMemo(() => readableReport(run?.report), [run])
   const [params, setParams] = useSearchParams()
 
   const [team, setTeam] = useState(() => {
