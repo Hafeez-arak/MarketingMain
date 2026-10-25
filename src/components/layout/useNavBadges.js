@@ -11,6 +11,9 @@ import { supabase } from '../../lib/supabaseClient'
 // and Home's tiles show the same numbers from one set of reads. The reasons
 // for each are v1's, kept below.
 
+/** Fired by Team & Access after a change to who may sign in. */
+export const ACCESS_CHANGED = 'campai:access-changed'
+
 export function useNavBadges() {
   const { user, activeWorkspaceId, accessToken, isAccessAdmin } = useAuth()
 
@@ -22,8 +25,12 @@ export function useNavBadges() {
   useEffect(() => {
     if (!isAccessAdmin) return
     let cancelled = false
-    fetchPendingCount().then(n => { if (!cancelled) setPendingAccess(n) })
-    return () => { cancelled = true }
+    const count = () => fetchPendingCount().then(n => { if (!cancelled) setPendingAccess(n) })
+    void count()
+    // Team & Access says when it approved, denied or restored someone, so the
+    // count follows at once instead of at the next reload.
+    window.addEventListener(ACCESS_CHANGED, count)
+    return () => { cancelled = true; window.removeEventListener(ACCESS_CHANGED, count) }
   }, [isAccessAdmin])
 
   // Posts that need a person. An approved post whose booking failed is

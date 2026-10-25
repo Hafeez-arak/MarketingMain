@@ -1,606 +1,578 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useAuth } from '../../store/auth'
-import { Card, Button, PageHeader } from '../../components/ui/index'
+import { Button, Modal, Avatar, Skeleton, Spinner } from '../../components/ui/index'
 import {
   fetchAllAccess, approveAccess, revokeAccess,
   fetchInvites, inviteAccess, cancelInvite,
   fetchAllCompanies, fetchCompanyAssignments, setUserCompanies, setUserRole,
 } from '../../lib/access'
+import { fetchCompanySections, setSection, GRANTABLE } from '../../lib/sectionAccess'
+import { SECTIONS } from '../../lib/modules'
+import { buildPeople, filterPeople, companyChips, sameSet, ACCESS_KINDS } from '../../lib/team'
+import { useT, labelOf, ago } from '../../lib/i18n'
+import { TEAM } from './accessWords'
+import { ACCESS_CHANGED } from '../../components/layout/useNavBadges'
 
-// ─── Team & Access ─────────────────────────────────────────────────────────
-// Replaces the old Team page, which invited people into a localStorage array
-// — a form that looked like it did something and never did. This one drives
-// the real gate: public.user_access plus the approve/revoke functions.
+// ─── Admin → Team & Access (v2, redesigned 2026-10-25) ─────────────────────
+// The owner: "make it easy and UI/UX friendly". It was five stacked boxes
+// with a row of buttons on every person, and a person's sections lived on a
+// second page. Now:
 //
-// Two privileges live here and nowhere else: who is let in at all, and which
-// companies they get. Everything else — creating companies, deleting them,
-// generating, posting — is identical for every approved person inside the
-// companies they hold, so those two decisions are the whole permission model.
+//   · requests waiting for a decision sit on top, only when there are any;
+//   · one list of people, in three tabs (active, invited, no access), with
+//     search;
+//   · a person opens in a side panel holding everything about them: what they
+//     use, their companies, their sections in each company, and remove or
+//     restore;
+//   · Add person is a short dialog.
 //
-// Nothing is handed out automatically (20261004_companies_by_assignment).
-// Approving someone lets them sign in and gives them no company; the picker
-// opens on their row straight away so the two decisions still take one visit.
-// Adding by email carries its own tick-list for the same reason — an invited
-// person has no row to tick until they sign up.
+// The access model and every call are unchanged (lib/access.js,
+// lib/sectionAccess.js, lib/team.js): approve/revoke, invite, companies by
+// whole set, role, and section grants per company. Nothing is handed out
+// automatically, so approving asks for the companies in the same step.
 
-// Two kinds of access below the admin (20261013_sales_role): the marketing
-// app, or the sales team's Leads page and nothing else. A sales person holds
-// no company membership at all (20261013_sales_seats), so the marketing
-// app's data stays shut to them in the database, not just on screen.
-// A sales admin (2026-10-12) is a sales person who may also approve leads
-// into the CRM: stored as role 'sales' with leads_approver on.
-const ROLE_CHOICES = [
-  { key: 'member', label: 'Marketing app', hint: 'Everything inside the companies they get.' },
-  { key: 'sales', label: 'Sales', hint: 'The leads list only: read, call, correct.' },
-  { key: 'sales_admin', label: 'Sales admin', hint: 'Sales, plus Approve: sends a lead to Odoo.' },
-]
+const NOTICE_MS = 7000
 
-/** member | sales | sales_admin, from a user_access row or an invite. */
-const accessOf = (row) => (row.role === 'sales' ? (row.leads_approver ? 'sales_admin' : 'sales') : row.role)
-
-function RoleTag({ role }) {
-  if (role !== 'sales' && role !== 'sales_admin') return null
+/** A row of mutually exclusive choices, for levels and short options. */
+function Segmented({ options, value, onChange, disabled = false, label }) {
   return (
-    <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-1 border bg-amber-50 text-amber-800 border-amber-200 whitespace-nowrap">
-      {role === 'sales_admin' ? 'Sales admin' : 'Sales · leads only'}
+    <div role="radiogroup" aria-label={label} className="inline-flex rounded-md border border-border bg-surface-subtle p-0.5">
+      {options.map(o => {
+        const on = o.value === value
+        return (
+          <button key={o.value} type="button" role="radio" aria-checked={on} disabled={disabled} title={o.hint}
+            onClick={() => !on && onChange(o.value)}
+            className={`px-2.5 py-1 text-xs rounded transition-colors disabled:opacity-50 ${on ? 'bg-white text-text font-medium shadow-sm border border-border' : 'text-text-secondary hover:text-text border border-transparent'}`}>
+            {o.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/** The three kinds of access as cards: what each gives, said once. */
+function AccessChoice({ value, onChange, disabled = false, t }) {
+  return (
+    <div role="radiogroup" aria-label={t.usesTitle} className="grid gap-2">
+      {ACCESS_KINDS.map(k => {
+        const on = value === k
+        return (
+          <button key={k} type="button" role="radio" aria-checked={on} disabled={disabled}
+            onClick={() => !on && onChange(k)}
+            className={`text-start rounded-lg border px-3 py-2.5 transition-colors disabled:opacity-60 ${on ? 'border-text bg-surface-subtle' : 'border-border bg-white hover:bg-surface-subtle'}`}>
+            <span className="flex items-center gap-2">
+              <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center ${on ? 'border-text' : 'border-stone-300'}`}>
+                {on && <span className="w-1.5 h-1.5 rounded-full bg-text" />}
+              </span>
+              <span className="text-sm font-medium text-text">{t.access[k]}</span>
+            </span>
+            <span className="block text-xs text-text-secondary mt-0.5" style={{ paddingInlineStart: '1.375rem' }}>{t.accessHint[k]}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/** Companies as toggle pills. */
+function CompanyPills({ companies, selected, onToggle, disabled = false }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {companies.map(c => {
+        const on = selected.includes(c.id)
+        return (
+          <button key={c.id} type="button" aria-pressed={on} disabled={disabled} onClick={() => onToggle(c.id)}
+            className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs transition-colors disabled:opacity-50 ${on ? 'border-text bg-text text-white' : 'border-border bg-white text-text-secondary hover:text-text hover:border-stone-300'}`}>
+            {on
+              ? <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M20 6 9 17l-5-5" /></svg>
+              : <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14" /></svg>}
+            {c.name}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+const DOT = { approved: 'bg-green-500', pending: 'bg-yellow-500', invited: 'bg-sky-500', revoked: 'bg-stone-300' }
+function StatusDot({ status, t }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs text-text-secondary whitespace-nowrap">
+      <span className={`w-1.5 h-1.5 rounded-full ${DOT[status] || 'bg-stone-300'}`} aria-hidden="true" />
+      {t.status[status] || status}
     </span>
   )
 }
 
-function RoleChoice({ value, onChange, disabled = false }) {
+function Companies({ person, companies, t }) {
+  const c = companyChips(person, companies)
+  if (c.all) return <span className="text-xs text-text-secondary">{t.allCompanies}</span>
+  if (!c.shown.length) return <span className="text-xs text-text-tertiary">{t.noCompanies}</span>
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-      {ROLE_CHOICES.map(c => (
-        <label key={c.key}
-          className={`border px-3 py-2 cursor-pointer transition-colors ${value === c.key ? 'border-amber-400 bg-amber-50/60' : 'border-border bg-white hover:bg-surface-subtle'}`}>
-          <span className="flex items-center gap-2 text-sm font-medium text-text">
-            <input type="radio" name="access-role" value={c.key} checked={value === c.key} disabled={disabled}
-              onChange={() => onChange(c.key)} className="accent-amber-500" />
-            {c.label}
-          </span>
-          <span className="block text-[11px] text-text-tertiary mt-0.5 pl-5">{c.hint}</span>
-        </label>
-      ))}
-    </div>
-  )
-}
-
-function StatusTag({ status }) {
-  const style = {
-    approved: 'bg-sage-50 text-sage-700 border-sage-200',
-    pending:  'bg-amber-50 text-amber-700 border-amber-200',
-    revoked:  'bg-stone-100 text-stone-500 border-stone-200',
-  }[status] || 'bg-stone-100 text-stone-500 border-stone-200'
-  return (
-    <span className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-1 border ${style}`}>
-      {status}
+    <span className="flex flex-wrap items-center gap-1">
+      {c.shown.map(n => <span key={n} className="rounded border border-border bg-surface-subtle px-1.5 py-0.5 text-[11px] text-text-secondary">{n}</span>)}
+      {c.more > 0 && <span className="text-[11px] text-text-tertiary">{t.more(c.more)}</span>}
     </span>
   )
 }
 
-// The tick-list of companies, shared by the per-person picker and the
-// add-by-email form so the two can't drift into looking like different things.
-function CompanyChecklist({ companies, selected, onToggle }) {
+/** A block of the side panel. */
+function Block({ title, hint, children, aside }) {
   return (
-    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-      {companies.map(c => (
-        <label key={c.id} className="flex items-center gap-2 text-sm text-text cursor-pointer py-0.5">
-          <input
-            type="checkbox"
-            checked={selected.has(c.id)}
-            onChange={() => onToggle(c.id)}
-            className="accent-amber-500"
-          />
-          <span className="truncate">{c.name}</span>
-        </label>
-      ))}
-      {companies.length === 0 && (
-        <p className="text-sm text-text-secondary col-span-2">No companies exist yet.</p>
-      )}
-    </div>
-  )
-}
-
-function toggled(set, id) {
-  const next = new Set(set)
-  if (next.has(id)) next.delete(id); else next.add(id)
-  return next
-}
-
-// The per-person company picker. Mounted only while open, which is what
-// seeds the draft from whatever the roster says right now — reopening after
-// a save shows the saved state rather than a stale copy from first render.
-function CompanyPicker({ companies, assigned, saving, onCancel, onSave }) {
-  const [draft, setDraft] = useState(() => new Set(assigned))
-
-  function toggle(id) {
-    setDraft(prev => toggled(prev, id))
-  }
-
-  const changed =
-    draft.size !== assigned.length || assigned.some(id => !draft.has(id))
-
-  return (
-    <div className="px-6 pb-4 -mt-1">
-      <div className="border border-border bg-surface-muted p-4 space-y-3">
-        <p className="text-xs text-text-tertiary">
-          Tick every company this person should see. Unticking one removes their
-          access to it immediately — nothing they made there is deleted.
-        </p>
-        <CompanyChecklist companies={companies} selected={draft} onToggle={toggle} />
-        <div className="flex items-center gap-2 pt-1">
-          <Button size="xs" disabled={saving || !changed} onClick={() => onSave([...draft])}>
-            {saving ? 'Saving…' : 'Save companies'}
-          </Button>
-          <Button size="xs" variant="ghost" disabled={saving} onClick={onCancel}>Cancel</Button>
-          <span className="text-xs text-text-tertiary ml-auto">
-            {draft.size} of {companies.length} selected
-          </span>
+    <section className="px-5 py-4 border-b border-border space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-text">{title}</h3>
+          {hint && <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">{hint}</p>}
         </div>
+        {aside}
       </div>
-    </div>
+      {children}
+    </section>
   )
 }
 
-function PersonRow({
-  row, busy, onApprove, onRevoke, isSelf, onSetRole,
-  companies = [], assigned = null, expanded = false, onToggleCompanies, onSaveCompanies,
-}) {
-  const isAdmin = row.role === 'admin'
-  // Only an approved person has a roster to edit at all; pending and revoked
-  // people hold zero memberships by design, and the RPC refuses them.
-  const canAssign = row.status === 'approved' && assigned !== null
-  return (
-    <li className="hover:bg-surface-muted transition-colors">
-      <div className="flex items-center gap-4 px-6 py-4">
-        <div className="w-8 h-8 flex items-center justify-center text-[11px] font-bold text-white flex-shrink-0 bg-stone-500">
-          {(row.full_name || row.email || '?').charAt(0).toUpperCase()}
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-text truncate">
-            {row.full_name || row.email}
-            {isSelf && <span className="text-text-tertiary font-normal"> (you)</span>}
-          </p>
-          {row.full_name && <p className="text-xs text-text-tertiary truncate">{row.email}</p>}
-          {canAssign && (
-            <p className="text-xs text-text-tertiary truncate mt-0.5">
-              {assigned.length === 0
-                ? 'No companies yet'
-                : companies
-                    .filter(c => assigned.includes(c.id))
-                    .map(c => c.name)
-                    .join(', ')}
-            </p>
-          )}
-        </div>
-        {isAdmin && (
-          <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-1 border bg-stone-800 text-white border-stone-800">
-            Admin
-          </span>
-        )}
-        {!(row.status === 'approved' && !isAdmin && onSetRole) && <RoleTag role={accessOf(row)} />}
-        {row.status === 'approved' && !isAdmin && onSetRole && (
-          <select aria-label="Access" value={accessOf(row)} disabled={busy}
-            onChange={e => onSetRole(row, e.target.value)}
-            className="text-[11px] font-semibold text-text bg-white border border-border px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-amber-400">
-            {ROLE_CHOICES.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
-          </select>
-        )}
-        <StatusTag status={row.status} />
-        <div className="flex items-center gap-1.5 flex-shrink-0 justify-end">
-          {canAssign && (
-            <Button size="xs" variant="secondary" onClick={() => onToggleCompanies(row)}>
-              {expanded ? 'Close' : `Companies (${assigned.length})`}
-            </Button>
-          )}
-          {row.status !== 'approved' && (
-            <Button size="xs" disabled={busy} onClick={() => onApprove(row)}>
-              {row.status === 'revoked' ? 'Restore' : 'Approve'}
-            </Button>
-          )}
-          {row.status === 'pending' && (
-            <Button size="xs" variant="secondary" disabled={busy} onClick={() => onRevoke(row)}>Deny</Button>
-          )}
-          {row.status === 'approved' && !isAdmin && (
-            <Button size="xs" variant="ghost" disabled={busy} onClick={() => onRevoke(row)}>Remove</Button>
-          )}
-        </div>
-      </div>
-      {expanded && canAssign && (
-        <CompanyPicker
-          companies={companies}
-          assigned={assigned}
-          saving={busy}
-          onCancel={() => onToggleCompanies(row)}
-          onSave={ids => onSaveCompanies(row, ids)}
-        />
-      )}
-    </li>
-  )
-}
+// ─── A person's sections in one company ────────────────────────────────────
+function SectionLevels({ person, companies, me, t, lang, activeWorkspaceId }) {
+  const theirs = companies.filter(c => person.companyIds.includes(c.id))
+  const [ws, setWs] = useState(() => (person.companyIds.includes(activeWorkspaceId) ? activeWorkspaceId : theirs[0]?.id) || null)
+  const [levels, setLevels] = useState(null)
+  const [state, setState] = useState({}) // section → 'busy' | 'done' | error text
+  const [error, setError] = useState('')
 
-export function Access() {
-  const { user, isAccessAdmin, workspaces, refreshWorkspaces } = useAuth()
-  const [rows, setRows]   = useState([])
-  const [invites, setInvites] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [busyId, setBusyId]   = useState(null)
-  const [error, setError]     = useState('')
-  const [notice, setNotice]   = useState('')
-  const [confirm, setConfirm] = useState(null)  // person pending a remove/deny confirmation
-  const [newEmail, setNewEmail] = useState('')
-  const [newCompanies, setNewCompanies] = useState(() => new Set()) // ticked on the add form
-  const [newRole, setNewRole] = useState('member')                     // chosen on the add form
-  const [adding, setAdding]     = useState(false)
-  const [companies, setCompanies]     = useState([])   // every company that exists
-  const [assignments, setAssignments] = useState({})   // user_id → [workspace_id]
-  const [openCompanies, setOpenCompanies] = useState(null) // user_id whose picker is open
-
-  // Refresh after a decision. Deliberately does not flip `loading` — the
-  // list is already on screen and blanking it to a spinner for 200ms makes
-  // an approval feel like a page reload rather than a row changing state.
-  const load = useCallback(async () => {
-    const [{ rows: data, error: e }, { invites: inv }, { companies: comps }, { assignments: asg }] =
-      await Promise.all([
-        fetchAllAccess(), fetchInvites(), fetchAllCompanies(), fetchCompanyAssignments(),
-      ])
-    setRows(data)
-    setInvites(inv)
-    setCompanies(comps)
-    setAssignments(asg)
-    setError(e || '')
-  }, [])
-
-  // Initial fetch. Kept separate from `load` so the effect body has no
-  // synchronous setState in it; `loading` starts true and is cleared once.
   useEffect(() => {
-    let cancelled = false
-    Promise.all([fetchAllAccess(), fetchInvites(), fetchAllCompanies(), fetchCompanyAssignments()])
-      .then(([{ rows: data, error: e }, { invites: inv }, { companies: comps }, { assignments: asg }]) => {
-        if (cancelled) return
-        setRows(data)
-        setInvites(inv)
-        setCompanies(comps)
-        setAssignments(asg)
-        setError(e || '')
-        setLoading(false)
-      })
-      .catch(err => {
-        // Without this a failed read left both lists on "Loading…" forever.
-        if (cancelled) return
-        setError(String(err?.message || err))
-        setLoading(false)
-      })
-    return () => { cancelled = true }
-  }, [])
+    if (!ws) return
+    let off = false
+    queueMicrotask(() => { if (!off) setLevels(null) })
+    fetchCompanySections(ws).then(({ rows, error: e }) => {
+      if (off) return
+      setError(e || '')
+      setLevels(Object.fromEntries(rows.filter(r => r.user_id === person.id).map(r => [r.section, r.level])))
+    })
+    return () => { off = true }
+  }, [ws, person.id])
 
-  async function handleAdd(e) {
-    e?.preventDefault()
-    const email = newEmail.trim()
-    if (!email) return
-    setAdding(true); setError(''); setNotice('')
-    const ids = [...newCompanies]
-    const { outcome, error: err } = await inviteAccess(email, ids, newRole)
-    if (err) { setError(err); setAdding(false); return }
-    const names = companies.filter(c => ids.includes(c.id)).map(c => c.name).join(', ')
-    const what = { sales: ' (sales, leads only)', sales_admin: ' (sales admin)' }[newRole] || ''
-    // Say which of the three things happened. "Done" would leave the admin
-    // unsure whether that person can log in right now or still has to sign up.
-    setNotice({
-      approved: names
-        ? `${email} is in${what}, with ${names}.`
-        : `${email} can sign in${what}, but has no companies yet. Use Companies on their row to give them one.`,
-      invited: names
-        ? `${email} is cleared${what} and will get ${names} when they sign up. Tell them to create an account.`
-        : `${email} is cleared${what}, with no companies yet. Tell them to create an account, then use Companies on their row.`,
-      already:  `${email} already has access. Use their row to change what they see.`,
-    }[outcome] || 'Done.')
-    setNewEmail('')
-    setNewCompanies(new Set())
-    setNewRole('member')
-    await load()
-    await refreshWorkspaces()
-    setAdding(false)
+  if (!theirs.length) return <p className="text-xs text-text-tertiary">{t.sectionsNoCompany}</p>
+  const pick = async (section, level) => {
+    setState(s => ({ ...s, [section]: 'busy' }))
+    const out = await setSection(ws, person.id, section, level || null, me)
+    if (out.error) { setState(s => ({ ...s, [section]: out.error })); return }
+    setLevels(l => ({ ...l, [section]: level || undefined }))
+    setState(s => ({ ...s, [section]: 'done' }))
   }
+  const options = ['', 'view', 'work', 'manage'].map(v => ({ value: v, label: t.levels[v], hint: t.levelHint[v] }))
+  return (
+    <div className="space-y-3">
+      {theirs.length > 1 && (
+        <div className="flex items-center gap-2 text-xs text-text-secondary">
+          <span>{t.sectionsIn}</span>
+          <Segmented label={t.companiesTitle} value={ws} onChange={setWs}
+            options={theirs.map(c => ({ value: c.id, label: c.name }))} />
+        </div>
+      )}
+      {error && <p className="text-xs text-red-600" dir="auto">{error}</p>}
+      {levels === null ? <Skeleton className="h-32" /> : (
+        <ul className="divide-y divide-border rounded-lg border border-border">
+          {GRANTABLE.map(s => {
+            const st = state[s]
+            return (
+              <li key={s} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                <span className="text-sm text-text">{labelOf(SECTIONS.find(x => x.key === s), lang) || s}</span>
+                <span className="flex items-center gap-2">
+                  {st === 'busy' && <Spinner size="sm" />}
+                  {st === 'done' && <span className="text-[11px] text-green-700" aria-live="polite">{t.saved}</span>}
+                  {st && st !== 'busy' && st !== 'done' && <span className="text-[11px] text-red-600 max-w-[8rem] truncate" title={st}>{st}</span>}
+                  <Segmented label={s} value={levels[s] || ''} options={options} disabled={st === 'busy'} onChange={v => pick(s, v)} />
+                </span>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
+  )
+}
 
-  async function handleCancelInvite(email) {
-    setBusyId(email); setError(''); setNotice('')
-    const err = await cancelInvite(email)
+// ─── The side panel: everything about one person ───────────────────────────
+function PersonPanel({ person, companies, me, activeWorkspaceId, onClose, act, t, lang, dir }) {
+  const [draft, setDraft] = useState(person.companyIds)
+  const [access, setAccess] = useState(person.access === 'admin' ? 'member' : person.access)
+  const [busy, setBusy] = useState('')
+  const [confirm, setConfirm] = useState(null) // 'remove' | 'deny'
+  const closeRef = useRef(null)
+
+  useEffect(() => {
+    closeRef.current?.focus()
+    const esc = e => { if (e.key === 'Escape' && !confirm) onClose() }
+    document.addEventListener('keydown', esc)
+    return () => document.removeEventListener('keydown', esc)
+  }, [onClose, confirm])
+
+  const run = async (key, fn) => { setBusy(key); try { await fn() } finally { setBusy('') } }
+  const toggle = id => setDraft(d => (d.includes(id) ? d.filter(x => x !== id) : [...d, id]))
+  const isAdmin = person.access === 'admin'
+  const dirty = !sameSet(draft, person.companyIds)
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex" dir={dir} lang={lang}>
+      <button type="button" aria-label={t.close} onClick={onClose} className="flex-1" style={{ background: 'rgba(9,9,11,0.32)' }} />
+      <aside role="dialog" aria-modal="true" aria-label={person.name}
+        className="w-full max-w-md h-full bg-white border-s border-border shadow-dropdown flex flex-col">
+        <header className="flex items-start gap-3 px-5 py-4 border-b border-border">
+          <Avatar name={person.name} size="lg" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-text truncate">{person.name}{person.isMe && <span className="font-normal text-text-tertiary"> · {t.you}</span>}</p>
+            <p className="text-xs text-text-tertiary truncate" dir="ltr">{person.email}</p>
+            <div className="mt-1.5 flex items-center gap-3">
+              <StatusDot status={person.status} t={t} />
+              <span className="text-xs text-text-secondary">{t.access[person.access]}</span>
+            </div>
+          </div>
+          <button ref={closeRef} type="button" onClick={onClose} aria-label={t.close}
+            className="w-8 h-8 flex items-center justify-center rounded-md text-text-tertiary hover:text-text hover:bg-surface-subtle">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
+        </header>
+
+        <div className="flex-1 overflow-y-auto scrollbar-thin">
+          {/* ── Waiting for a decision: choose, then approve in one step ── */}
+          {person.status === 'pending' && (
+            <>
+              <div className="px-5 pt-4">
+                <p className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-900">{t.pendingNote}</p>
+              </div>
+              <Block title={t.usesTitle}><AccessChoice value={access} onChange={setAccess} t={t} disabled={!!busy} /></Block>
+              <Block title={t.companiesTitle} hint={t.companiesLater}>
+                <CompanyPills companies={companies} selected={draft} onToggle={toggle} disabled={!!busy} />
+              </Block>
+            </>
+          )}
+
+          {/* ── Invited by email, no account yet ── */}
+          {person.status === 'invited' && (
+            <Block title={t.companiesTitle} hint={t.invitedNote}>
+              <Companies person={person} companies={companies} t={t} />
+            </Block>
+          )}
+
+          {/* ── No access ── */}
+          {person.status === 'revoked' && <Block title={t.status.revoked} hint={t.removedNote} />}
+
+          {/* ── Active ── */}
+          {person.status === 'approved' && (
+            <>
+              <Block title={t.usesTitle} hint={isAdmin ? t.adminNote : null}>
+                {isAdmin
+                  ? <p className="text-sm text-text">{t.access.admin} · <span className="text-text-secondary">{t.accessHint.admin}</span></p>
+                  : <AccessChoice value={person.access} t={t} disabled={!!busy}
+                      onChange={k => run('role', () => act.setRole(person, k))} />}
+              </Block>
+              {!isAdmin && (
+                <Block title={t.companiesTitle} hint={t.companiesHint}
+                  aside={<span className="text-[11px] text-text-tertiary whitespace-nowrap">{t.selected(draft.length, companies.length)}</span>}>
+                  <CompanyPills companies={companies} selected={draft} onToggle={toggle} disabled={busy === 'companies'} />
+                  {dirty && (
+                    <div className="flex items-center gap-2">
+                      <Button size="xs" disabled={!!busy} onClick={() => run('companies', () => act.saveCompanies(person, draft))}>
+                        {busy === 'companies' ? t.saving : t.save}
+                      </Button>
+                      <Button size="xs" variant="ghost" disabled={!!busy} onClick={() => setDraft(person.companyIds)}>{t.cancel}</Button>
+                    </div>
+                  )}
+                </Block>
+              )}
+              <Block title={t.sectionsTitle} hint={person.access === 'member' && person.companyIds.length ? t.sectionsHint : null}>
+                {isAdmin ? <p className="text-xs text-text-secondary">{t.sectionsAdmin}</p>
+                  : person.access !== 'member' ? <p className="text-xs text-text-secondary">{t.sectionsSales}</p>
+                  : <SectionLevels key={person.companyIds.join(',')} person={person} companies={companies} me={me} t={t} lang={lang} activeWorkspaceId={activeWorkspaceId} />}
+              </Block>
+              {!isAdmin && !person.isMe && (
+                <Block title={t.dangerTitle} hint={t.dangerBody}>
+                  <Button size="sm" variant="danger" disabled={!!busy} onClick={() => setConfirm('remove')}>{t.remove}</Button>
+                </Block>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* ── The panel's main action, where it is the point of opening it ── */}
+        {(person.status === 'pending' || person.status === 'invited' || person.status === 'revoked') && (
+          <footer className="flex items-center gap-2 px-5 py-3 border-t border-border bg-white">
+            {person.status === 'pending' && (
+              <>
+                <Button className="flex-1 justify-center" disabled={!!busy} onClick={() => run('approve', () => act.approve(person, access, draft))}>
+                  {busy === 'approve' ? <Spinner size="sm" /> : null}{t.approveWith}
+                </Button>
+                <Button variant="secondary" disabled={!!busy} onClick={() => setConfirm('deny')}>{t.deny}</Button>
+              </>
+            )}
+            {person.status === 'invited' && (
+              <Button variant="secondary" className="flex-1 justify-center" disabled={!!busy}
+                onClick={() => run('cancel', () => act.cancelInvite(person))}>{t.cancelInvite}</Button>
+            )}
+            {person.status === 'revoked' && (
+              <Button className="flex-1 justify-center" disabled={!!busy} onClick={() => run('restore', () => act.restore(person))}>
+                {busy === 'restore' ? <Spinner size="sm" /> : null}{t.restore}
+              </Button>
+            )}
+          </footer>
+        )}
+      </aside>
+
+      <Modal open={!!confirm} onClose={() => setConfirm(null)} width="max-w-sm"
+        title={confirm === 'deny' ? t.denyQ(person.name) : t.removeQ(person.name)}>
+        <div className="p-5 space-y-4" dir={dir}>
+          <p className="text-sm text-text-secondary leading-relaxed">{confirm === 'deny' ? t.denyBody : t.dangerBody}</p>
+          <div className="flex gap-2 justify-end">
+            <Button variant="secondary" onClick={() => setConfirm(null)}>{t.cancel}</Button>
+            <Button variant="danger" disabled={!!busy}
+              onClick={() => run('revoke', async () => { await act.revoke(person, confirm); setConfirm(null) })}>
+              {busy === 'revoke' ? <Spinner size="sm" /> : null}{confirm === 'deny' ? t.deny : t.remove}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    </div>,
+    document.body,
+  )
+}
+
+// ─── Add person ────────────────────────────────────────────────────────────
+function AddPerson({ open, onClose, companies, onAdd, t, dir }) {
+  const [email, setEmail] = useState('')
+  const [access, setAccess] = useState('member')
+  const [ids, setIds] = useState([])
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const reset = () => { setEmail(''); setAccess('member'); setIds([]); setError('') }
+  const submit = async e => {
+    e.preventDefault()
+    if (!email.trim()) return
+    setBusy(true); setError('')
+    const err = await onAdd(email.trim(), access, ids)
+    setBusy(false)
     if (err) setError(err)
-    await load()
-    setBusyId(null)
+    else { reset(); onClose() }
   }
+  return (
+    <Modal open={open} onClose={() => { if (!busy) { reset(); onClose() } }} title={t.addTitle} width="max-w-md">
+      <form onSubmit={submit} className="p-5 space-y-4" dir={dir}>
+        <label className="block">
+          <span className="text-xs font-medium text-text">{t.email}</span>
+          <input type="email" required autoFocus value={email} onChange={e => setEmail(e.target.value)} placeholder={t.emailPh} dir="ltr"
+            className="mt-1 w-full rounded-md border border-border bg-white px-3 py-2 text-sm text-text focus:outline-none focus:border-stone-400 focus:ring-2 focus:ring-stone-200" />
+          <span className="block text-[11px] text-text-tertiary mt-1">{t.addHint}</span>
+        </label>
+        <div>
+          <p className="text-xs font-medium text-text mb-1.5">{t.usesTitle}</p>
+          <AccessChoice value={access} onChange={setAccess} t={t} disabled={busy} />
+        </div>
+        {companies.length > 0 && (
+          <div>
+            <p className="text-xs font-medium text-text">{t.companiesTitle}</p>
+            <p className="text-[11px] text-text-tertiary mb-1.5">{t.companiesLater}</p>
+            <CompanyPills companies={companies} selected={ids} disabled={busy}
+              onToggle={id => setIds(s => (s.includes(id) ? s.filter(x => x !== id) : [...s, id]))} />
+          </div>
+        )}
+        {error && <p className="text-xs text-red-600" dir="auto">{error}</p>}
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="secondary" disabled={busy} onClick={() => { reset(); onClose() }}>{t.cancel}</Button>
+          <Button type="submit" disabled={busy || !email.trim()}>{busy ? t.adding : t.add}</Button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
 
-  async function handleApprove(row) {
-    setBusyId(row.user_id); setError(''); setNotice('')
-    const e = await approveAccess(row.user_id)
-    if (e) setError(e)
-    else {
-      // Approval gives no company, so the next decision is put in front of
-      // the admin instead of being left for them to remember.
-      setNotice(`${row.full_name || row.email} can sign in now. Tick the companies they should see.`)
-      setOpenCompanies(row.user_id)
+// ─── The page ──────────────────────────────────────────────────────────────
+export function Access() {
+  const { user, isAccessAdmin, refreshWorkspaces, activeWorkspaceId } = useAuth()
+  const { t, lang, dir } = useT(TEAM)
+  const [data, setData] = useState(null) // { rows, invites, companies, assignments }
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [tab, setTab] = useState('active')
+  const [query, setQuery] = useState('')
+  const [openId, setOpenId] = useState(null)
+  const [adding, setAdding] = useState(false)
+
+  const load = useCallback(async () => {
+    try {
+      const [acc, inv, comp, asg] = await Promise.all([fetchAllAccess(), fetchInvites(), fetchAllCompanies(), fetchCompanyAssignments()])
+      setError(acc.error || comp.error || asg.error || inv.error || '')
+      setData({ rows: acc.rows, invites: inv.invites, companies: comp.companies, assignments: asg.assignments })
+    } catch (err) {
+      setError(String(err?.message || err))
+      setData(d => d || { rows: [], invites: [], companies: [], assignments: {} })
     }
+  }, [])
+  useEffect(() => { if (isAccessAdmin) queueMicrotask(load) }, [load, isAccessAdmin])
+
+  // A notice says what just happened, then goes.
+  useEffect(() => {
+    if (!notice) return
+    const id = setTimeout(() => setNotice(''), NOTICE_MS)
+    return () => clearTimeout(id)
+  }, [notice])
+
+  const companies = useMemo(() => data?.companies || [], [data])
+  const people = useMemo(() => (data ? buildPeople({ ...data, me: user?.id }) : null), [data, user?.id])
+  const all = people ? [...people.pending, ...people.active, ...people.invited, ...people.removed] : []
+  const open = all.find(p => p.id === openId) || null
+  const names = ids => companies.filter(c => ids.includes(c.id)).map(c => c.name).join(', ')
+
+  // Every action: do it, say what happened (or why not), reload the list.
+  // Your own company list (the switcher) is re-read only when the change was
+  // to you: re-reading it puts the whole app into loading, which unmounted
+  // this page and lost the open panel and the notice.
+  const after = async (err, ok, p = null) => {
+    if (err) { setError(err); return false }
+    setError(''); setNotice(ok)
+    window.dispatchEvent(new Event(ACCESS_CHANGED))
     await load()
-    // Approving can change the caller's own view when they are also the one
-    // being restored, and always changes the roster count — cheap to resync.
-    await refreshWorkspaces()
-    setBusyId(null)
+    if (p?.isMe) await refreshWorkspaces?.()
+    return true
+  }
+  const act = {
+    async approve(p, access, ids) {
+      let err = await approveAccess(p.id)
+      if (!err && access !== 'member') err = await setUserRole(p.id, access)
+      if (!err) err = await setUserCompanies(p.id, ids)
+      await after(err, t.done.approvedNow(p.name) + (ids.length ? ` ${t.done.companies(p.name, names(ids))}` : ''), p)
+    },
+    async revoke(p, why) {
+      const ok = await after(await revokeAccess(p.id), why === 'deny' ? t.done.denied(p.name) : t.done.removed(p.name), p)
+      if (ok) setOpenId(null)
+    },
+    async restore(p) { await after(await approveAccess(p.id), t.done.restored(p.name), p) },
+    async setRole(p, access) { await after(await setUserRole(p.id, access), t.done.role(p.name, t.access[access]), p) },
+    async saveCompanies(p, ids) { await after(await setUserCompanies(p.id, ids), t.done.companies(p.name, names(ids)), p) },
+    async cancelInvite(p) {
+      const ok = await after(await cancelInvite(p.email), t.done.inviteCancelled(p.email))
+      if (ok) setOpenId(null)
+    },
+  }
+  const add = async (email, access, ids) => {
+    const { outcome, error: err } = await inviteAccess(email, ids, access)
+    if (err) return err
+    const c = names(ids)
+    await after(null, outcome === 'already' ? t.done.already(email) : outcome === 'invited' ? t.done.invited(email, c) : t.done.approved(email, c))
+    setTab(outcome === 'invited' ? 'invited' : 'active')
+    return null
   }
 
-  async function handleSaveCompanies(row, ids) {
-    setBusyId(row.user_id); setError(''); setNotice('')
-    const e = await setUserCompanies(row.user_id, ids)
-    if (e) { setError(e); setBusyId(null); return }
-    const names = companies.filter(c => ids.includes(c.id)).map(c => c.name)
-    setNotice(
-      names.length === 0
-        ? `${row.full_name || row.email} now has no companies. They can sign in but will see nothing until you assign one.`
-        : `${row.full_name || row.email} now has ${names.join(', ')}.`,
-    )
-    setOpenCompanies(null)
-    await load()
-    // Assigning to yourself changes your own switcher; cheap enough to resync
-    // either way rather than guess which case this was.
-    await refreshWorkspaces()
-    setBusyId(null)
-  }
-
-  async function handleSetRole(row, role) {
-    if (role === accessOf(row)) return
-    setBusyId(row.user_id); setError(''); setNotice('')
-    const e = await setUserRole(row.user_id, role)
-    if (e) setError(e)
-    else setNotice(`${row.full_name || row.email} ${{
-      sales: 'now sees the leads only, for the same companies',
-      sales_admin: 'is now a sales admin: the leads, plus Approve into Odoo, for the same companies',
-      member: 'now has the marketing app, for the same companies',
-    }[role]}. They see the change the next time they open the app.`)
-    await load()
-    setBusyId(null)
-  }
-
-  async function handleRevoke(row) {
-    setBusyId(row.user_id); setError('')
-    const e = await revokeAccess(row.user_id)
-    if (e) setError(e)
-    await load()
-    setBusyId(null)
-    setConfirm(null)
-  }
-
-  // Non-admins get the roster as a plain read — RLS already limits them to
-  // their own row, so rather than render a one-row "team" list that looks
-  // broken, tell them where the control actually lives.
   if (!isAccessAdmin) {
     return (
-      <div className="max-w-3xl space-y-4">
-        <PageHeader title="Team & Access" subtitle="Who can use this application." />
-        <Card className="p-6">
-          <p className="text-sm text-text-secondary leading-relaxed">
-            You have full access to the {workspaces.length === 1 ? 'company' : `${workspaces.length} companies`} in
-            your switcher — creating, editing, generating, scheduling, and
-            publishing all work the same for everyone on the team.
-          </p>
-          <p className="text-sm text-text-secondary leading-relaxed mt-3">
-            Adding people, removing them, and deciding which companies each
-            person gets are the actions reserved for the administrator. Ask
-            them and it takes about ten seconds.
-          </p>
-        </Card>
+      <div className="max-w-2xl" dir={dir} lang={lang}>
+        <h1 className="text-lg font-semibold text-text">{t.notAdminTitle}</h1>
+        <p className="mt-2 text-sm text-text-secondary leading-relaxed">{t.notAdminBody}</p>
       </div>
     )
   }
 
-  const pending  = rows.filter(r => r.status === 'pending')
-  const approved = rows.filter(r => r.status === 'approved')
-  // The lists could not be read at all (as opposed to an action failing on a
-  // list that is on screen): say so rather than "No requests waiting".
-  const unread = !loading && !!error && rows.length === 0
-  const removed  = rows.filter(r => r.status === 'revoked')
+  const list = people ? filterPeople(people[tab], query, companies) : []
 
   return (
-    <div className="max-w-3xl space-y-4">
-      <PageHeader
-        title="Team & Access"
-        subtitle={loading || unread
-          ? 'Who can sign in, and which companies each of them gets.'
-          : `Who can sign in, and which of the ${companies.length} ${companies.length === 1 ? 'company' : 'companies'} each of them gets.`}
-      />
-
-      {error && (
-        <div className="border border-red-200 bg-red-50/60 px-5 py-3">
-          <p className="text-xs text-red-600">{error}</p>
+    <div className="max-w-5xl space-y-5" dir={dir} lang={lang}>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-lg font-semibold text-text">{t.title}</h1>
+          <p className="text-sm text-text-secondary mt-0.5">{t.subtitle}</p>
         </div>
-      )}
+        <Button onClick={() => setAdding(true)}>
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
+          {t.add}
+        </Button>
+      </div>
+
       {notice && (
-        <div className="border border-sage-200 bg-sage-50/60 px-5 py-3">
-          <p className="text-xs text-sage-700">{notice}</p>
+        <div role="status" className="flex items-start justify-between gap-3 rounded-lg border border-green-200 bg-green-50 px-4 py-2.5 text-sm text-green-800">
+          <span dir="auto">{notice}</span>
+          <button type="button" onClick={() => setNotice('')} aria-label={t.close} className="text-green-700 hover:text-green-900">×</button>
         </div>
       )}
+      {error && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700" dir="auto">{people ? error : t.loadFailed(error)}</div>}
 
-      {/* Add by email. The reactive half of this page (approving requests)
-          only works once someone has signed up and is waiting; teams
-          normally grow the other way round — the person is hired, and access
-          is arranged before they ever open the app. */}
-      <Card className="overflow-hidden">
-        <div className="px-5 py-4 border-b border-border">
-          <h3 className="font-semibold text-text text-sm">Add someone</h3>
-          <p className="text-xs text-text-tertiary mt-0.5">
-            Works whether or not they have an account yet. Nothing is emailed — you'll still need to tell them to sign up.
-          </p>
-        </div>
-        <form onSubmit={handleAdd} className="px-5 py-4 space-y-3">
-          <div className="flex gap-2">
-            <input
-              type="email"
-              value={newEmail}
-              onChange={e => setNewEmail(e.target.value)}
-              placeholder="name@company.com"
-              className="flex-1 border border-border bg-white text-text text-sm px-3.5 py-2 focus:outline-none focus:ring-1 focus:ring-amber-400"
-            />
-            <Button type="submit" size="sm" disabled={!newEmail.trim() || adding}>
-              {adding ? 'Adding…' : 'Add'}
-            </Button>
+      {/* ── Waiting for you ── */}
+      {people?.pending.length > 0 && (
+        <section className="rounded-xl border border-amber-200 bg-amber-50/50">
+          <div className="px-4 pt-3 pb-2">
+            <h2 className="text-sm font-semibold text-text">{t.waitingTitle(people.pending.length)}</h2>
+            <p className="text-xs text-text-secondary">{t.waitingBody}</p>
           </div>
-          <div>
-            <p className="text-xs text-text-tertiary mb-1.5">What they get</p>
-            <RoleChoice value={newRole} onChange={setNewRole} disabled={adding} />
-          </div>
-          {!loading && companies.length > 0 && (
-            <div>
-              <p className="text-xs text-text-tertiary mb-1.5">
-                Companies they should see{newRole !== 'member' ? ' the leads of' : ''}. Leave all unticked to decide later.
-              </p>
-              <CompanyChecklist
-                companies={companies}
-                selected={newCompanies}
-                onToggle={id => setNewCompanies(prev => toggled(prev, id))}
-              />
-            </div>
-          )}
-        </form>
-      </Card>
-
-      {/* People cleared but not yet signed up. Shown separately from the
-          roster because they hold no access today — an invite is a promise,
-          not a membership, and merging the two lists would overstate it. */}
-      {invites.length > 0 && (
-        <Card className="overflow-hidden">
-          <div className="px-5 py-4 border-b border-border">
-            <h3 className="font-semibold text-text text-sm">Cleared, waiting to sign up</h3>
-            <p className="text-xs text-text-tertiary mt-0.5">
-              No account yet. They get in the moment they create one, with the companies listed.
-            </p>
-          </div>
-          <ul className="divide-y divide-border">
-            {invites.map(inv => (
-              <li key={inv.email} className="flex items-center gap-4 px-6 py-3.5 hover:bg-surface-muted transition-colors">
-                <div className="w-8 h-8 flex items-center justify-center text-[11px] font-bold text-white flex-shrink-0 bg-stone-400">
-                  {inv.email.charAt(0).toUpperCase()}
-                </div>
+          <ul className="divide-y divide-amber-100">
+            {people.pending.map(p => (
+              <li key={p.id} className="flex items-center gap-3 px-4 py-2.5">
+                <Avatar name={p.name} size="sm" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm text-text truncate">{inv.email}</p>
-                  <p className="text-xs text-text-tertiary truncate mt-0.5">
-                    {companies.filter(c => (inv.workspace_ids || []).includes(c.id)).map(c => c.name).join(', ')
-                      || 'No companies yet'}
-                  </p>
+                  <p className="text-sm text-text truncate">{p.name}</p>
+                  <p className="text-xs text-text-tertiary truncate"><span dir="ltr">{p.email}</span>{p.at ? ` · ${t.asked(ago(p.at, lang))}` : ''}</p>
                 </div>
-                <RoleTag role={inv.role} />
-                <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-1 border bg-sky-50 text-sky-700 border-sky-200">
-                  Invited
-                </span>
-                <Button size="xs" variant="ghost" disabled={busyId === inv.email}
-                  onClick={() => handleCancelInvite(inv.email)}>
-                  Cancel
-                </Button>
+                <Button size="xs" onClick={() => setOpenId(p.id)}>{t.review}</Button>
               </li>
             ))}
           </ul>
-        </Card>
+        </section>
       )}
 
-      {/* Requests waiting on a decision. Kept at the top and given the amber
-          treatment because this is the only thing on the page that is
-          waiting on the reader. */}
-      <Card className="overflow-hidden">
-        <div className="px-5 py-4 border-b border-border flex items-center justify-between gap-4">
-          <div>
-            <h3 className="font-semibold text-text text-sm">Access requests</h3>
-            <p className="text-xs text-text-tertiary mt-0.5">
-              Anyone who signs up lands here first. They can't see a single row of data until you approve.
-            </p>
+      {/* ── Everyone else ── */}
+      <section className="rounded-xl border border-border bg-white overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-border">
+          <div role="tablist" className="flex gap-1">
+            {['active', 'invited', 'removed'].map(k => (
+              <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
+                className={`rounded-md px-3 py-1.5 text-sm transition-colors ${tab === k ? 'bg-surface-subtle text-text font-medium' : 'text-text-secondary hover:text-text'}`}>
+                {t.tabs[k]}{people ? <span className="ms-1.5 text-xs text-text-tertiary">{people[k].length}</span> : null}
+              </button>
+            ))}
           </div>
-          {pending.length > 0 && (
-            <span className="text-[11px] font-bold px-2 py-1 bg-amber-100 text-amber-800 border border-amber-200">
-              {pending.length}
-            </span>
-          )}
+          <div className="relative w-full sm:w-72">
+            <svg className="absolute top-1/2 -translate-y-1/2 start-2.5 w-4 h-4 text-text-tertiary" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+            <input type="search" value={query} onChange={e => setQuery(e.target.value)} placeholder={t.search} aria-label={t.search}
+              className="w-full rounded-md border border-border bg-white py-1.5 pe-3 ps-8 text-sm text-text focus:outline-none focus:border-stone-400 focus:ring-2 focus:ring-stone-200" />
+          </div>
         </div>
-        {loading ? (
-          <div className="px-6 py-8 text-center text-xs text-text-tertiary">Loading…</div>
-        ) : unread ? (
-          <div className="px-6 py-8 text-center text-sm text-text-secondary">Not loaded: see the error above.</div>
-        ) : pending.length === 0 ? (
-          <div className="px-6 py-8 text-center text-sm text-text-secondary">No requests waiting.</div>
+
+        <div className="hidden sm:grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.6fr)_7rem_1rem] gap-4 px-4 py-2 text-[11px] font-medium text-text-tertiary border-b border-border">
+          <span>{t.cols.person}</span><span>{t.cols.uses}</span><span>{t.cols.companies}</span><span>{t.cols.status}</span><span />
+        </div>
+
+        {people === null ? (
+          <div className="p-4 space-y-2">{[0, 1, 2, 3].map(i => <Skeleton key={i} className="h-11" />)}</div>
+        ) : list.length === 0 ? (
+          <p className="px-4 py-10 text-center text-sm text-text-secondary">{query.trim() ? t.noMatch(query.trim()) : t.empty[tab]}</p>
         ) : (
-          <ul className="divide-y divide-border bg-amber-50/30">
-            {pending.map(row => (
-              <PersonRow key={row.user_id} row={row} busy={busyId === row.user_id}
-                onApprove={handleApprove} onRevoke={p => setConfirm({ ...p, action: 'deny' })} />
+          <ul className="divide-y divide-border">
+            {list.map(p => (
+              <li key={p.id}>
+                <button type="button" onClick={() => setOpenId(p.id)}
+                  className="w-full text-start grid grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.6fr)_7rem_1rem] items-center gap-x-4 gap-y-1 px-4 py-3 hover:bg-surface-subtle focus:outline-none focus-visible:bg-surface-subtle transition-colors">
+                  <span className="flex items-center gap-3 min-w-0">
+                    <Avatar name={p.name} size="md" />
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-text truncate">{p.name}{p.isMe && <span className="font-normal text-text-tertiary"> · {t.you}</span>}</span>
+                      <span className="block text-xs text-text-tertiary truncate" dir="ltr">{p.email}</span>
+                    </span>
+                  </span>
+                  <span className="hidden sm:block text-sm text-text-secondary truncate">{t.access[p.access]}</span>
+                  <span className="hidden sm:block min-w-0"><Companies person={p} companies={companies} t={t} /></span>
+                  <span className="sm:block"><StatusDot status={p.status} t={t} /></span>
+                  <svg className="hidden sm:block w-4 h-4 text-text-tertiary rtl:rotate-180" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6" /></svg>
+                </button>
+              </li>
             ))}
           </ul>
         )}
-      </Card>
+      </section>
 
-      {/* Everyone with access */}
-      <Card className="overflow-hidden">
-        <div className="px-5 py-4 border-b border-border">
-          <h3 className="font-semibold text-text text-sm">People with access</h3>
-          <p className="text-xs text-text-tertiary mt-0.5">
-            Marketing app: everything inside the companies they hold. Sales: the leads list for those companies, nothing else. Sales admin: the same, plus Approve into Odoo. Use Companies to change who gets what.
-          </p>
-        </div>
-        {loading ? (
-          <div className="px-6 py-8 text-center text-xs text-text-tertiary">Loading…</div>
-        ) : unread ? (
-          <div className="px-6 py-8 text-center text-sm text-text-secondary">Not loaded: see the error above.</div>
-        ) : (
-          <ul className="divide-y divide-border">
-            {approved.map(row => (
-              <PersonRow key={row.user_id} row={row} busy={busyId === row.user_id}
-                isSelf={row.user_id === user?.id}
-                companies={companies}
-                assigned={assignments[row.user_id] || []}
-                expanded={openCompanies === row.user_id}
-                onToggleCompanies={p => setOpenCompanies(openCompanies === p.user_id ? null : p.user_id)}
-                onSaveCompanies={handleSaveCompanies}
-                onSetRole={handleSetRole}
-                onApprove={handleApprove} onRevoke={p => setConfirm({ ...p, action: 'remove' })} />
-            ))}
-          </ul>
-        )}
-      </Card>
-
-      {/* Previously removed / denied — kept visible so restoring someone is a
-          click rather than asking them to sign up again. */}
-      {removed.length > 0 && (
-        <Card className="overflow-hidden">
-          <div className="px-5 py-4 border-b border-border">
-            <h3 className="font-semibold text-text text-sm">No access</h3>
-            <p className="text-xs text-text-tertiary mt-0.5">Denied or removed. Their account still exists — restoring is one click.</p>
-          </div>
-          <ul className="divide-y divide-border">
-            {removed.map(row => (
-              <PersonRow key={row.user_id} row={row} busy={busyId === row.user_id}
-                onApprove={handleApprove} onRevoke={() => {}} />
-            ))}
-          </ul>
-        </Card>
+      {open && (
+        <PersonPanel key={`${open.id}:${open.status}:${open.access}:${open.companyIds.join(',')}`} person={open} companies={companies}
+          me={user?.id} activeWorkspaceId={activeWorkspaceId} onClose={() => setOpenId(null)} act={act} t={t} lang={lang} dir={dir} />
       )}
-
-      {confirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(28,35,33,0.45)' }}>
-          <div className="bg-white shadow-dropdown w-full max-w-sm border border-border animate-fade-scale p-6 space-y-4">
-            <h3 className="font-semibold text-text text-sm">
-              {confirm.action === 'deny' ? 'Deny' : 'Remove'} {confirm.full_name || confirm.email}?
-            </h3>
-            <p className="text-sm text-text-secondary leading-relaxed">
-              {confirm.action === 'deny'
-                ? 'They stay signed up but see nothing. You can approve them later without them re-requesting.'
-                : 'They lose access to every company immediately. Nothing they created is deleted, and you can restore them at any time.'}
-            </p>
-            <div className="flex gap-3 pt-1">
-              <Button variant="secondary" className="flex-1 justify-center" onClick={() => setConfirm(null)}>Cancel</Button>
-              <Button variant="danger" className="flex-1 justify-center"
-                disabled={busyId === confirm.user_id}
-                onClick={() => handleRevoke(confirm)}>
-                {busyId === confirm.user_id ? 'Working…' : (confirm.action === 'deny' ? 'Deny' : 'Remove')}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <AddPerson open={adding} onClose={() => setAdding(false)} companies={companies} onAdd={add} t={t} dir={dir} />
     </div>
   )
 }

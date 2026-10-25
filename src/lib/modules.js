@@ -89,7 +89,7 @@ export const SECTIONS = [
     blurb: 'Who can sign in, and which sections each person gets.',
     blurbAr: 'من يمكنه الدخول، وأي الأقسام يحصل عليها كل شخص.',
     pages: [
-      { to: '/admin/team', label: 'Team & Access', ar: 'الفريق والصلاحيات', icon: 'users', badge: 'pendingAccess' },
+      { to: '/admin/team', label: 'Team & Access', ar: 'الفريق والصلاحيات', icon: 'users', badge: 'pendingAccess', translated: true },
       { to: '/admin/sections', label: 'Section access', ar: 'صلاحيات الأقسام', icon: 'grid', translated: true },
     ],
   },
