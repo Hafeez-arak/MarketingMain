@@ -22,7 +22,8 @@ describe('sectionRows', () => {
   it('lists the company\'s approved people with their grants, admin first', () => {
     const rows = sectionRows({ access, assignments, grants, workspaceId: WS })
     expect(rows.map(r => [r.userId, r.kind])).toEqual([['a', 'admin'], ['m', 'member'], ['s', 'sales']])
-    expect(rows[0].levels).toEqual({ ceo: 'manage', sales: 'manage', marketing: 'manage', insights: 'manage', technical: 'manage', finance: 'manage' })
+    // Technical and Finance are parked until Musa's ERP (lib/erp.js), so not listed.
+    expect(rows[0].levels).toEqual({ ceo: 'manage', sales: 'manage', marketing: 'manage', insights: 'manage' })
     expect(rows[1]).toMatchObject({ name: 'maya', levels: { ceo: null, sales: 'work', marketing: 'manage', insights: null } })
   })
 })

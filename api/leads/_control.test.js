@@ -17,7 +17,7 @@ const NOW = new Date('2026-10-18T09:00:00Z')
 const hAgo = (h) => new Date(NOW.getTime() - h * 3_600_000).toISOString()
 const lid = (n) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(n).padStart(12, '0')}`
 
-function world({ targets = {}, rules = [], leads = [], missing = false, sendOk = true, flags = null } = {}) {
+function world({ targets = {}, rules = [], leads = [], missing = false, sendOk = true, flags = null, erpPending = false } = {}) {
   const state = {
     targets: { workspace_id: WS, routing_enabled: false, routing_since: null, routing_fallback: null, alert_emails: ['boss@example.com'], brief_emails: [], ...targets },
     rules, leads,
@@ -65,7 +65,7 @@ function world({ targets = {}, rules = [], leads = [], missing = false, sendOk =
     }
     return []
   }
-  const deps = {
+  const deps = { erpPending,
     db, now: () => NOW,
     sendAlert: vi.fn(async (mail) => { state.mails.push(mail); return sendOk ? { ok: true } : { ok: false, error: new Error('mailbox refused') } }),
   }
@@ -185,6 +185,16 @@ describe('runDailyAlerts', () => {
     expect(state.flags[0].alerted_at).toBe(NOW.toISOString())
     const again = await runDailyAlerts(deps, { workspaceId: WS, force: true })
     expect(again.items).toBe(0)
+  })
+
+  it('while Musa\'s ERP is pending, no project flags are read or told (2026-10-25)', async () => {
+    const flags = [{ odoo_project_id: 1, name: 'Najd clinic', level: 'red', reasons: ['late'], red_since: '2026-10-20T00:00:00Z', alerted_at: null }]
+    const { state, deps } = world({ flags, erpPending: true })
+    const f = await gatherControl(deps, WS, NOW)
+    expect(f.projectFlags).toEqual([])
+    expect(f.odoo).toBeNull()
+    await runDailyAlerts(deps, { workspaceId: WS })
+    expect(state.mails.map(m => m.text || m.html || '').join(' ')).not.toMatch(/Najd clinic/)
   })
 
   it('the panel carries Technical\'s project flags (its at-risk count and the alert read them)', async () => {

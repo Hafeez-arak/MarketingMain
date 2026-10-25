@@ -1,3 +1,4 @@
+import { PARKED } from './modules'
 import { supabase } from './supabaseClient'
 
 // ─── v2: section grants (public.section_access) ────────────────────────────
@@ -48,7 +49,8 @@ export async function setSection(workspaceId, userId, section, level, grantedBy)
 }
 
 /** The sections that can be granted, in the rail's order. Admin is never granted. */
-export const GRANTABLE = ['ceo', 'sales', 'marketing', 'insights', 'technical', 'finance']
+// Technical and Finance are parked until Musa's ERP (lib/erp.js): not offered.
+export const GRANTABLE = ['ceo', 'sales', 'marketing', 'insights', 'technical', 'finance'].filter(k => !PARKED.has(k))
 
 /**
  * The rows of the admin's Section access screen for one company: everyone

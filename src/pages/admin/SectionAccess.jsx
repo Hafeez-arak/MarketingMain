@@ -4,6 +4,7 @@ import { useAuth } from '../../store/auth'
 import { PageHeader, Skeleton, Spinner } from '../../components/ui/index'
 import { fetchAllAccess, fetchCompanyAssignments } from '../../lib/access'
 import { fetchCompanySections, setSection, sectionRows, GRANTABLE } from '../../lib/sectionAccess'
+import { PARKED } from '../../lib/modules'
 import { SECTIONS } from '../../lib/modules'
 import { useT, labelOf } from '../../lib/i18n'
 
@@ -92,7 +93,8 @@ export default function SectionAccess() {
       </div>
 
       <p className="text-xs text-text-secondary">{t.locked}</p>
-      <p className="text-xs text-text-secondary">{t.technicalNote}</p>
+      {/* About Technical and Finance: shown only while they are offered (parked until Musa's ERP). */}
+      {!PARKED.has('technical') && <p className="text-xs text-text-secondary">{t.technicalNote}</p>}
 
       {error && <p className="text-xs text-red-600" dir="auto">{error}</p>}
 

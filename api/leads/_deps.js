@@ -1,5 +1,6 @@
 import { db } from '../agent/_supabase.js'
 import { sealSecret, openSecret } from '../email/_secrets.js'
+import { ERP_PENDING } from '../../src/lib/erp.js'
 import { msConfig, createGraphMail } from '../email/_graph.js'
 import { checkMail } from './_mail.js'
 import { runHealth } from './_health.js'
@@ -140,7 +141,10 @@ export function leadDeps() {
   deps.health = (args) => runHealth(deps, { pageUrl: `${APP_URL}/leads`, ...args })
   deps.route = (args) => routeWaiting(deps, { appUrl: APP_URL, ...args })
   deps.tasks = (args) => runTaskReminders(deps, args)
-  deps.odoo = (args = {}) => (args.workspaceId ? syncOdoo(deps, args) : syncAllOdoo(deps, args))
+  // Parked until Musa's ERP (src/lib/erp.js): the mirror reads nothing, so
+  // no Odoo projects or accounts are copied. Sales' push to Odoo is not this.
+  deps.odoo = (args = {}) => (ERP_PENDING ? Promise.resolve({ off: true, parked: 'erp' })
+    : args.workspaceId ? syncOdoo(deps, args) : syncAllOdoo(deps, args))
   // Technical watches the projects after each mirror round (_technical.js).
   deps.technical = (args) => monitorProjects(deps, args)
   // The battle cards read back from Odoo at 07:50 and 13:00 Riyadh (_crmCard.js).

@@ -14,6 +14,7 @@
 // in api/leads/_control.js, so every number here is tested without a
 // database. Everything shown is { ar, en }: Arabic first, English on a switch.
 
+import { ERP_WAITING, ERP_WAITING_SUB } from '../erp.js'
 import { effectiveVerdict, projectOf } from '../leads/view.js'
 import { money } from '../agent/ceoBrief.js'
 import { leadRegion } from './region.js'
@@ -156,10 +157,10 @@ export function controlKpis({ leads = [], odoo = null, targets: tRow = null, now
       key: 'pipeline', source: 'campai',
       label: { en: 'Open pipeline', ar: 'قيمة الفرص المفتوحة' },
       value: money(sum),
-      sub: { en: `${group(quoted.length)} open quote${quoted.length === 1 ? '' : 's'} · Odoo not linked yet`, ar: `${group(quoted.length)} عرض سعر مفتوح · أودو غير مربوط بعد` },
+      sub: { en: `${group(quoted.length)} open quote${quoted.length === 1 ? '' : 's'} · ${ERP_WAITING.en}`, ar: `${group(quoted.length)} عرض سعر مفتوح · ${ERP_WAITING.ar}` },
       tone: rag(sum, targets.pipeline_sar, { better: 'higher', amberPct }),
     } : WAITING('pipeline', { en: 'Open pipeline', ar: 'قيمة الفرص المفتوحة' },
-      { en: 'Shows once Odoo is linked', ar: 'يظهر بعد ربط أودو' }))
+      ERP_WAITING_SUB))
   }
 
   // 2. Average response time (median hours, arrival → first reply), last 30 days
@@ -193,7 +194,7 @@ export function controlKpis({ leads = [], odoo = null, targets: tRow = null, now
     },
     tone: rag(odoo.revenue_month_sar, targets.revenue_month_sar, { better: 'higher', amberPct }),
   } : WAITING('revenue', { en: 'Revenue this month', ar: 'إيرادات هذا الشهر' },
-    { en: 'Shows once Odoo is linked', ar: 'يظهر بعد ربط أودو' }))
+    ERP_WAITING_SUB))
 
   // 4. Leads with no owner: the last 30 days, older ones named in the sub.
   const unowned = open.filter(l => !l.assigned_to)
@@ -217,7 +218,7 @@ export function controlKpis({ leads = [], odoo = null, targets: tRow = null, now
     sub: { en: `of ${group(odoo.projects_open)} running`, ar: `من ${group(odoo.projects_open)} قيد التنفيذ` },
     tone: rag(odoo.projects_at_risk, 0, { better: 'lower' }),
   } : WAITING('projects', { en: 'Projects at risk', ar: 'مشاريع متعثرة' },
-    { en: 'Needs Odoo Project in use', ar: 'يتطلب استخدام تطبيق المشاريع في أودو' }))
+    ERP_WAITING_SUB))
 
   // 6. Overdue unpaid invoices: Odoo Accounting.
   tiles.push(odoo?.overdue_invoices_sar != null ? {
@@ -227,7 +228,7 @@ export function controlKpis({ leads = [], odoo = null, targets: tRow = null, now
     sub: { en: `${group(odoo.overdue_invoices)} unpaid over 60 days`, ar: `${group(odoo.overdue_invoices)} غير مدفوعة منذ أكثر من 60 يومًا` },
     tone: rag(odoo.overdue_invoices_sar, 0, { better: 'lower' }),
   } : WAITING('invoices', { en: 'Overdue invoices', ar: 'فواتير متأخرة التحصيل' },
-    { en: 'Needs Odoo Accounting in use', ar: 'يتطلب استخدام المحاسبة في أودو' }))
+    ERP_WAITING_SUB))
 
   return tiles
 }

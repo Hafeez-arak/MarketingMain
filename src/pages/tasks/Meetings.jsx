@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../store/auth'
 import { Button, Skeleton, Spinner } from '../../components/ui/index'
+import { PARKED } from '../../lib/modules'
 import { fetchMeetings, fetchMeeting, saveMeeting, fetchTasks, createTask, updateTask } from '../../lib/tasks/client'
 import { meetingProgress, toDueAt } from '../../lib/tasks/logic'
 import { TaskList, TaskForm, Dialog } from './parts'
@@ -14,7 +15,8 @@ import { TW } from './words'
 // saving gives everyone their tasks. A meeting's page then shows where each
 // item stands, ready for the next meeting.
 
-const SECTION_KEYS = ['', 'sales', 'marketing', 'ceo', 'insights', 'technical', 'finance']
+// Technical and Finance are parked until Musa's ERP (lib/erp.js).
+const SECTION_KEYS = ['', 'sales', 'marketing', 'ceo', 'insights', 'technical', 'finance'].filter(k => !PARKED.has(k))
 const field = 'w-full rounded-md border border-border bg-white px-2.5 py-1.5 text-sm text-text focus:outline-none focus:border-stone-400 focus:ring-2 focus:ring-stone-200'
 const today = () => new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10)
 const shortDate = (iso, lang = 'en') => fmtDay(iso, lang, { weekday: 'short', day: 'numeric', month: 'short' })

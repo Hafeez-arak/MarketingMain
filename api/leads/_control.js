@@ -30,6 +30,7 @@ import { REGIONS } from '../../src/lib/control/region.js'
 import { assignLead } from './_assign.js'
 import { readMirror } from './_odooSync.js'
 import { odooFacts, withOdoo } from '../../src/lib/control/odoo.js'
+import { ERP_PENDING } from '../../src/lib/erp.js'
 
 const isUuid = (v) => /^[0-9a-f-]{36}$/i.test(String(v || ''))
 const ws = (id) => `workspace_id=eq.${encodeURIComponent(id)}`
@@ -103,12 +104,15 @@ export async function gatherControl(deps, workspaceId, now = deps.now()) {
     deps.db(`social_accounts?${ws(workspaceId)}&platform=eq.linkedin&select=followers_count`).then((r) => r || []).catch(() => []),
   ])
   // Odoo's numbers, from the mirror (_odooSync.js), when there is one.
-  const mirror = await readMirror(deps, workspaceId).catch(() => ({ status: null }))
+  // Not while Musa's ERP is pending (src/lib/erp.js): its numbers wait for it.
+  const erpPending = deps.erpPending ?? ERP_PENDING
+  const mirror = erpPending ? { status: null } : await readMirror(deps, workspaceId).catch(() => ({ status: null }))
   const odoo = mirror.records ? odooFacts(mirror.records, { now, models: mirror.models, url: mirror.url }) : null
   // Technical's health per project (project_flags, v2). Where it exists,
   // "projects at risk" is the projects Technical shows red, so the CEO's
   // number, his daily alert and the Technical page agree.
-  const projectFlags = await deps.db(`project_flags?${ws(workspaceId)}&select=odoo_project_id,name,level,reasons,red_since,alerted_at`).catch(() => null)
+  const projectFlags = erpPending ? null
+    : await deps.db(`project_flags?${ws(workspaceId)}&select=odoo_project_id,name,level,reasons,red_since,alerted_at`).catch(() => null)
   const projectManagers = Array.isArray(projectFlags) && projectFlags.some(p => p.level === 'red')
     ? await deps.db('rpc/project_managers', { method: 'POST', body: { ws: workspaceId } }).catch(() => []) || []
     : []

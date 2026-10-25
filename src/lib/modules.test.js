@@ -46,7 +46,7 @@ describe('old addresses', () => {
 
 describe('who sees what', () => {
   it('an admin gets every section; a member gets Marketing and Insights', () => {
-    expect(sectionsFor({ isAccessAdmin: true }).map(s => s.key)).toEqual(['ceo', 'sales', 'marketing', 'insights', 'technical', 'finance', 'admin'])
+    expect(sectionsFor({ isAccessAdmin: true }).map(s => s.key)).toEqual(['ceo', 'sales', 'marketing', 'insights', 'admin'])
     expect(sectionsFor({ isAccessAdmin: false }).map(s => s.key)).toEqual(['marketing', 'insights'])
   })
 })
@@ -125,5 +125,16 @@ describe('canVisit', () => {
     expect(canVisit('/requests', who)).toBe(true)
     expect(canVisit('/admin/team', who)).toBe(false)
     expect(canVisit('/admin/team', { isAccessAdmin: true })).toBe(true)
+  })
+})
+
+describe('parked until Musa\'s ERP (2026-10-25)', () => {
+  it('Technical and Finance are parked, not offered anywhere', async () => {
+    const { PARKED, PARKED_SECTIONS } = await import('./modules.js')
+    const { GRANTABLE } = await import('./sectionAccess.js')
+    expect([...PARKED].sort()).toEqual(['finance', 'technical'])
+    expect(PARKED_SECTIONS.every(s => s.pages.length)).toBe(true)
+    expect(SECTIONS.some(s => PARKED.has(s.key))).toBe(false)
+    expect(GRANTABLE.some(k => PARKED.has(k))).toBe(false)
   })
 })

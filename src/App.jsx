@@ -53,8 +53,11 @@ import { TechnicalSubmittals } from './pages/technical/Submittals'
 import { TechnicalSettings } from './pages/technical/Settings'
 import { FinanceInvoices } from './pages/finance/index'
 import { FinanceProjects } from './pages/finance/Projects'
-import { fromLegacy, canVisit } from './lib/modules'
+import { fromLegacy, canVisit, PARKED } from './lib/modules'
 import { useLang, COMMON } from './lib/i18n'
+
+// A parked section's page (lib/modules.js PARKED_SECTIONS) is not served: its URL goes to Home.
+const parked = (key, page) => (PARKED.has(key) ? <Navigate to="/" replace /> : page)
 
 // Loads the account's saved webhook URLs into state.webhooks on startup, so
 // they're there regardless of which page loads first. This used to happen
@@ -207,15 +210,16 @@ function ProtectedApp() {
             <Route path="/insights/analytics"        element={<Analytics />} />
             <Route path="/insights/analytics/report" element={<PerformanceReport />} />
 
-            {/* ── Technical ── Odoo Project's projects, watched (2026-10-19). */}
-            <Route path="/technical"             element={<TechnicalProjects />} />
-            <Route path="/technical/project"     element={<TechnicalProject />} />
-            <Route path="/technical/submittals"  element={<TechnicalSubmittals />} />
-            <Route path="/technical/settings"    element={<TechnicalSettings />} />
+            {/* ── Technical ── Odoo Project's projects, watched (2026-10-19).
+                Parked until Musa's ERP (lib/erp.js): the URLs go to Home. */}
+            <Route path="/technical"             element={parked('technical', <TechnicalProjects />)} />
+            <Route path="/technical/project"     element={parked('technical', <TechnicalProject />)} />
+            <Route path="/technical/submittals"  element={parked('technical', <TechnicalSubmittals />)} />
+            <Route path="/technical/settings"    element={parked('technical', <TechnicalSettings />)} />
 
-            {/* ── Finance ── read only, from Odoo Accounting. */}
-            <Route path="/finance"               element={<FinanceInvoices />} />
-            <Route path="/finance/projects"      element={<FinanceProjects />} />
+            {/* ── Finance ── read only, from Odoo Accounting. Parked too. */}
+            <Route path="/finance"               element={parked('finance', <FinanceInvoices />)} />
+            <Route path="/finance/projects"      element={parked('finance', <FinanceProjects />)} />
 
             {/* ── Admin ── */}
             <Route path="/admin"                 element={<Navigate to="/admin/team" replace />} />

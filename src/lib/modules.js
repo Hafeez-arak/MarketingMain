@@ -85,6 +85,26 @@ export const SECTIONS = [
     ],
   },
   {
+    key: 'admin', label: 'Admin', ar: 'الإدارة', icon: 'users', base: '/admin', adminOnly: true,
+    blurb: 'Who can sign in, and which sections each person gets.',
+    blurbAr: 'من يمكنه الدخول، وأي الأقسام يحصل عليها كل شخص.',
+    pages: [
+      { to: '/admin/team', label: 'Team & Access', ar: 'الفريق والصلاحيات', icon: 'users', badge: 'pendingAccess' },
+      { to: '/admin/sections', label: 'Section access', ar: 'صلاحيات الأقسام', icon: 'grid', translated: true },
+    ],
+  },
+]
+
+/**
+ * Sections PARKED until Musa's ERP is connected (2026-10-25, lib/erp.js):
+ * Technical and Finance read Odoo's projects and accounts, which the ERP will
+ * own. Kept whole so they can be reused or removed later; nothing reads them
+ * (not the rail, not Home, not Section access) and App.jsx sends their URLs
+ * to Home. To bring one back, move it into SECTIONS.
+ * @type {Section[]}
+ */
+export const PARKED_SECTIONS = [
+  {
     // Odoo Project manages the projects; this watches them (2026-10-19):
     // the nine stages, late stages, submittal rounds and codes, the PM's
     // weekly update. A PM sees the projects they manage in Odoo; manage
@@ -109,16 +129,10 @@ export const SECTIONS = [
       { to: '/finance/projects', label: 'Project margins', ar: 'هوامش المشاريع', icon: 'bars', translated: true },
     ],
   },
-  {
-    key: 'admin', label: 'Admin', ar: 'الإدارة', icon: 'users', base: '/admin', adminOnly: true,
-    blurb: 'Who can sign in, and which sections each person gets.',
-    blurbAr: 'من يمكنه الدخول، وأي الأقسام يحصل عليها كل شخص.',
-    pages: [
-      { to: '/admin/team', label: 'Team & Access', ar: 'الفريق والصلاحيات', icon: 'users', badge: 'pendingAccess' },
-      { to: '/admin/sections', label: 'Section access', ar: 'صلاحيات الأقسام', icon: 'grid', translated: true },
-    ],
-  },
 ]
+
+/** The parked sections' keys. */
+export const PARKED = new Set(PARKED_SECTIONS.map(s => s.key))
 
 /**
  * Present in every section: the rail's foot. Not a section, so they never
