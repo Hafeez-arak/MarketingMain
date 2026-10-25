@@ -49,6 +49,30 @@ export function profileIdOf(value) {
   return String(value).trim()
 }
 
+// ─── Which Zernio key a workspace uses ─────────────────────────────────────
+//
+// One Zernio account serves every workspace by default (ZERNIO_API_KEY). A
+// company with its own Zernio account is listed in ZERNIO_WORKSPACE_KEYS as
+// `<workspace id>=<key>` pairs, separated by commas, semicolons or newlines.
+// Keyed by workspace id rather than name or slug because the id never changes
+// and most workspaces have no slug.
+//
+// A workspace's Zernio profile lives inside one Zernio account, so a profile
+// id read with the wrong key does not exist there. The n8n Publish and Sync
+// workflows carry a copy of this function; change both together.
+export function zernioKeyFor(workspaceId, env = {}) {
+  const id = String(workspaceId || '').trim().toLowerCase()
+  if (id) {
+    for (const pair of String(env.ZERNIO_WORKSPACE_KEYS || '').split(/[,;\n]+/)) {
+      const at = pair.indexOf('=')
+      if (at < 1) continue
+      const key = pair.slice(at + 1).trim()
+      if (pair.slice(0, at).trim().toLowerCase() === id && key) return key
+    }
+  }
+  return String(env.ZERNIO_API_KEY || '').trim()
+}
+
 // ─── HTTP ──────────────────────────────────────────────────────────────────
 // Non-2xx is read as data rather than thrown by fetch, so the status and
 // Zernio's own machine-readable `code` survive to the caller. Several

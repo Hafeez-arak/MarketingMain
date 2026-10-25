@@ -277,3 +277,122 @@ describe('phones from signature pictures', () => {
     expect(mergePhones(['+966553251417'], ['055 325 1417', '011 465 0000'])).toEqual(['+966553251417', '011 465 0000'])
   })
 })
+
+describe('warning signs, checked in code (2026-10-25)', async () => {
+  const { senderAddress, redirectLinks, baseDomain, namesSomething, warningSigns, decidedBeforeModel, codeVerdict, SENDER_FITS } = await import('./qualify.js')
+  const phish = await import('./fixtures/phishingRfq.js')
+  const reply = (o = {}) => JSON.stringify({ ...phish.MODEL_REPLY, ...o })
+
+  describe('senderAddress', () => {
+    it('keeps one real address, lower-cased, and cleans harmless wrapping', () => {
+      expect(senderAddress('Omar@NourContracting.sa')).toEqual({ email: 'omar@nourcontracting.sa', problem: '' })
+      expect(senderAddress('<omar@nour.sa>')).toEqual({ email: 'omar@nour.sa', problem: '' })
+      expect(senderAddress('mailto:omar@nour.sa.')).toEqual({ email: 'omar@nour.sa', problem: '' })
+      expect(senderAddress('first.last+rfq@mail.besix.com.sa').email).toBe('first.last+rfq@mail.besix.com.sa')
+    })
+    it('rejects the phishing chain outright, never "repairing" it to the address at its end', () => {
+      expect(senderAddress(phish.RAW_FROM)).toEqual({ email: '', problem: 'not_an_address' })
+    })
+    it('rejects slashes, URL encoding, query strings, two @, spaces and tracking hosts', () => {
+      for (const bad of ['a/b@x.sa', 'a%40b@x.sa', 'a?x=1@x.sa', 'a@b@x.sa', 'a b@x.sa', 'click@awstrack.me', 'https://x.sa/a@x.sa', 'a@x', 'a..b@x.sa']) {
+        expect(senderAddress(bad).problem).toBe('not_an_address')
+      }
+      expect(senderAddress('').problem).toBe('missing')
+    })
+  })
+
+  describe('redirectLinks', () => {
+    it('finds tracking services and links that carry another site in their path', () => {
+      expect(redirectLinks(phish.RAW_FROM)).toContain('x1abc2d3.r.us_west_2.awstrack.me')
+      expect(redirectLinks('Pay here: https://track.example-mail.com/l0/%2f%2fspectrumbusiness.net%2fbilling%2f')).toEqual(['track.example-mail.com'])
+      expect(redirectLinks('See https://u123.ct.sendgrid.net/ls/click?upn=abc')).toEqual(['u123.ct.sendgrid.net'])
+    })
+    it('ignores ordinary links, links back to the same site, and the link scanners', () => {
+      expect(redirectLinks('Drawings: Download<https://example-my.sharepoint.com/:f:/g/drawings>\nwww.nour.sa<http://www.nour.sa>')).toEqual([])
+      expect(redirectLinks('https://service.ariba.com/Supplier.aw/ad/login?returnUrl=https%3A%2F%2Fservice.ariba.com%2Fx')).toEqual([])
+      expect(redirectLinks('https://urldefense.com/v3/__https://nour.sa/rfq__;!!abc')).toEqual([])
+    })
+    it('looks inside Microsoft Safe Links instead of flagging every link it wraps', () => {
+      const wrap = (u) => `https://nam02.safelinks.protection.outlook.com/?url=${encodeURIComponent(u)}&data=05`
+      expect(redirectLinks(wrap('https://nour.sa/boq.pdf'))).toEqual([])
+      expect(redirectLinks(wrap('https://x9.awstrack.me/l0/abc'))).toEqual(['x9.awstrack.me'])
+    })
+  })
+
+  it('baseDomain groups a company\'s own sub-domains', () => {
+    expect(baseDomain('mail.besix.com.sa')).toBe('besix.com.sa')
+    expect(baseDomain('eu.mail.example.com')).toBe('example.com')
+  })
+
+  it('namesSomething: products, quantities, places and documents count; "project" and "pricing" do not', () => {
+    expect(namesSomething({}, `Request for Quotation\n${phish.BODY}`)).toBe(false)
+    expect(namesSomething({}, 'Please quote 30 downlights for our villa')).toBe(true)
+    expect(namesSomething({}, 'RFQ attached, BOQ for the hospital')).toBe(true)
+    expect(namesSomething({}, 'نحتاج عرض سعر إنارة خارجية')).toBe(true)
+    expect(namesSomething({ details: { location: 'Jeddah' } }, '')).toBe(true)
+    expect(namesSomething({ projectEvidence: 'project awarded' }, '')).toBe(true)
+  })
+
+  describe('the phishing RFQ from Junk', () => {
+    const junk = { flags: [], folder: 'junk', hasAttachments: false, text: `Request for Quotation\n${phish.BODY}` }
+
+    it('is rejected in code before any model call: bad sender and tracking links', () => {
+      const checks = { ...junk, flags: ['bad_sender', 'tracking_links'] }
+      expect(decidedBeforeModel(checks)).toBe(true)
+      const v = codeVerdict(checks)
+      expect(v).toMatchObject({ verdict: 'unqualified', rule: 'bad_sender', category: 'spam', sourceCheck: 'not_verified' })
+      const c = verdictColumns(v, { folder: 'junk', email: '' })
+      expect(c).toMatchObject({ verdict: 'unqualified', rule: 'bad_sender', source_check: 'not_verified', folder: 'junk', email_kind: 'none' })
+      expect(c.reason).toBe('Rejected: the sender address is not real. The sender address is not a real address (a chain of links); its links go through redirect or tracking services; it sat in Junk and names no product, scope, location or project.')
+    })
+
+    it('even with a clean sender, the model\'s own answer can no longer make it a lead', () => {
+      // What Luna actually said: quotation_request, medium, Verified.
+      const v = parseVerdict(reply(), junk)
+      expect(v).toMatchObject({ verdict: 'unqualified', rule: 'warning_signs', warnings: ['junk_vague'] })
+      expect(v.reason).toMatch(/^It sat in Junk and names no product, scope, location or project\./)
+    })
+
+    it('"Verified" is never kept when the sender\'s organisation is unrelated', () => {
+      const v = parseVerdict(reply({ sender_fit: 'unrelated' }), junk)
+      expect(v).toMatchObject({ verdict: 'unqualified', sourceCheck: 'not_verified', senderFit: 'unrelated' })
+      expect(v.warnings).toEqual(['junk_vague', 'unrelated_org'])
+      expect(v.sourceEvidence).toMatch(/nothing to do with construction or lighting/)
+      // Same answer from the Inbox: still not a lead, it waits for a person.
+      const inbox = parseVerdict(reply({ sender_fit: 'unrelated' }), { ...junk, folder: 'inbox' })
+      expect(inbox).toMatchObject({ verdict: 'needs_review', rule: 'warning_signs', sourceCheck: 'not_verified' })
+    })
+  })
+
+  describe('one sign at a time', () => {
+    const good = (o) => JSON.stringify({ ...phish.MODEL_REPLY, confidence: 'high', details: { products: 'downlights', quantity: '40' }, sender_fit: 'fits', ...o })
+    it('a Reply-To on another domain, or tracking links, in the Inbox: needs review, not verified', () => {
+      expect(parseVerdict(good(), { flags: ['reply_to_mismatch'], folder: 'inbox' })).toMatchObject({ verdict: 'needs_review', rule: 'warning_signs', sourceCheck: 'not_verified' })
+      expect(parseVerdict(good(), { flags: ['tracking_links'], folder: 'inbox' })).toMatchObject({ verdict: 'needs_review', rule: 'warning_signs' })
+      expect(decidedBeforeModel({ flags: ['reply_to_mismatch'], folder: 'inbox' })).toBe(false)
+    })
+    it('the same sign in Junk rejects; two signs reject anywhere; a bad sender always does', () => {
+      expect(decidedBeforeModel({ flags: ['tracking_links'], folder: 'junk', hasAttachments: false })).toBe(true)
+      expect(decidedBeforeModel({ flags: ['tracking_links', 'reply_to_mismatch'], folder: 'inbox' })).toBe(true)
+      expect(decidedBeforeModel({ flags: ['bad_sender'], folder: 'inbox' })).toBe(true)
+    })
+    it('a Junk email with attachments and nothing named in the text goes to a person, not out', () => {
+      const v = parseVerdict(good({ details: {} }), { flags: [], folder: 'junk', hasAttachments: true, text: 'RFQ\nPlease see attached.' })
+      expect(v).toMatchObject({ verdict: 'needs_review', warnings: ['junk_vague'] })
+    })
+    it('a real enquiry in Junk that names what it wants is still a lead', () => {
+      expect(warningSigns({ details: {} }, { folder: 'junk', text: 'Please quote 30 downlights for our villa' })).toEqual([])
+      expect(parseVerdict(good(), { flags: [], folder: 'junk', text: 'Please quote 40 downlights' })).toMatchObject({ verdict: 'qualified', rule: '', warnings: [] })
+    })
+    it('no checks (the website form, Try it): the rules are as before', () => {
+      expect(parseVerdict(good())).toMatchObject({ verdict: 'qualified', rule: '' })
+    })
+  })
+
+  it('the model is asked for sender_fit, and the prompt says what an unrelated sender means', () => {
+    expect(VERDICT_SCHEMA.schema.required).toContain('sender_fit')
+    expect(VERDICT_SCHEMA.schema.properties.sender_fit.enum).toEqual(SENDER_FITS)
+    expect(systemPrompt()).toMatch(/when sender_fit is unrelated, source_check is not_verified/)
+    expect(systemPrompt()).toMatch(/phishing from a hijacked mailbox: use spam/)
+  })
+})

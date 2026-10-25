@@ -5,6 +5,7 @@ import { createCompany, fetchAllAccess } from '../../lib/access'
 import { Card, Button, PageHeader, Skeleton } from '../../components/ui/index'
 import { fetchSpend, setCap, projectedMonth } from '../../lib/aiSpend'
 import { useT } from '../../lib/i18n'
+import { collectCompanyFiles, removeCompanyFiles } from '../../lib/workspaceFiles'
 
 const SW = {
   en: {
@@ -17,7 +18,7 @@ const SW = {
     nobodyElse: 'Nobody else has been approved yet.', active: 'Active', save: 'Save', switchTo: 'Switch', rename: 'Rename', delete: 'Delete',
     danger: 'Danger Zone', dangerBody: 'Delete the active company. This permanently removes its brand brain, content, plans, and posts.', deleteCompany: 'Delete company',
     needSecond: 'Create a second company before you can delete this one.', deleteQ: n => `Delete "${n}"?`,
-    deleteBody: 'All content, posts, campaigns, brand brain, and settings for this company will be permanently removed.', deleting: 'Deleting…',
+    deleteBody: 'All content, posts, campaigns, brand brain, settings and uploaded files for this company will be permanently removed.', deleting: 'Deleting…',
     yourAccount: 'Your account', signedInAs: e => `Signed in as ${e || '…'}`, pwChanged: 'Password changed. Use the new one next time you sign in.',
     changePw: 'Change password', newPw: 'New password (at least 8 characters)', typeAgain: 'Type it again', saving: 'Saving…', savePw: 'Save password',
     tooShort: 'Use at least 8 characters.', noMatch: 'The two passwords do not match.',
@@ -35,7 +36,7 @@ const SW = {
     nobodyElse: 'لم تتم الموافقة على أحد آخر بعد.', active: 'النشطة', save: 'حفظ', switchTo: 'انتقال', rename: 'إعادة تسمية', delete: 'حذف',
     danger: 'منطقة الخطر', dangerBody: 'حذف الشركة النشطة. يزيل نهائيًا هوية علامتها ومحتواها وخططها ومنشوراتها.', deleteCompany: 'حذف الشركة',
     needSecond: 'أنشئ شركة ثانية قبل أن تحذف هذه.', deleteQ: n => `حذف "${n}"؟`,
-    deleteBody: 'سيُحذف نهائيًا كل محتوى هذه الشركة ومنشوراتها وحملاتها وهوية علامتها وإعداداتها.', deleting: 'جارٍ الحذف…',
+    deleteBody: 'سيُحذف نهائيًا كل محتوى هذه الشركة ومنشوراتها وحملاتها وهوية علامتها وإعداداتها وملفاتها المرفوعة.', deleting: 'جارٍ الحذف…',
     yourAccount: 'حسابك', signedInAs: e => `مسجّل باسم ${e || '…'}`, pwChanged: 'تم تغيير كلمة المرور. استخدم الجديدة في المرة القادمة.',
     changePw: 'تغيير كلمة المرور', newPw: 'كلمة المرور الجديدة (٨ أحرف على الأقل)', typeAgain: 'اكتبها مرة أخرى', saving: 'جارٍ الحفظ…', savePw: 'حفظ كلمة المرور',
     tooShort: 'استخدم ٨ أحرف على الأقل.', noMatch: 'كلمتا المرور غير متطابقتين.',
@@ -119,9 +120,21 @@ export function Settings() {
 
   async function handleDelete(id) {
     setBusy(true); setError('')
+    // Files first, while the company's studio sessions still exist to say
+    // which render folders are its. If they can't be listed, stop here:
+    // deleting anyway would leave files nothing points at any more.
+    let files
+    try {
+      files = await collectCompanyFiles(supabase, id)
+    } catch (err) {
+      setError(`Nothing was deleted: the company's files could not be listed (${err.message}). Try again.`)
+      setBusy(false); setConfirmDelete(null); return
+    }
     // FK on delete cascade wipes members + all workspace-scoped data.
     const { error: e } = await supabase.from('workspaces').delete().eq('id', id)
     if (e) { setError(e.message); setBusy(false); setConfirmDelete(null); return }
+    const { failed } = await removeCompanyFiles(supabase.storage, files)
+    if (failed) setError(`The company was deleted, but ${failed} of its file${failed === 1 ? '' : 's'} could not be removed from storage.`)
     if (id === activeId) {
       const next = workspaces.find(w => w.id !== id)
       if (next) switchWorkspace(next.id)

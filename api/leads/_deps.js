@@ -9,6 +9,7 @@ import { syncAllOdoo, syncOdoo } from './_odooSync.js'
 import { monitorProjects } from './_technical.js'
 import { supabaseStorage } from './_files.js'
 import { checkWebsite } from './_website.js'
+import { maybePullCards } from './_crmCard.js'
 
 // ─── The lead agent's real IO, in one place ────────────────────────────────
 // Used by api/leads/[action].js and, for the two things that must live in
@@ -142,5 +143,7 @@ export function leadDeps() {
   deps.odoo = (args = {}) => (args.workspaceId ? syncOdoo(deps, args) : syncAllOdoo(deps, args))
   // Technical watches the projects after each mirror round (_technical.js).
   deps.technical = (args) => monitorProjects(deps, args)
+  // The battle cards read back from Odoo at 07:50 and 13:00 Riyadh (_crmCard.js).
+  deps.crmPull = (args) => maybePullCards(deps, args)
   return deps
 }

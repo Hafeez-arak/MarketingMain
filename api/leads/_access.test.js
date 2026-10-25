@@ -153,6 +153,14 @@ describe('approving into the CRM', () => {
     expect(writes()).toEqual([])
   })
 
+  it('only the access admin may approve as a test, never a sales admin', async () => {
+    who = { member: false, admin: false, sales: true, approver: true }
+    const res = await call(handler, 'approve', { lead_id: LEAD, test: true })
+    expect(res.statusCode).toBe(403)
+    expect(res.body.error).toMatch(/access admin/)
+    expect(writes()).toEqual([])
+  })
+
   it('a sales admin gets through to the lead (here: not found in this fake)', async () => {
     who = { member: false, admin: false, sales: true, approver: true }
     const res = await call(handler, 'approve', { lead_id: LEAD })

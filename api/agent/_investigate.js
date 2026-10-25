@@ -259,6 +259,14 @@ export async function planLenses(workspaceId, runId, cadence = 'weekly') {
  * every lens's — the calendar's dates cost an API round trip, and fetching
  * them to run the demand lens would be waste repeated on every call.
  */
+/** The hire stage and recurring offers, or null when the ICP names no hire stage. */
+export function lateHireOf(icp) {
+  if (!icp) return null
+  const norm = normaliseIcp(icp)
+  if (!norm.hire_stage) return null
+  return { stage: norm.hire_stage, recurring: norm.offers.filter(o => o.kind === 'recurring').map(o => o.label) }
+}
+
 async function argsForLens(key, { brandFacts, motion, competitors, competitorNotes = [], gathered, profile, ctx, agenda = [], language = '', workspaceId = '', line = '', icp = null, sources = [], sweep = [] }) {
   // What the team already tracks, so the lens reports changes instead of
   // re-announcing last week. Read only for the three lenses that produce
@@ -284,8 +292,13 @@ async function argsForLens(key, { brandFacts, motion, competitors, competitorNot
   // projects. `fit` is only the size, share and region lines of the ICP, so
   // openings sizes a project before proposing it (see sizing() in
   // lensPrompts.js) without turning into a second targets lens.
+  // `late` switches both project lenses to the order of value for a brand
+  // hired late in a project, or one selling a recurring service to sites that
+  // already exist (lateHireOrder in lensPrompts.js). Null without a hire stage,
+  // which keeps every other brand's prompts exactly as they were.
+  const late = lateHireOf(icp)
   if (key === 'openings') {
-    return { args: [brandFacts, { motion, agenda, language, intel, sources, sweep, fit: hasIcp(icp) ? icpFitText(icp) : '' }] }
+    return { args: [brandFacts, { motion, agenda, language, intel, sources, sweep, fit: hasIcp(icp) ? icpFitText(icp) : '', late }] }
   }
   if (key === 'targets') {
     // The ICP is rendered as plain briefing lines, and the split between the
@@ -301,6 +314,7 @@ async function argsForLens(key, { brandFacts, motion, competitors, competitorNot
         intel,
         sources,
         sweep,
+        late,
       }],
     }
   }

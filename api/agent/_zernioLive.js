@@ -1,5 +1,5 @@
 import {
-  createZernio, retryRateLimited, explainZernioError, INSTAGRAM_INSIGHT_METRICS,
+  createZernio, zernioKeyFor, retryRateLimited, explainZernioError, INSTAGRAM_INSIGHT_METRICS,
   LINKEDIN_PAGE_METRICS, LINKEDIN_MAX_DAYS,
 } from '../zernio/_zernio.js'
 import { readAccounts } from './_ownData.js'
@@ -313,7 +313,7 @@ export async function postAnalytics(z, profileId, { limit = POST_LIMIT } = {}) {
  * worth much more here than an exception — the same rule stage 0 follows.
  */
 export async function liveZernioAnalytics(workspaceId, { days = MAX_INSIGHT_DAYS, apiKey } = {}) {
-  const key = apiKey || process.env.ZERNIO_API_KEY || ''
+  const key = apiKey || zernioKeyFor(workspaceId, process.env)
   if (!key) {
     console.error('[config] ZERNIO_API_KEY is not set on this deployment')
     return {

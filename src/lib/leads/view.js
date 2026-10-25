@@ -120,7 +120,7 @@ export const SENDER_LABEL = {
   facility_company: 'Facility company', trader: 'Trader', individual: 'Individual', unknown: 'Sender unclear',
 }
 export const PROJECT_LABEL = { jih: 'JIH', tender: 'Tender', maintenance: 'Maintenance' }
-export const REQUEST_LABEL = { requirement: 'Requirement', inquiry: 'Inquiry' }
+export const REQUEST_LABEL = { requirement: 'Requirement', inquiry: 'Info request' }
 export const FOLDER_LABEL = { inbox: 'Inbox', junk: 'Junk', deleted: 'Deleted items', archive: 'Archive', other: 'Other folder', website: 'Website form' }
 export const PHILIPS_LABEL = { only: 'Philips only', mixed: 'Philips + others', or_equivalent: 'Philips or equivalent' }
 

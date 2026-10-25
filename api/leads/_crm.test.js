@@ -52,6 +52,7 @@ function fakeOdoo({ plan = 'custom', canCreate = true, failCreate = false, lists
       for (const id of a[0]) Object.assign(odoo.leads.find((l) => l.id === id) || {}, a[1])
       return ok(true)
     }
+    if (model === 'crm.stage' && m === 'search_read') return ok([{ id: 1, name: 'New', sequence: 0 }, { id: 11, name: 'RFQ Received (TENDER)', sequence: 1 }, { id: 3, name: 'RFQ Received (JIH)', sequence: 2 }, { id: 12, name: 'Quotation (tender)', sequence: 3 }])
     if (model === 'crm.tag' && m === 'search') return ok(odoo.tags.filter((t) => t.name === a[0][0][2]).map((t) => t.id))
     if (model === 'crm.tag' && m === 'create') { odoo.tags.push({ id: odoo.tags.length + 1, ...a[0] }); return ok(odoo.tags.length) }
     return err(`fake odoo: ${model}.${m}`)
@@ -246,6 +247,44 @@ describe('approving', () => {
     expect(odoo.leads).toHaveLength(0)
   })
 
+  it('lands on the Pipeline board, as an opportunity in the column for its phase', async () => {
+    state.crm = { ...connected }
+    const odoo = fakeOdoo()
+    await approveLead(depsOf(state, odoo), { workspaceId: WS, leadId: L1, user: LAYLA })
+    expect(odoo.leads[0]).toMatchObject({ type: 'opportunity', stage_id: 11 })
+    Object.assign(state.leads[1], { project_type: 'jih' })
+    await approveLead(depsOf(state, odoo), { workspaceId: WS, leadId: L2, user: LAYLA })
+    expect(odoo.leads[1]).toMatchObject({ type: 'opportunity', stage_id: 3 })
+  })
+
+  it('a lead with no phase starts in the first column', async () => {
+    state.crm = { ...connected }
+    Object.assign(state.leads[0], { project_type: '' })
+    const odoo = fakeOdoo()
+    await approveLead(depsOf(state, odoo), { workspaceId: WS, leadId: L1, user: LAYLA })
+    expect(odoo.leads[0].stage_id).toBe(1)
+  })
+
+  it('"Test only": no one of ours, the connection\'s own user owns it in Odoo, and it is marked as a test', async () => {
+    state.crm = { ...connected }
+    state.leads[0].assigned_to = null
+    const odoo = fakeOdoo()
+    const r = await approveLead(depsOf(state, odoo), { workspaceId: WS, leadId: L1, user: LAYLA, test: true })
+    expect(r.crm).toBe('sent')
+    expect(odoo.leads[0].user_id).toBe(7) // the connection's own Odoo user, not a salesperson
+    expect(state.leads[0]).toMatchObject({ crm_test: true, assigned_to: null })
+    expect(odoo.calls.some((c) => c.includes('res.users'))).toBe(false)
+  })
+
+  it('a test refuses a lead someone already has, and waits for nothing: Odoo must be connected', async () => {
+    const odoo = fakeOdoo()
+    expect((await approveLead(depsOf(state, odoo), { workspaceId: WS, leadId: L1, user: LAYLA, test: true })).status).toBe(409)
+    state.leads[0].assigned_to = null
+    const r = await approveLead(depsOf(state, odoo), { workspaceId: WS, leadId: L1, user: LAYLA, test: true })
+    expect(r).toMatchObject({ status: 409, error: expect.stringMatching(/Connect Odoo first/) })
+    expect(state.leads[0].approved_at).toBeNull()
+  })
+
   it('refuses a lead of another company', async () => {
     const r = await approveLead(depsOf(state, fakeOdoo()), { workspaceId: '99999999-9999-4999-8999-999999999999', leadId: '55555555-5555-4555-8555-555555555555', user: LAYLA })
     expect(r.status).toBe(404)
@@ -282,5 +321,48 @@ describe('when the API key arrives', () => {
     const state = fakeDb([])
     const saved = await saveCrm(depsOf(state, fakeOdoo()), WS, { url: 'https://arak-co.odoo.com', login: 'x', api_key: 'bad-key' })
     expect(saved.crm).toMatchObject({ connected: false, lastError: 'Odoo did not accept that login and API key.' })
+  })
+})
+
+describe('matching a company by name in Odoo', () => {
+  it('keeps the part that names the company, and refuses one too short to identify anyone', async () => {
+    const { companyCore } = await import('./_odoo.js')
+    expect(companyCore('Example Contracting Co. Ltd')).toBe('Example')
+    expect(companyCore('Nour Al-Riyadh Trading Est.')).toBe('Nour Al Riyadh')
+    expect(companyCore('ABC Co')).toBe('')
+    expect(companyCore('')).toBe('')
+  })
+})
+
+describe('their history, when Odoo\'s contacts carry no email', () => {
+  // A tiny Odoo: one customer with no email on file and one order.
+  const fakeOdoo = (asked) => async (_url, init) => {
+    const { params } = JSON.parse(init.body)
+    if (params.service === 'common') return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: 7 }))
+    const [, , , model, method, args] = params.args
+    asked.push([model, method, JSON.stringify(args)])
+    const ok = (result) => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result }))
+    if (model === 'res.partner' && method === 'search_read') {
+      const [[field, op, value]] = args[0]
+      return ok(field === 'name' && op === '=ilike' && value === 'Hadd Contracting (HC) 100\\%' ? [{ id: 42, commercial_partner_id: [42, 'x'] }] : [])
+    }
+    if (model === 'res.partner' && method === 'read') return ok([{ id: 42, name: 'Hadd Contracting (HC) 100%' }])
+    if (model === 'sale.order') return ok([{ state: 'sale', amount_total: 1000, date_order: '2026-01-02 10:00:00', user_id: [3, 'Sam'] }])
+    return ok([])
+  }
+  const cfg = { url: 'https://arak-co.odoo.com', db: 'arak-co', login: 'x', apiKey: 'k' }
+
+  it('finds them by the name our client list keeps for them, whole', async () => {
+    const { customerHistory } = await import('./_odoo.js')
+    const asked = []
+    const h = await customerHistory(fakeOdoo(asked), cfg, { email: 'pm@hadd.sa', company: 'HC', odooName: 'Hadd Contracting (HC) 100%' })
+    expect(h.matchedBy).toBe('our client list')
+    expect(h.companies).toEqual([{ id: 42, name: 'Hadd Contracting (HC) 100%' }])
+    expect(h.orders).toHaveLength(1)
+  })
+  it('without that name, a domain Odoo does not know finds no customer', async () => {
+    const { customerHistory } = await import('./_odoo.js')
+    const h = await customerHistory(fakeOdoo([]), cfg, { email: 'pm@hadd.sa', company: 'HC' })
+    expect(h.companies).toEqual([])
   })
 })

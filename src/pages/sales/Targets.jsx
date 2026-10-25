@@ -165,17 +165,24 @@ export default function Targets() {
 function AccountsTab({ rows = [], error, onChange }) {
   const { t } = useT(SW)
   const [showParked, setShowParked] = useState(false)
+  const [prio, setPrio] = useState('all')
   if (error) return <p className="px-4 py-10 text-sm text-red-600 text-center">{t.accountsFailed(error)}</p>
-  const shown = rows.filter(r => showParked || !['won', 'parked'].includes(r.status))
+  const open = rows.filter(r => showParked || !['won', 'parked'].includes(r.status))
+  const shown = open.filter(r => prio === 'all' || String(r.priority) === prio)
   if (!rows.length) return <p className="px-4 py-10 text-sm text-text-tertiary text-center">{t.noAccounts}</p>
+  const prioTabs = [{ key: 'all', label: t.prioAll(open.length) },
+    ...['1', '2', '3'].map(p => ({ key: p, label: t.prioN(p, open.filter(r => String(r.priority) === p).length) }))]
   return (
     <div>
-      <div className="px-4 py-2 flex items-center justify-between gap-3 text-[11px] text-text-tertiary">
-        <span>{t.accountsIntro}</span>
-        <label className="flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
+      <div className="px-4 py-2 flex items-center justify-between gap-3 flex-wrap">
+        <SubTabs items={prioTabs} value={prio} onChange={setPrio} />
+        <label className="flex items-center gap-1.5 cursor-pointer whitespace-nowrap text-[11px] text-text-tertiary">
           <input type="checkbox" checked={showParked} onChange={e => setShowParked(e.target.checked)} /> {t.showParked}
         </label>
       </div>
+      <p className="px-4 pb-2 text-[11px] text-text-tertiary">
+        Every client we have closed a job with. Existing customers win about three times as often as new ones. Priority 1 first, largest first.
+      </p>
       <ul className="divide-y divide-border border-t border-border">
         {shown.map(a => <AccountRow key={a.id} a={a} onChange={onChange} />)}
       </ul>
@@ -196,7 +203,7 @@ function AccountRow({ a, onChange }) {
         </div>
         <p className="text-[11px] text-text-tertiary mt-1 tabular-nums">
           {[a.orders != null && t.orders(a.orders), amount(a.value_sar, lang),
-            a.last_order && t.lastOrder(dateLabel(a.last_order, lang)), a.bought && t.bought(a.bought),
+            a.last_order && t.lastOrder(dateLabel(a.last_order, lang)), a.bought && t.bought(a.bought), a.sold_by && t.soldBy(a.sold_by),
             a.open_deals ? t.openDeals(a.open_deals, amount(a.open_value_sar, lang)) : '']
             .filter(Boolean).join(' · ')}
         </p>
@@ -375,6 +382,10 @@ function IcpTab({ icp: raw, updatedAt, error, onSave }) {
         <Input label="Built from" value={form.evidence} onChange={set('evidence')} />
         <Input label="Share of weekly search on the core track (%)" type="number" min={0} max={100} value={form.core} onChange={set('core')}
           hint="The rest goes to the broader track." />
+        <Textarea label="What we sell" rows={4} value={form.offers} onChange={set('offers')}
+          hint="One per line: name | one-off or recurring | note. Recurring means a yearly contract, e.g. maintenance. Prospects pick one of these." />
+        <Textarea label="When we are hired" rows={2} value={form.hire_stage} onChange={set('hire_stage')}
+          hint="When in a project's life buyers hire us, e.g. at design stage, or late, at external works. Research looks for projects at this stage." />
         <Textarea label="Segments" rows={8} value={form.segments} onChange={set('segments')}
           hint="One per line: name | core or broader | weight 1–3 | words that identify it, comma separated | note | share % (optional, e.g. 6-8)" />
         <div>
@@ -459,6 +470,10 @@ function IcpTab({ icp: raw, updatedAt, error, onSave }) {
           icp.share && `Our share of a project: ${icp.share.min === icp.share.max ? icp.share.min : `${icp.share.min}–${icp.share.max}`}%`,
           icp.share?.note,
           icp.regions.length && `Region: ${icp.regions.join(', ')}`,
+        ].filter(Boolean)} />
+        <IcpList title="What we sell, and when we are hired" items={[
+          ...icp.offers.map(o => `${o.label}${o.kind === 'recurring' ? ' (yearly)' : ''}${o.note ? ` — ${o.note}` : ''}`),
+          icp.hire_stage && `Hired: ${icp.hire_stage}`,
         ].filter(Boolean)} />
         <IcpList title="Ask these first" items={icp.ask_first} ordered />
         <IcpList title="Red flags" items={icp.red_flags.map(f => `${f.label}${f.advice ? ` — ${f.advice}` : ''}`)} />

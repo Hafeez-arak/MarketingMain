@@ -117,15 +117,35 @@ export const leadUrl = (url, id) => `${url}/web#id=${id}&model=crm.lead&view_typ
  * (a push that died after Odoo saved it). Returns { id, url, existed }.
  * `values` comes from odooLeadValues (_crm.js); `ref` is our lead id.
  */
-export async function createLead(fetchFn, cfg, values, ref) {
+export async function createLead(fetchFn, cfg, values, ref, { pipeline = false, phase = '' } = {}) {
   const uid = await login(fetchFn, cfg)
   const [already] = await call(fetchFn, cfg, uid, 'crm.lead', 'search', [[['description', 'ilike', ref]]], { limit: 1, context: { active_test: false } })
   if (already) return { id: already, url: leadUrl(cfg.url, already), existed: true }
   const { tags = [], ...fields } = values
   const vals = { ...fields }
   if (tags.length) vals.tag_ids = [[6, 0, await tagIds(fetchFn, cfg, uid, tags)]]
+  // Straight onto the Pipeline board (the owner, 2026-10-20): an opportunity
+  // in the column for its phase, not a Lead waiting under the Leads menu.
+  if (pipeline) {
+    vals.type = 'opportunity'
+    const stage = await pipelineStage(fetchFn, cfg, uid, phase, vals.team_id)
+    if (stage) vals.stage_id = stage
+  }
   const id = await call(fetchFn, cfg, uid, 'crm.lead', 'create', [vals])
   return { id, url: leadUrl(cfg.url, id), existed: false }
+}
+
+/**
+ * The Pipeline column a new opportunity starts in: the first stage named for
+ * its phase ("RFQ Received (TENDER)" before "Quotation (tender)"), else the
+ * first stage ("New"). Won stages never; the team's own stages and the
+ * shared ones. null when Odoo has none.
+ */
+async function pipelineStage(fetchFn, cfg, uid, phase = '', teamId = null) {
+  const stages = await call(fetchFn, cfg, uid, 'crm.stage', 'search_read', [[['is_won', '=', false], '|', ['team_id', '=', false], ['team_id', '=', teamId || false]]], { fields: ['name', 'sequence'], order: 'sequence, id' })
+  if (!stages.length) return null
+  const word = { tender: /tender/i, jih: /\bjih\b/i, maintenance: /mainten/i }[phase]
+  return (word && stages.find((s) => word.test(s.name)))?.id || stages[0].id
 }
 
 /**
@@ -198,4 +218,189 @@ export async function readChanged(fetchFn, cfg, model, { fields, domain = [], si
     lastId = rows[rows.length - 1].id
   }
   return { rows: out, done: false }
+}
+
+// ─── The battle card as fields, and the lead's history (2026-10-20) ────────
+
+/** The sales teams, for choosing where our leads go. */
+export async function listTeams(fetchFn, cfg) {
+  const uid = await login(fetchFn, cfg)
+  return call(fetchFn, cfg, uid, 'crm.team', 'search_read', [[]], { fields: ['name', 'user_id', 'member_ids', 'use_leads'], order: 'name' })
+}
+
+/** A team's properties definition (the fields its leads carry). */
+export async function readTeamDefinition(fetchFn, cfg, teamId) {
+  const uid = await login(fetchFn, cfg)
+  const [team] = await call(fetchFn, cfg, uid, 'crm.team', 'read', [[Number(teamId)]], { fields: ['name', 'lead_properties_definition'] })
+  if (!team) throw new OdooError(`Sales team ${teamId} is not in Odoo.`)
+  return team
+}
+
+/** Write a team's properties definition. Needs Sales: Administrator. */
+export async function writeTeamDefinition(fetchFn, cfg, teamId, definition) {
+  const uid = await login(fetchFn, cfg)
+  await call(fetchFn, cfg, uid, 'crm.team', 'write', [[Number(teamId)], { lead_properties_definition: definition }])
+  return true
+}
+
+/**
+ * Move deals into another team. Their battle-card values come along when
+ * that team already holds the same fields (Odoo keeps a value whose name is
+ * in the new team's definition), so the fields go on the team first.
+ */
+export async function moveLeadsToTeam(fetchFn, cfg, ids, teamId) {
+  const uid = await login(fetchFn, cfg)
+  for (let i = 0; i < ids.length; i += 100) {
+    await call(fetchFn, cfg, uid, 'crm.lead', 'write', [ids.slice(i, i + 100).map(Number), { team_id: Number(teamId) }])
+  }
+  return ids.length
+}
+
+/** A new sales team with these members. Needs Sales: Administrator. */
+export async function createTeam(fetchFn, cfg, name, memberIds = []) {
+  const uid = await login(fetchFn, cfg)
+  return call(fetchFn, cfg, uid, 'crm.team', 'create', [{ name, use_leads: true, use_opportunities: true, member_ids: [[6, 0, memberIds.map(Number)]] }])
+}
+
+/** { odooLeadId: { props: [{ name, value, … }], teamId } } for these leads, archived ones too. */
+export async function readLeadProps(fetchFn, cfg, ids) {
+  if (!ids.length) return {}
+  const uid = await login(fetchFn, cfg)
+  const rows = await call(fetchFn, cfg, uid, 'crm.lead', 'read', [ids.map(Number)], { fields: ['lead_properties', 'team_id', 'user_id'], context: { active_test: false } })
+  return Object.fromEntries(rows.map((r) => [String(r.id), {
+    props: r.lead_properties || [], teamId: Array.isArray(r.team_id) ? r.team_id[0] : null, userId: Array.isArray(r.user_id) ? r.user_id[0] : null,
+  }]))
+}
+
+/** Write the lead's properties WHOLE ({ name: value }): Odoo replaces the set. */
+export async function writeLeadProps(fetchFn, cfg, leadId, values) {
+  const uid = await login(fetchFn, cfg)
+  await call(fetchFn, cfg, uid, 'crm.lead', 'write', [[Number(leadId)], { lead_properties: values }])
+  return true
+}
+
+// ─── Their history with us, for the battle card (2026-10-20) ───────────────
+
+/**
+ * Everything Odoo knows about this customer: their past deals (won, lost and
+ * why, open) and their quotations and orders. Found by their email domain,
+ * or by the exact email for a free address (gmail…), or by the exact company
+ * name. Read only. `exclude` is the lead itself. Returns the raw rows; the
+ * summing up is pure (historyLines in src/lib/sales/odooCard.js).
+ */
+export async function customerHistory(fetchFn, cfg, { email = '', company = '', odooName = '', freeEmail = false, ownDomains = [], exclude = null } = {}) {
+  const addr = typeof email === 'string' ? email.trim().toLowerCase() : ''
+  const own = new Set([...ownDomains.map((d) => String(d).toLowerCase()), ...PLACEHOLDER_DOMAINS])
+  const domain = !freeEmail && addr.includes('@') && !own.has(addr.split('@')[1]) ? addr.split('@')[1] : ''
+  const core = companyCore(company)
+  const uid = await login(fetchFn, cfg)
+  // Companies (commercial partners) behind the contacts matching a condition;
+  // more than MAX_COMPANIES means the key is shared or a placeholder
+  // ("@1234.com" sits on 37 customers), so it identifies no one.
+  const companiesFor = async (cond) => {
+    const rows = await call(fetchFn, cfg, uid, 'res.partner', 'search_read', [[cond]], { fields: ['commercial_partner_id'], limit: 60, context: { active_test: false } })
+    const ids = [...new Set(rows.map((p) => (Array.isArray(p.commercial_partner_id) ? p.commercial_partner_id[0] : p.id)))]
+    return ids.length && ids.length <= MAX_COMPANIES ? ids : []
+  }
+  let matchedBy = null
+  let companies = []
+  if (domain) { companies = await companiesFor(['email', '=ilike', `%@${domain}`]); if (companies.length) matchedBy = 'email domain' }
+  else if (freeEmail && addr) { companies = await companiesFor(['email', '=ilike', addr]); if (companies.length) matchedBy = 'email' }
+  // Our client list knows the sender's domain and Odoo's own name for them
+  // (Odoo's customers rarely carry an email): that exact name, whole.
+  const exact = String(odooName || '').trim().replace(/[%_]/g, (c) => `\\${c}`)
+  if (!companies.length && exact) { companies = await companiesFor(['name', '=ilike', exact]); if (companies.length) matchedBy = 'our client list' }
+  if (!companies.length && core) { companies = await companiesFor(['name', 'ilike', core]); if (companies.length) matchedBy = 'company name' }
+  const leadEmail = domain ? ['email_from', '=ilike', `%@${domain}`] : null
+  if (!companies.length && !leadEmail) return { matchedBy: null, companies: [], deals: [], orders: [] }
+  const anyOf = (conds) => [...Array(conds.length - 1).fill('|'), ...conds]
+  const dealDomain = anyOf([companies.length ? ['partner_id', 'child_of', companies] : null, leadEmail].filter(Boolean))
+  const names = companies.length ? await call(fetchFn, cfg, uid, 'res.partner', 'read', [companies], { fields: ['name'] }) : []
+  const [deals, orders] = await Promise.all([
+    dealDomain.length
+      ? call(fetchFn, cfg, uid, 'crm.lead', 'search_read', [[...dealDomain, ...(exclude ? [['id', '!=', Number(exclude)]] : [])]], {
+          fields: ['active', 'probability', 'stage_id', 'lost_reason_id', 'date_closed', 'create_date', 'expected_revenue', 'user_id'],
+          order: 'create_date desc', limit: 100, context: { active_test: false },
+        })
+      : [],
+    companies.length
+      ? call(fetchFn, cfg, uid, 'sale.order', 'search_read', [[['partner_id', 'child_of', companies], ['state', '!=', 'cancel']]], {
+          fields: ['state', 'amount_total', 'date_order', 'user_id'], order: 'date_order desc', limit: 200,
+        })
+      : [],
+  ])
+  if (!companies.length && deals.length) matchedBy = 'email domain'
+  return { matchedBy: deals.length || orders.length ? matchedBy : null, companies: names.map((n) => ({ id: n.id, name: n.name })), deals, orders }
+}
+
+/**
+ * Domains that name no company: reserved test domains, and the made-up ones
+ * typed into Odoo when a contact's real email was unknown (2026-10-20:
+ * "@1234.com" on 37 customers, "@123.com" and "@abc.com" on 7 each).
+ */
+export const PLACEHOLDER_DOMAINS = ['example.com', 'example.org', 'example.net', 'test.com', 'domain.com', 'email.com', 'mail.com', '123.com', '1234.com', '12345.com', 'abc.com', 'xyz.com', 'none.com', 'na.com']
+
+/** More companies than this behind one email domain or name: it identifies no one. */
+const MAX_COMPANIES = 3
+
+// Words that say what kind of company it is, not which one.
+const COMPANY_WORDS = /\b(co|company|corp|corporation|est|establishment|llc|ltd|limited|inc|trading|contracting|contractors?|group|holding|international|intl|for|and|the|of|ksa|saudi|arabia|w\.?l\.?l|l\.?l\.?c)\b/gi
+
+/** "Example Contracting Co. Ltd" → "Example". '' when too little is left to identify anyone. */
+export function companyCore(name = '') {
+  const core = String(name || '').replace(/[().,&/\\-]+/g, ' ').replace(COMPANY_WORDS, ' ').replace(/\s+/g, ' ').trim()
+  return core.length >= 5 ? core : ''
+}
+
+// ─── The next step as an Activity (a to-do with a due date) ────────────────
+
+/** The ids an activity on a lead needs: crm.lead's model id and the To-Do type. */
+async function activityRefs(fetchFn, cfg, uid) {
+  const [model] = await call(fetchFn, cfg, uid, 'ir.model', 'search', [[['model', '=', 'crm.lead']]], { limit: 1 })
+  const [todo] = await call(fetchFn, cfg, uid, 'mail.activity.type', 'search', [['|', ['name', '=', 'To-Do'], ['name', '=', 'To Do']]], { limit: 1 })
+  const type = todo || (await call(fetchFn, cfg, uid, 'mail.activity.type', 'search', [[['res_model', '=', false]]], { limit: 1 }))[0]
+  if (!model || !type) throw new OdooError('Odoo has no To-Do activity type to schedule the next step with.')
+  return { modelId: model, typeId: type }
+}
+
+/** Schedule the next step on the lead for this Odoo user. Returns the activity id. */
+export async function createActivity(fetchFn, cfg, leadId, { summary, date, userId }) {
+  const uid = await login(fetchFn, cfg)
+  const { modelId, typeId } = await activityRefs(fetchFn, cfg, uid)
+  return call(fetchFn, cfg, uid, 'mail.activity', 'create', [{
+    res_model_id: modelId, res_id: Number(leadId), activity_type_id: typeId,
+    summary, date_deadline: date || new Date().toISOString().slice(0, 10), ...(userId ? { user_id: userId } : {}),
+  }])
+}
+
+/** Change an open activity's text, date or person. */
+export async function writeActivity(fetchFn, cfg, id, { summary, date, userId }) {
+  const uid = await login(fetchFn, cfg)
+  await call(fetchFn, cfg, uid, 'mail.activity', 'write', [[Number(id)], {
+    summary, date_deadline: date || new Date().toISOString().slice(0, 10), ...(userId ? { user_id: userId } : {}),
+  }])
+  return true
+}
+
+/** Mark an activity done (it leaves the to-do list; Odoo logs it on the lead). */
+export async function doneActivity(fetchFn, cfg, id, feedback = '') {
+  const uid = await login(fetchFn, cfg)
+  await call(fetchFn, cfg, uid, 'mail.activity', 'action_feedback', [[Number(id)]], { feedback })
+  return true
+}
+
+/** { id: { summary, date } } for the activities still open; done ones are gone. */
+export async function readActivities(fetchFn, cfg, ids) {
+  if (!ids.length) return {}
+  const uid = await login(fetchFn, cfg)
+  const rows = await call(fetchFn, cfg, uid, 'mail.activity', 'search_read', [[['id', 'in', ids.map(Number)]]], { fields: ['summary', 'date_deadline'] })
+  return Object.fromEntries(rows.map((r) => [String(r.id), { summary: r.summary || '', date: r.date_deadline || null }]))
+}
+
+/** An internal note in the lead's history (never emailed to the customer). */
+export async function postNote(fetchFn, cfg, leadId, html) {
+  const uid = await login(fetchFn, cfg)
+  return call(fetchFn, cfg, uid, 'crm.lead', 'message_post', [[Number(leadId)]], {
+    body: html, body_is_html: true, message_type: 'comment', subtype_xmlid: 'mail.mt_note',
+  })
 }

@@ -8,7 +8,7 @@ import {
   ReportTable, ReportRow, Cell, Caveats, ReportFooter,
 } from '../../components/report/ReportShell'
 import { useReportFilename } from '../../lib/reports/print'
-import { lensStates, pct } from '../../lib/researchBrief'
+import { lensStates, pct, readableReport } from '../../lib/researchBrief'
 import {
   TEAMS, sectionVisible, forTeam, topThree, salesRows, competitorMoves, movesByLine,
   globalView, lineView, linesIn, socialActivity, eventsView,
@@ -128,7 +128,7 @@ export function ResearchReport() {
     return runs.find(r => r.status === 'complete' && r.report?.headline) || runs[0] || null
   }, [runs, wanted])
 
-  const report = useMemo(() => run?.report || {}, [run])
+  const report = useMemo(() => readableReport(run?.report), [run])
   const top = useMemo(() => topThree(report, now), [report, now])
   const sales = useMemo(() => salesRows({ report, opportunities: intel.opportunities, runId: run?.id, now }), [report, intel, run, now])
   // The watchlist lines a rival known only from an Instagram board read, the
@@ -190,7 +190,7 @@ export function ResearchReport() {
               <option key={r.id} value={r.id}>
                 {new Date(r.started_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
                 {' — '}
-                {r.status === 'failed' ? 'did not finish' : partRun(r) ? 'partly finished' : (r.report?.headline || 'complete').slice(0, 44)}
+                {r.status === 'failed' ? 'did not finish' : partRun(r) ? 'partly finished' : (readableReport(r.report).headline || 'complete').slice(0, 44)}
               </option>
             ))}
           </PillSelect>

@@ -8,6 +8,7 @@ import { checkMail, emailFile, currentOutlookLink, emailAttachments, attachmentF
 import { exportLeads, applySheetDecisions } from './_export.js'
 import { approveLead, crmStatus, saveCrm, sendWaiting, disconnectCrm } from './_crm.js'
 import { openCard, saveCard, watchlist } from './_card.js'
+import { crmTeams, setCrmTeam, pullCards } from './_crmCard.js'
 import { assignLead, teamList, teamSave, teamCheckOdoo } from './_assign.js'
 import { sectionFor, hasSection } from './_sectionAccess.js'
 import { controlPanel, saveTargets, saveRouting, markLead, remind, remindProject, accountContacted, sendToSales, runDailyAlerts, MIGRATION_MISSING } from './_control.js'
@@ -388,6 +389,16 @@ const actions = {
   async approve({ workspaceId, body, user, token }) {
     if (!(await canApprove(workspaceId, token))) return fail(403, 'Only a sales admin can approve leads into the CRM.')
     const deps = leadDeps()
+    // "Test only" (2026-10-20): the access admin tries the Odoo path on one
+    // lead with no one assigned and nothing forwarded; it goes to Odoo as the
+    // connection's own user. Never for anyone else.
+    if (body.test === true) {
+      const [member, admin] = await Promise.all([isMember(workspaceId, token), isAdmin(token)])
+      if (!member || !admin) return fail(403, 'Only the access admin can approve a lead as a test.')
+      const out = await approveLead(deps, { workspaceId, leadId: body.lead_id, user, test: true })
+      if (out.error) return fail(out.status, out.error)
+      return { lead: out.lead, crm: out.crm, forward: null }
+    }
     // Chosen in the confirmation when no one had it yet (or someone else):
     // assigned first, which forwards the email, then approved.
     let forward = null
@@ -577,6 +588,33 @@ const actions = {
     const out = await sendWaiting(deps, workspaceId)
     if (out.error) return fail(409, out.error)
     return { sent: out, crm: await crmStatus(deps, workspaceId) }
+  },
+
+  /** Odoo's sales teams, for choosing where our leads go (2026-10-20). */
+  async crm_teams({ workspaceId }) {
+    const out = await crmTeams(leadDeps(), workspaceId)
+    if (out.error) return fail(out.status || 409, out.error)
+    return out
+  },
+
+  /**
+   * The team our leads go into. Its leads get the battle-card fields (Odoo
+   * Properties), written now; Odoo refuses that without Sales: Administrator.
+   */
+  async crm_set_team({ workspaceId, body }) {
+    const deps = leadDeps()
+    const out = await setCrmTeam(deps, workspaceId, body.team_id, { moveSent: body.move_sent === true })
+    if (out.error) return fail(out.status || 409, out.error)
+    return { crm: await crmStatus(deps, workspaceId), fieldsAdded: out.changed, moved: out.moved }
+  },
+
+  /** Read every pushed lead's battle card back from Odoo now (it also runs at 07:50 and 13:00). */
+  async crm_pull({ workspaceId }) {
+    const deps = leadDeps()
+    const out = await pullCards(deps, workspaceId)
+    if (out.error) return fail(409, out.error)
+    await db(`lead_crm?workspace_id=eq.${workspaceId}`, { method: 'PATCH', prefer: 'return=minimal', body: { last_pull_at: new Date().toISOString(), last_pull_error: '', last_pull_counts: out } })
+    return { pulled: out, crm: await crmStatus(deps, workspaceId) }
   },
 
   /** Forget the Odoo connection. Leads already sent keep their Odoo links. */

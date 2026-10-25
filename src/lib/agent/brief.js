@@ -10,6 +10,8 @@
 //
 // Pure — the schema, the prompts, and the merge. No network, no model.
 
+import { cleanBriefProse } from './refs.js'
+
 /**
  * What the model is allowed to return from stage 4.
  *
@@ -204,7 +206,7 @@ export const BRIEF_SCHEMA = {
           properties: {
             title: { type: 'string' },
             angle: { type: 'string' },
-            rationale: { type: 'string', description: 'Which finding this answers, in prose.' },
+            rationale: { type: 'string', description: 'Which finding this answers, in plain words. Name it; never write its ref here.' },
             // The same link as `rationale`, but as a reference rather than as
             // prose, so the page can render the idea UNDER the thing it
             // answers instead of in a separate card. Prose alone meant the
@@ -478,6 +480,14 @@ export const SYNTHESISE_PROMPT = [
   'the bottom. If an idea answers nothing on this list, that is a reason to reconsider proposing',
   'it, not a reason to invent a reference.',
   '',
+  'REFS ARE FOR CODE, NEVER FOR THE READER.',
+  'F-refs, S-refs and G-ids go ONLY in the `refs`, `sources` and `answers` fields. Never write one',
+  'inside a sentence: not "(F3)", not "(F19, F23, S2)", not "see G2". The page never shows these',
+  'ids, and a reader who meets "F19" takes it for item 19 on the page and goes looking for it. When',
+  'a sentence needs to point at its evidence, name the thing in words: the project, the rival, the',
+  'post, the search. A section with no refs field (a gap, a market direction) names its evidence',
+  'in words too.',
+  '',
   'A RULE IS FOREVER. AN IDEA IS FOR THIS WEEK. DO NOT CONFUSE THEM.',
   'An approved rule is appended to the brand context of every future generation until a person',
   'deletes it by hand. There is no expiry and nothing reviews it a second time. So before you',
@@ -500,7 +510,8 @@ export const SYNTHESISE_PROMPT = [
   '- Between two and four marketing recommendations. Each is a gap with the content that closes it;',
   '  a fifth proposal dilutes the four that matter, and an unnumbered one at the bottom is read last',
   '  however time-critical it is.',
-  '- Every claim rests on a finding or a stored signal you were given, named by its ref. No ref, no claim.',
+  '- Every claim rests on a finding or a stored signal you were given, named by its ref in that',
+  '  item\'s refs, sources or answers field, never in the sentence. No ref, no claim.',
   '- Say when a sample is too small to carry a conclusion. "n=3" is a fact, not a hedge.',
   '- "Nothing moved this week" is a complete headline. Do not manufacture a finding to',
   '  justify having run — the weeks where something did happen only mean anything if the',
@@ -759,7 +770,10 @@ export function mergeBrief(gathered, brief, allowedUrls, findings = [], signalRe
     (brief?.competitor_moves || []).map(m => [String(m.competitor || '').toLowerCase(), m.what_changed || '']),
   )
 
-  return {
+  // Refs stay in `refs`, `sources` and `answers`, where code resolves them;
+  // any the model also wrote into a sentence are stripped, because the page
+  // never shows an F, S or G label and a reader cannot look one up.
+  return cleanBriefProse({
     ...gathered,
     // The model's headline replaces stage 0's placeholder, but only if it
     // wrote one — a failed synthesis leaves the measured headline standing.
@@ -781,5 +795,5 @@ export function mergeBrief(gathered, brief, allowedUrls, findings = [], signalRe
     rules_dropped_uncited: droppedRules.length,
     rules_dropped: droppedRules,
     stage_reached: 'synthesise',
-  }
+  })
 }

@@ -12,6 +12,89 @@ import { when } from '../../lib/leads/view'
 
 const ODOO_DEFAULT = 'https://arak-co.odoo.com'
 
+/**
+ * The battle card in Odoo (2026-10-20): the team our leads go into (its
+ * leads carry the card as fields), and the read back from Odoo, which runs
+ * by itself at 07:50 and 13:00 and can be run now.
+ */
+function CardSync({ workspaceId, crm, onChange, onError }) {
+  const [teams, setTeams] = useState(null)
+  // Changing team takes the deals already sent along (one step to the real
+  // team, the owner, 2026-10-20); untick to leave them where they are.
+  const [moveSent, setMoveSent] = useState(true)
+  const [busy, setBusy] = useState('')
+  const [note, setNote] = useState('')
+
+  async function loadTeams() {
+    setBusy('teams')
+    const r = await leadsApi('crm_teams', workspaceId)
+    setBusy('')
+    if (r.error) return onError(r.error)
+    setTeams(r.teams)
+  }
+
+  async function chooseTeam(e) {
+    const id = Number(e.target.value)
+    if (!id) return
+    setBusy('team'); setNote('')
+    const r = await leadsApi('crm_set_team', workspaceId, { team_id: id, move_sent: moveSent && crm.sentCount > 0 })
+    setBusy('')
+    if (r.error) return onError(r.error)
+    onChange(r.crm)
+    setTeams(null)
+    setNote([
+      r.fieldsAdded ? 'The battle-card fields were added to that team.' : 'That team already had the battle-card fields.',
+      r.moved ? `${r.moved} deal${r.moved === 1 ? '' : 's'} already sent moved there too.` : '',
+    ].filter(Boolean).join(' '))
+  }
+
+  async function pullNow() {
+    setBusy('pull'); setNote('')
+    const r = await leadsApi('crm_pull', workspaceId)
+    setBusy('')
+    if (r.error) return onError(r.error)
+    onChange(r.crm)
+    setNote(`Read ${r.pulled.read} lead${r.pulled.read === 1 ? '' : 's'} from Odoo; ${r.pulled.updated} card${r.pulled.updated === 1 ? '' : 's'} changed here.`)
+  }
+
+  const counts = crm.lastPullCounts
+  return (
+    <div className="border-t border-border pt-3 space-y-2">
+      <p className="text-xs text-text">
+        <span className="text-text-tertiary">Battle card in Odoo: </span>
+        {crm.teamId ? <>leads go into <b>{crm.teamName || `team ${crm.teamId}`}</b>, with the card as fields.</> : <span className="text-amber-800 font-semibold">no team chosen, so leads go without the card.</span>}
+      </p>
+      {teams && crm.sentCount > 0 && (
+        <label className="flex items-center gap-2 text-[11px] text-text-secondary">
+          <input type="checkbox" checked={moveSent} onChange={(e) => setMoveSent(e.target.checked)} />
+          Also move the {crm.sentCount} deal{crm.sentCount === 1 ? '' : 's'} already sent to the new team (their battle cards come along)
+        </label>
+      )}
+      {teams ? (
+        <select aria-label="Sales team in Odoo" defaultValue="" onChange={chooseTeam} disabled={busy === 'team'}
+          className="w-full text-xs bg-white border border-border px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-amber-400">
+          <option value="" disabled>Choose the team our leads go into…</option>
+          {teams.map((t) => <option key={t.id} value={t.id}>{t.name}{t.leader ? ` (${t.leader})` : ''}{t.id === crm.teamId ? ' · now' : ''}</option>)}
+        </select>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="xs" variant="secondary" onClick={loadTeams} disabled={Boolean(busy)}>{busy === 'teams' ? <Spinner size="sm" /> : null}{crm.teamId ? 'Change team' : 'Choose team'}</Button>
+          {crm.teamId && <Button size="xs" variant="ghost" onClick={pullNow} disabled={Boolean(busy)}>{busy === 'pull' ? <Spinner size="sm" /> : null}Read from Odoo now</Button>}
+        </div>
+      )}
+      {crm.teamId && (
+        <p className="text-[11px] text-text-tertiary">
+          A card saved here goes to Odoo at once. Odoo is the master: what is changed there comes back here at 07:50 and 13:00.
+          {crm.lastPullAt ? ` Last read ${when(crm.lastPullAt)}${counts ? `: ${counts.read} read, ${counts.updated} changed` : ''}.` : ' Not read yet.'}
+        </p>
+      )}
+      {crm.lastPullError && <p className="text-[11px] text-red-600">The last read from Odoo failed: {crm.lastPullError}</p>}
+      {crm.cardsNotSynced > 0 && <p className="text-[11px] text-amber-800 font-semibold">{crm.cardsNotSynced} card{crm.cardsNotSynced === 1 ? '' : 's'} not in Odoo yet; tried again at the next read.</p>}
+      {note && <p className="text-[11px] text-sage-700">{note}</p>}
+    </div>
+  )
+}
+
 export default function CrmCard({ workspaceId, crm, loading, onChange, onError }) {
   const [form, setForm] = useState(null) // the open form's values
   const [busy, setBusy] = useState('')
@@ -89,6 +172,7 @@ export default function CrmCard({ workspaceId, crm, loading, onChange, onError }
           )}
         </div>
       )}
+      {!loading && crm?.connected && <CardSync workspaceId={workspaceId} crm={crm} onChange={onChange} onError={onError} />}
       {note && <p className="text-xs text-sage-700">{note}</p>}
 
       {form ? (

@@ -184,19 +184,27 @@ export function senderDomain(lead = {}) {
 const compact = (s) => str(s).toLowerCase().replace(/[^a-z0-9]+/g, '')
 
 /**
- * One of our accounts, matched by name: the sender's domain root (sajco in
- * sajco.com.sa) or company name found inside the account's name. Five
- * letters at least, so short words never match. A name match only, which
- * the card says.
+ * One of our accounts. First by the sender's email domain, from the domains
+ * our clients wrote from (example.sa, or a subdomain of it): that IS the client.
+ * Else by name: the sender's domain root (sajco in sajco.com.sa) or company
+ * name found inside the account's name, five letters at least so short
+ * words never match. A name match is a guess, which the card says.
+ * Returns the account with `matchedBy` ('domain' | 'name'), or null.
  */
 export function matchAccount(lead = {}, accounts = []) {
   const domain = senderDomain(lead)
+  if (domain) {
+    const owns = (d) => { const x = str(d).toLowerCase().trim(); return Boolean(x) && (domain === x || domain.endsWith(`.${x}`)) }
+    const byDomain = accounts.find((a) => list(a.domains).some(owns))
+    if (byDomain) return { ...byDomain, matchedBy: 'domain' }
+  }
   const keys = [
     domain.split('.')[0].replace(/[^a-z0-9]/g, ''),
     compact(str(lead.company).replace(/\b(company|co|ltd|llc|est|establishment|group|contracting|trading|for|and|the)\b/gi, ' ')),
   ].filter((k) => k.length >= 5)
   if (!keys.length) return null
-  return accounts.find((a) => keys.some((k) => compact(a.name).includes(k))) || null
+  const byName = accounts.find((a) => keys.some((k) => compact(a.name).includes(k)))
+  return byName ? { ...byName, matchedBy: 'name' } : null
 }
 
 const sar = (n) => {
@@ -281,7 +289,7 @@ export function buyerOf(lead = {}) {
 // Riyadh" would otherwise read as an office job in our region).
 const aboutText = (lead = {}) => [lead.subject, lead.summary, lead.details?.products, lead.details?.location, lead.details?.stage].map(str).join(' ')
 
-const BAND_LABEL = { strong: 'Strong fit', possible: 'Possible fit', weak: 'Weak fit' }
+export const BAND_LABEL = { strong: 'Strong fit', possible: 'Possible fit', weak: 'Weak fit' }
 
 /**
  * How well the lead fits the company's ICP, scored the way Sales → Targets
@@ -457,8 +465,10 @@ export function buildLeadCard(lead = {}, context = {}) {
   if (account?.status === 'parked') {
     history.push(`Parked account: ${account.name}. Check with the owner before contacting.`)
   } else if (account) {
-    const bits = [account.orders ? `${account.orders} orders` : '', sar(account.value_sar), account.last_order ? `last order ${monthYear(account.last_order)}` : ''].filter(Boolean)
-    history.push(`Existing customer (name match, confirm): ${account.name}${bits.length ? `, ${bits.join(', ')}` : ''}.`)
+    const bits = [account.orders ? `${account.orders} orders` : '', sar(account.value_sar), account.last_order ? `last order ${monthYear(account.last_order)}` : '',
+      str(account.sold_by) ? `sold by ${str(account.sold_by)}` : ''].filter(Boolean)
+    const how = account.matchedBy === 'domain' ? '' : ' (name match, confirm)'
+    history.push(`Existing customer${how}: ${account.name}${bits.length ? `, ${bits.join(', ')}` : ''}.`)
   }
   if (earlier.length) {
     const dates = [...earlier].sort((x, y) => String(x.received_at).localeCompare(String(y.received_at))).map((e) => dayMonth(e.received_at)).filter(Boolean)

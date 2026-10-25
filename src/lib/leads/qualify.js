@@ -58,8 +58,11 @@ export const PHILIPS = ['none', 'only', 'mixed', 'or_equivalent']
 
 export const SOURCE_CHECKS = ['verified', 'not_verified']
 
+/** Does the sender's organisation have any reason to buy from us? (2026-10-25) */
+export const SENDER_FITS = ['fits', 'unrelated', 'unknown']
+
 /** Bumped whenever the rules change, so the page can tell old readings from new. */
-export const CRITERIA_VERSION = 2
+export const CRITERIA_VERSION = 3
 
 const FREE_MAIL = new Set([
   'gmail.com', 'googlemail.com', 'hotmail.com', 'outlook.com', 'live.com', 'msn.com',
@@ -322,6 +325,7 @@ Rules:
 - If a BUYER asks us for something clearly outside what we sell (for example IT or network equipment, HVAC sensors, furniture, vehicles, stationery), use unclear and start the reason with "Outside what we sell:". A company promoting ITS OWN products or services, in any field, is vendor_pitch, never unclear.
 - An empty or unreadable message whose subject offers shipping, freight, DDP, logistics, sourcing or other services is vendor_pitch. If you still cannot tell whether they want to buy from us or sell to us (an empty message with a vague or no subject), use unclear.
 - A vague request to meet about an unnamed "client project", with no product or scope, especially from an odd or mismatched domain, is usually a scam: use spam, or unclear with low confidence.
+- A generic "Request for Quotation" or "we have an upcoming project, can you confirm you can quote? we will send the details" that names no product, scope, location or project, from an organisation whose own work has nothing to do with buildings, construction or lighting (a school, clinic, law firm, travel agency abroad), is phishing from a hijacked mailbox: use spam.
 - Use low confidence when the enquiry could reasonably be read two ways.
 - Personal details were replaced with [NAME], [EMAIL@domain], [PHONE], [LINK:domain]. The domains are real: use them.
 - Enquiries may be Arabic or English. Always answer in English.
@@ -343,7 +347,13 @@ sender_evidence: the words from the signature or website that show it ("Procurem
 source_check: is this a real, identifiable business or person we can call back?
 - verified: the signature names a company together with a role, an address, a company phone or a company website; or the website checked below shows a real company that matches the sender; or (website forms) a company name together with a company email domain whose website matches. The email domain must fit the company named: a large or well-known company (an oil company, a bank, a ministry, a giga-project) writing from a domain that is not its own, such as a bulk-mail or CRM service (salesforce, sfcustomeremail, sendgrid, mailchimp, hubspot), a free email or an unrelated domain, is not_verified however good the signature looks. Small companies writing from a free email can still be verified by their signature.
 - not_verified: no signature, only a name, a free email with no company details, or the website could not be opened and nothing else shows who they are. Never guess: when in doubt, not_verified.
+- A website that shows a real organisation is NOT enough when that organisation has nothing to do with the request: when sender_fit is unrelated, source_check is not_verified.
 source_evidence: what you relied on, in a few words.
+
+sender_fit: does the sender's organisation have a reason to buy from us?
+- fits: it works in construction, building, lighting, electrical, MEP, interiors, real estate or facilities, or it is a business or institution in Saudi Arabia or the Gulf buying for its own building.
+- unrelated: the signature or the website shows an organisation whose work has nothing to do with buildings, construction or lighting and that has no link to Saudi Arabia or the Gulf (for example a school, clinic or shop abroad), and the email names no project of its own. In an RFQ this usually means a hijacked mailbox.
+- unknown: you cannot tell.
 
 project_type: ONLY when the enquiry says it; never infer.
 - jih: job in hand: the project is awarded or going ahead: "awarded", "under construction", "ready to go", "PO", "contract signed", "site", "submittal", "material approval", "delivery schedule", "تمت الترسية", "قيد التنفيذ".
@@ -372,7 +382,7 @@ Answer with JSON only:
 - summary: what they want, in at most 20 English words.
 - details: products, brands, quantity, location, project stage, urgency; use "" when not stated.
 - ask_next: up to 3 short questions the first call should answer.
-- sender_type, sender_confidence, sender_evidence, source_check, source_evidence, project_type, project_evidence, request_type, philips: as above.`
+- sender_type, sender_confidence, sender_evidence, source_check, source_evidence, sender_fit, project_type, project_evidence, request_type, philips: as above.`
 }
 
 /** The website check, as the model reads it: a few lines, or why there are none. */
@@ -408,7 +418,7 @@ export const VERDICT_SCHEMA = {
     additionalProperties: false,
     required: [
       'category', 'confidence', 'reason', 'summary', 'details', 'ask_next',
-      'sender_type', 'sender_confidence', 'sender_evidence', 'source_check', 'source_evidence',
+      'sender_type', 'sender_confidence', 'sender_evidence', 'source_check', 'source_evidence', 'sender_fit',
       'project_type', 'project_evidence', 'request_type', 'philips',
     ],
     properties: {
@@ -435,6 +445,7 @@ export const VERDICT_SCHEMA = {
       sender_evidence: { type: 'string' },
       source_check: { type: 'string', enum: SOURCE_CHECKS },
       source_evidence: { type: 'string' },
+      sender_fit: { type: 'string', enum: SENDER_FITS },
       project_type: { type: 'string', enum: PROJECT_TYPES },
       project_evidence: { type: 'string' },
       request_type: { type: 'string', enum: REQUEST_TYPES },
@@ -478,6 +489,169 @@ export function openRouterRequest(env, brand = {}, { model = QUALIFIER_MODEL, si
   }
 }
 
+// ─── Warning signs, checked in code (2026-10-25) ───────────────────────────
+// A phishing "Request for Quotation" from Junk was stored as QUALIFIED and
+// Verified: its sender "address" was a chain of tracking redirects
+// (awstrack.me → …/billing → a fake Zoom link → someone@an-italian-school),
+// the body named nothing, and the model itself had read that the sender was a
+// psychotherapy school. So these signs are now decided here, not by the model:
+//   bad_sender         the From value is not one real address
+//   tracking_links     a link goes through a redirect or click-tracking service
+//   reply_to_mismatch  replies would go to another domain than the sender's
+//   junk_vague         it sat in Junk and names no product, scope, location or project
+//   unrelated_org      the sender's organisation has nothing to do with what we sell
+// Any sign keeps a lead out of "qualified". A bad sender, two signs, or one
+// sign on mail in Junk (without attachments) makes it unqualified.
+
+/** Click-tracking and redirect services. A one-to-one RFQ never goes through them. */
+const TRACKING_HOST = /(^|\.)(awstrack\.me|list-manage\.com|sendgrid\.net|mandrillapp\.com|mailgun\.(org|net)|sparkpostmail\.com|rs6\.net|exct\.net|hubspotlinks\.com|hubspotemail\.net|mjt\.lu|sendibt\d*\.com|createsend\d*\.com|cmail\d+\.com|klclick\d*\.com|mlsend\.com|smtp2go\.net|elasticemail\.com)$/i
+
+/** Link scanners that rewrite every link in the mail: not a sign of anything. */
+const SECURITY_WRAPPER = /(^|\.)(safelinks\.protection\.outlook\.com|urldefense\.(com|proofpoint\.com)|mimecast\.com|mimecastprotect\.com|barracudanetworks\.com)$/i
+
+const HOST_TOKEN = /[a-z0-9_-]+(?:\.[a-z0-9_-]+)+/gi
+
+const SECOND_LEVEL = /^(com|net|org|gov|edu|co|ac|sch|med|ltd|plc)$/
+
+/** "mail.besix.com.sa" → "besix.com.sa", "x.y.example.com" → "example.com". */
+export function baseDomain(host) {
+  const parts = String(host || '').toLowerCase().replace(/\.$/, '').split('.').filter(Boolean)
+  if (parts.length <= 2) return parts.join('.')
+  const keep = SECOND_LEVEL.test(parts[parts.length - 2]) && parts[parts.length - 1].length === 2 ? 3 : 2
+  return parts.slice(-keep).join('.')
+}
+
+const isTrackingHost = (h) => TRACKING_HOST.test(String(h || '').toLowerCase())
+const decode = (s) => { try { return decodeURIComponent(s) } catch { return s } }
+
+/**
+ * The From value as one clean address, or why it is not one. Harmless
+ * wrapping ("<a@b.sa>", "mailto:", a trailing dot) is cleaned; anything with a
+ * slash, a "?", URL encoding, a second "@" or a tracking host is rejected,
+ * never repaired: whatever address hides at the end of such a chain is not
+ * someone we can trust to have written.
+ * Returns { email, problem } with problem '' | 'missing' | 'not_an_address'.
+ */
+export function senderAddress(raw) {
+  let s = String(raw ?? '').trim()
+  if (!s) return { email: '', problem: 'missing' }
+  s = s.replace(/^mailto:/i, '').replace(/^<(.*)>$/, '$1').replace(/[.;,]+$/, '').trim()
+  const bad = { email: '', problem: 'not_an_address' }
+  if (/[/\\?\s<>"]|%[0-9a-f]{2}|:\/\//i.test(s)) return bad
+  if ((s.match(/@/g) || []).length !== 1) return bad
+  if ((s.match(HOST_TOKEN) || []).some(isTrackingHost)) return bad
+  const email = s.toLowerCase()
+  const [local, domain] = email.split('@')
+  if (!local || local.length > 64 || email.length > 254) return bad
+  if (!/^[a-z0-9!#$&'*+=^_`{|}~.-]+$/.test(local) || /^\.|\.\.|\.$/.test(local)) return bad
+  if (!/^(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?\.)+[\p{L}]{2,63}$/u.test(domain)) return bad
+  return { email, problem: '' }
+}
+
+/**
+ * The redirect and tracking links in a text, by host: a link through a
+ * click-tracking service, or a link whose path or query carries another
+ * site's address (…/l0/%2f%2fspectrumbusiness.net%2fbilling). Microsoft Safe
+ * Links is unwrapped first and the other link scanners are ignored, because
+ * they rewrite every link of every email. Bare tracking hosts count too: the
+ * phishing email's chain had no "https://" in front of it.
+ */
+export function redirectLinks(text) {
+  const t = String(text || '')
+  const out = new Set()
+  const URL_RE = /\bhttps?:\/\/[^\s<>"')\]]+/gi
+  for (const m of t.matchAll(URL_RE)) {
+    let url = m[0]
+    let host = hostOf(url)
+    if (/(^|\.)safelinks\.protection\.outlook\.com$/i.test(host)) {
+      const inner = url.match(/[?&]url=([^&]+)/i)?.[1]
+      if (!inner) continue
+      url = decode(inner)
+      host = hostOf(url)
+    }
+    if (!host || SECURITY_WRAPPER.test(host)) continue
+    if (isTrackingHost(host)) { out.add(host); continue }
+    const rest = decode(decode(url.slice(url.toLowerCase().indexOf(host) + host.length)))
+    const inner = rest.match(/(?:https?:)?\/\/(?:www\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,})/i)?.[1]
+    if (inner && baseDomain(inner) !== baseDomain(host)) out.add(host)
+  }
+  // Outside the links just read (a Safe Links wrapper hides its target in them).
+  for (const h of decode(t.replace(URL_RE, ' ')).match(HOST_TOKEN) || []) if (isTrackingHost(h)) out.add(h.toLowerCase())
+  return [...out]
+}
+
+// Words that name something concrete: a product, a quantity, a document with
+// the scope in it, or a place. "Project", "quotation" and "pricing" are not
+// on the list: the phishing email had all three and nothing else.
+const CONCRETE = new RegExp([
+  String.raw`\b(?:light|lamp|luminaire|fixture|downlight|spotlight|floodlight|chandelier|pendant|bulb|bollard|knx|dali|dimm|boq|drawing|specification|datasheet|catalogue)\w*`,
+  String.raw`\b(?:led|bill of quantities|street light|led strip)\b`,
+  String.raw`\b\d+\s*(?:pcs|pc|nos|units|pieces|sets|meters|lm)\b|\bqty\b|\bquantity\b`,
+  String.raw`\b(?:riyadh|jeddah|dammam|khobar|makkah|mecca|madinah|medina|neom|tabuk|abha|qassim|jubail|yanbu|diriyah|red sea|alula|al ula|saudi|ksa|dubai|abu dhabi|doha|kuwait|bahrain|muscat)\b`,
+  'إنارة|انارة|إضاءة|اضاءة|كشاف|لمبة|لمبات|ثريا|سبوت|جدول الكميات|مخطط|الرياض|جدة|الدمام|الخبر|مكة|المدينة',
+].join('|'), 'iu')
+
+/** Does the email name a product, scope, location or a project of its own (the model's reading, or the words themselves)? */
+export function namesSomething(reading = {}, text = '') {
+  const d = reading.details || {}
+  if (['products', 'quantity', 'location'].some((k) => String(d[k] || '').trim())) return true
+  if (String(reading.projectEvidence || '').trim()) return true
+  return CONCRETE.test(String(text || ''))
+}
+
+export const WARNING_TEXT = {
+  bad_sender: 'the sender address is not a real address (a chain of links)',
+  tracking_links: 'its links go through redirect or tracking services',
+  reply_to_mismatch: 'replies would go to a different domain than the sender\'s',
+  junk_vague: 'it sat in Junk and names no product, scope, location or project',
+  unrelated_org: 'the sender\'s organisation has nothing to do with construction or lighting',
+}
+
+/**
+ * Every warning sign for one email: the ones found in code before the model
+ * (checks.flags) plus the two that need its reading.
+ *   checks: { flags, folder, hasAttachments, text }   text = subject + message
+ */
+export function warningSigns(reading = {}, checks = {}) {
+  const out = [...(checks.flags || [])]
+  if (checks.folder === 'junk' && !namesSomething(reading, checks.text)) out.push('junk_vague')
+  if (reading.senderFit === 'unrelated') out.push('unrelated_org')
+  return [...new Set(out)].filter((w) => WARNING_TEXT[w])
+}
+
+/** Enough to reject with no model call: the signs found in code already settle it. */
+const settles = (warnings, checks) => warnings.includes('bad_sender') || warnings.length >= 2 || (warnings.length >= 1 && checks.folder === 'junk' && !checks.hasAttachments)
+
+/** True when the code's own signs decide the email, so the model is not asked. */
+export function decidedBeforeModel(checks = {}) {
+  const flags = (checks.flags || []).filter((w) => WARNING_TEXT[w])
+  return flags.length > 0 && settles(flags, checks)
+}
+
+const warningSentence = (warnings) => {
+  const s = warnings.map((w) => WARNING_TEXT[w]).join('; ')
+  return s ? s[0].toUpperCase() + s.slice(1) + '.' : ''
+}
+
+/** The verdict for an email decidedBeforeModel() settled: rejected, with the signs as the reason. */
+export function codeVerdict(checks = {}) {
+  const warnings = warningSigns({}, checks)
+  return {
+    ...EMPTY_READING,
+    verdict: 'unqualified',
+    rule: warnings.includes('bad_sender') ? 'bad_sender' : 'warning_signs',
+    warnings,
+    category: 'spam',
+    confidence: 'high',
+    reason: warningSentence(warnings),
+    summary: '',
+    details: Object.fromEntries(['products', 'brands', 'quantity', 'location', 'stage', 'urgency'].map((k) => [k, ''])),
+    ask_next: [],
+    sourceEvidence: 'Not checked: the warning signs settled it.',
+    valid: true,
+  }
+}
+
 /**
  * The sales team's criteria (2026-10-11), applied to what the model read.
  * Order matters: the first rule that fires decides, and `rule` says which, so
@@ -489,9 +663,15 @@ export function openRouterRequest(env, brand = {}, { model = QUALIFIER_MODEL, si
  * A trader from the market was rule 2 for a day; the owner kept them in
  * (2026-10-11): sender_type says "trader" and sales decides.
  */
-export function deriveVerdict(r) {
+export function deriveVerdict(r, checks = {}) {
   let verdict = CATEGORIES[r.category]
   let rule = ''
+  // 0. Warning signs come first (2026-10-25): never qualified with one.
+  const warnings = warningSigns(r, checks)
+  if (warnings.length) {
+    if (settles(warnings, checks)) return { verdict: 'unqualified', rule: warnings.includes('bad_sender') ? 'bad_sender' : 'warning_signs', warnings }
+    if (verdict === 'qualified') return { verdict: 'needs_review', rule: 'warning_signs', warnings }
+  }
   if (verdict === 'qualified') {
     if (r.philips === 'only') { verdict = 'unqualified'; rule = 'philips_only' }
     else if (r.sourceCheck !== 'verified') { verdict = 'needs_review'; rule = 'unverified' }
@@ -503,11 +683,13 @@ export function deriveVerdict(r) {
     // (2026-10-07).
     verdict = 'needs_review'; rule = 'unsure'
   }
-  return { verdict, rule }
+  return { verdict, rule, warnings }
 }
 
 /** What a rule means, in the words the sales team used. */
 export const RULE_LABELS = {
+  bad_sender: 'Rejected: the sender address is not real',
+  warning_signs: 'Warning signs',
   philips_only: 'Rejected: asks only for Philips',
   unverified: 'Source not verified',
   unsure: 'Not sure',
@@ -518,14 +700,15 @@ export const RULE_LABELS = {
  * not usable becomes needs_review with the reason saying why, so a broken
  * model answer reaches a person instead of disappearing.
  */
-export function parseVerdict(text) {
+export function parseVerdict(text, checks = {}) {
   let data
   try {
     const raw = String(text ?? '').trim().replace(/^```(?:json)?\s*|\s*```$/g, '')
     const start = raw.indexOf('{'); const end = raw.lastIndexOf('}')
     data = JSON.parse(start >= 0 && end > start ? raw.slice(start, end + 1) : raw)
   } catch {
-    return { ...EMPTY_READING, verdict: 'needs_review', category: 'unclear', confidence: 'low', reason: 'The model reply was not readable.', summary: '', details: {}, ask_next: [], rule: '', valid: false }
+    const { verdict, rule, warnings } = deriveVerdict({ ...EMPTY_READING, category: 'unclear', confidence: 'low' }, checks)
+    return { ...EMPTY_READING, verdict, category: 'unclear', confidence: 'low', reason: withWarnings(warnings, 'The model reply was not readable.'), summary: '', details: {}, ask_next: [], rule, warnings, valid: false }
   }
   const pick = (v, list, fallback) => (list.includes(v) ? v : fallback)
   const str = (v) => (typeof v === 'string' ? v.trim() : '')
@@ -538,6 +721,7 @@ export function parseVerdict(text) {
     // Missing or unreadable counts as not verified: the safe side is a person.
     sourceCheck: pick(data?.source_check, SOURCE_CHECKS, 'not_verified'),
     sourceEvidence: str(data?.source_evidence),
+    senderFit: pick(data?.sender_fit, SENDER_FITS, 'unknown'),
     projectType: pick(data?.project_type, PROJECT_TYPES, 'not_stated'),
     projectEvidence: str(data?.project_evidence),
     requestType: pick(data?.request_type, REQUEST_TYPES, 'none'),
@@ -545,16 +729,24 @@ export function parseVerdict(text) {
   }
   // A phase with no words behind it is a guess: sales fills it in instead.
   if (reading.projectType !== 'not_stated' && !reading.projectEvidence) reading.projectType = 'not_stated'
-  const { verdict, rule } = deriveVerdict({ category, confidence, ...reading })
   const d = data?.details && typeof data.details === 'object' ? data.details : {}
+  const details = Object.fromEntries(['products', 'brands', 'quantity', 'location', 'stage', 'urgency'].map((k) => [k, str(d[k])]))
+  const { verdict, rule, warnings } = deriveVerdict({ category, confidence, details, ...reading }, checks)
+  // "Verified" means a real business we can call back about THIS request. An
+  // unrelated organisation, or a sender that is not what it says, never is.
+  if (reading.sourceCheck === 'verified' && warnings.some((w) => ['bad_sender', 'reply_to_mismatch', 'unrelated_org'].includes(w))) {
+    reading.sourceCheck = 'not_verified'
+    reading.sourceEvidence = `Not verified: ${warnings.filter((w) => ['bad_sender', 'reply_to_mismatch', 'unrelated_org'].includes(w)).map((w) => WARNING_TEXT[w]).join('; ')}.`
+  }
   return {
     verdict,
     rule,
+    warnings,
     category,
     confidence,
-    reason: str(data?.reason),
+    reason: withWarnings(warnings, str(data?.reason)),
     summary: str(data?.summary),
-    details: Object.fromEntries(['products', 'brands', 'quantity', 'location', 'stage', 'urgency'].map((k) => [k, str(d[k])])),
+    details,
     ask_next: Array.isArray(data?.ask_next) ? data.ask_next.map(str).filter(Boolean).slice(0, 3) : [],
     ...reading,
     valid: category === data?.category,
@@ -562,9 +754,12 @@ export function parseVerdict(text) {
 }
 
 const EMPTY_READING = {
-  senderType: 'unknown', senderConfidence: 'low', senderEvidence: '', sourceCheck: 'not_verified', sourceEvidence: '',
+  senderType: 'unknown', senderConfidence: 'low', senderEvidence: '', sourceCheck: 'not_verified', sourceEvidence: '', senderFit: 'unknown',
   projectType: 'not_stated', projectEvidence: '', requestType: 'none', philips: 'none',
 }
+
+/** The model's sentence, after the warning signs when there are any. */
+const withWarnings = (warnings, reason) => [warningSentence(warnings || []), reason].filter(Boolean).join(' ')
 
 /** The reason as people read it: the rule that decided, then the model's sentence. */
 export function fullReason(v) {

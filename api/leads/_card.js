@@ -1,5 +1,6 @@
 import { buildLeadCard, normaliseLeadCard, afterCallFields, senderDomain, objectionsFromCards } from '../../src/lib/sales/leadCard.js'
 import { trackFields } from '../../src/lib/leads/pipeline.js'
+import { pushCardAfterSave } from './_crmCard.js'
 
 // ─── Battle cards for leads someone is working ─────────────────────────────
 // A lead gets its card when it is assigned (the owner, 2026-10-19; it was
@@ -13,7 +14,7 @@ import { trackFields } from '../../src/lib/leads/pipeline.js'
 
 const isUuid = (v) => /^[0-9a-f-]{36}$/i.test(String(v || ''))
 
-const CARD_COLUMNS = 'lead_id,card,decision,quote_due,target_price,decides,competitors,built_at,updated_at,updated_by'
+const CARD_COLUMNS = 'lead_id,card,decision,quote_due,target_price,decides,competitors,built_at,updated_at,updated_by,crm_synced_at,crm_pulled_at,crm_sync_error'
 const LEAD_COLUMNS = 'id,received_at,created_at,company,name,email,subject,message,summary,details,ask_next,category,verdict,human_verdict,sender_type,source_check,project_type,human_project_type,project_final,philips,approved_at,stage,source,channel,assigned_to'
 
 const effective = (l) => l.human_verdict || l.verdict
@@ -24,7 +25,7 @@ async function context(deps, workspaceId, lead) {
   const before = lead.received_at || lead.created_at
   const [icp, accounts, suppliers, profile, earlier, competitorBrands] = await Promise.all([
     deps.db(`sales_icp?workspace_id=eq.${workspaceId}&select=battle_cards,config`).then((r) => r || []).catch(() => []),
-    deps.db(`sales_accounts?workspace_id=eq.${workspaceId}&select=name,orders,value_sar,last_order,status`).then((r) => r || []).catch(() => []),
+    deps.db(`sales_accounts?workspace_id=eq.${workspaceId}&select=name,orders,value_sar,last_order,status,domains,sold_by`).then((r) => r || []).catch(() => []),
     deps.db(`brand_directory_rows?workspace_id=eq.${workspaceId}&section_key=eq.suppliers&select=data`).then((r) => r || []).catch(() => []),
     deps.db(`brand_profile?workspace_id=eq.${workspaceId}&select=company_facts,key_projects`).then((r) => r || []).catch(() => []),
     domain && before
@@ -112,5 +113,8 @@ export async function saveCard(deps, { workspaceId, leadId, user, body = {} }) {
       method: 'PATCH', prefer: 'return=representation', body: { ...track.values, updated_at: deps.now().toISOString() },
     }) || []
   }
-  return { card: row, lead }
+  // Already in Odoo: the change goes there now, with a note in its history
+  // (2026-10-20). A failure is kept on the card and retried; the save stands.
+  const odoo = await pushCardAfterSave(deps, { workspaceId, leadId, user }).catch((err) => ({ ok: false, error: String(err.message || err) }))
+  return { card: row, lead, odoo }
 }

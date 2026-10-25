@@ -3,6 +3,7 @@ import { callModel } from './_provider.js'
 import { loadBrandContext, IDENTITY } from './_context.js'
 import { textIn } from '../../src/lib/agent/loop.js'
 import { marketOf } from '../../src/lib/agent/calendar.js'
+import { findProspects } from './_prospects.js'
 import {
   DISCOVER_SCHEMA, discoverPrompt, newCompetitors, agendaRowsFor, discoverSummary,
 } from '../../src/lib/agent/discover.js'
@@ -11,6 +12,10 @@ import {
 // Find rivals nobody listed, and propose them onto the agent's own watchlist.
 //
 // Body: { workspace_id }
+//
+// Body: { workspace_id, mode: 'prospects', segment, area?, count? } finds
+// companies to contract with instead (api/agent/_prospects.js). Same route
+// because api/ is at Vercel's twelve-function limit.
 //
 // RESEARCH-AGENT.md §5 moved this up from "later" for a reason the live
 // database confirms: Alo Kheyatah has no competitor section at all, so the
@@ -50,9 +55,19 @@ export default async function handler(req, res) {
   const workspaceId = String(body.workspace_id || '').trim()
   if (!workspaceId) return res.status(400).json({ error: 'workspace_id is required.' })
 
-  if (!(await callerId(req))) return res.status(401).json({ error: 'Sign in to discover competitors.' })
+  const userId = await callerId(req)
+  if (!userId) return res.status(401).json({ error: 'Sign in to discover competitors.' })
   if (!(await callerMayUseWorkspace(req, workspaceId))) {
     return res.status(403).json({ error: 'You do not have access to this workspace.' })
+  }
+
+  if (body.mode === 'prospects') {
+    try {
+      return await findProspects(res, { workspaceId, body, userId })
+    } catch (err) {
+      console.error('[agent/discover] prospects', err)
+      return res.status(500).json({ ok: false, error: String(err?.message || err).slice(0, 400) })
+    }
   }
 
   try {

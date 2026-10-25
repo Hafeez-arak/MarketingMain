@@ -1242,8 +1242,23 @@ function isolateBilingual(text){
   return wrap(first) + SEP + wrap(second);
 }
 
+// The workspace's own Zernio account when ZERNIO_WORKSPACE_KEYS lists it
+// (`<workspace id>=<key>` pairs), else the shared ZERNIO_API_KEY. A copy of
+// zernioKeyFor in api/zernio/_zernio.js; change both together.
+function zernioKeyFor(workspaceId, env){
+  const id = String(workspaceId || '').trim().toLowerCase();
+  if (id){
+    for (const pair of String(env.ZERNIO_WORKSPACE_KEYS || '').split(/[,;\n]+/)){
+      const at = pair.indexOf('=');
+      if (at < 1) continue;
+      const key = pair.slice(at + 1).trim();
+      if (pair.slice(0, at).trim().toLowerCase() === id && key) return key;
+    }
+  }
+  return String(env.ZERNIO_API_KEY || '').trim();
+}
 const body = ($input.first().json.body) || {};
-const ZERNIO   = $env.ZERNIO_API_KEY;
+const ZERNIO   = zernioKeyFor(body.workspace_id, $env);
 const SUPA_URL = String($env.SUPABASE_URL || '').replace(/\/+$/, '');
 const SUPA_KEY = $env.SUPABASE_KEY;
 const ZBASE    = 'https://zernio.com/api/v1';
@@ -1865,11 +1880,27 @@ async function req(opts){
 // optional workspace_id). Both shapes have to be tolerated here.
 const raw  = ($input.first() && $input.first().json) || {};
 const body = raw.body || {};
-const ZERNIO   = $env.ZERNIO_API_KEY;
+// The workspace's own Zernio account when ZERNIO_WORKSPACE_KEYS lists it
+// (`<workspace id>=<key>` pairs), else the shared ZERNIO_API_KEY. A copy of
+// zernioKeyFor in api/zernio/_zernio.js; change both together.
+function zernioKeyFor(workspaceId, env){
+  const id = String(workspaceId || '').trim().toLowerCase();
+  if (id){
+    for (const pair of String(env.ZERNIO_WORKSPACE_KEYS || '').split(/[,;\n]+/)){
+      const at = pair.indexOf('=');
+      if (at < 1) continue;
+      const key = pair.slice(at + 1).trim();
+      if (pair.slice(0, at).trim().toLowerCase() === id && key) return key;
+    }
+  }
+  return String(env.ZERNIO_API_KEY || '').trim();
+}
+// The shared key; a workspace with its own Zernio account reads with zHeadersFor.
+const ZERNIO   = zernioKeyFor('', $env);
 const SUPA_URL = String($env.SUPABASE_URL || '').replace(/\/+$/, '');
 const SUPA_KEY = $env.SUPABASE_KEY;
 const ZBASE    = 'https://zernio.com/api/v1';
-const zHeaders = { Authorization: `Bearer ${ZERNIO}`, 'Content-Type': 'application/json' };
+const zHeadersFor = wsId => ({ Authorization: `Bearer ${zernioKeyFor(wsId, $env)}`, 'Content-Type': 'application/json' });
 const sHeaders = { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' };
 
 const POST_TABLES = ['instagram_generated_posts','generated_posts'];
@@ -1921,7 +1952,7 @@ try {
     const profileId = String(ws.zernio_profile_id);
     const list = await req({ method:'GET',
       url:`${ZBASE}/accounts?profileId=${encodeURIComponent(profileId)}`,
-      headers:zHeaders, json:true });
+      headers:zHeadersFor(wsId), json:true });
     hasAnalyticsAccess = hasAnalyticsAccess || !!(list && list.hasAnalyticsAccess);
 
     const mine = ((list && list.accounts) || [])
@@ -1990,7 +2021,7 @@ try {
       try {
         const tl = await req({ method:'GET',
           url:`${ZBASE}/analytics/post-timeline?postId=${encodeURIComponent(t.zernio_post_id)}`,
-          headers:zHeaders, json:true });
+          headers:zHeadersFor(t.workspace_id), json:true });
         for (const day of ((tl && tl.timeline) || [])){
           const present = METRIC_KEYS.filter(k => day[k] !== undefined && day[k] !== null);
           await req({ method:'POST', url:`${SUPA_URL}/rest/v1/post_analytics?on_conflict=zernio_post_id,platform,metric_date`,
@@ -2016,7 +2047,7 @@ try {
       if (!wrote){
         single = await req({ method:'GET',
           url:`${ZBASE}/analytics?postId=${encodeURIComponent(t.zernio_post_id)}`,
-          headers:zHeaders, json:true });
+          headers:zHeadersFor(t.workspace_id), json:true });
         const perPlatform = (single && single.platformAnalytics) || [];
         // Prefer the per-platform breakdown; fall back to the roll-up when
         // Zernio hasn't split it out yet.
@@ -2066,7 +2097,7 @@ try {
           if (!single){
             single = await req({ method:'GET',
               url:`${ZBASE}/analytics?postId=${encodeURIComponent(t.zernio_post_id)}`,
-              headers:zHeaders, json:true });
+              headers:zHeadersFor(t.workspace_id), json:true });
           }
           const zStatus = String((single && single.status) || '').toLowerCase();
           if (zStatus === 'published'){
@@ -2083,7 +2114,7 @@ try {
             // the platform's reason on each target's errorMessage.
             const got = await req({ method:'GET',
               url:`${ZBASE}/posts/${encodeURIComponent(t.zernio_post_id)}`,
-              headers:zHeaders, json:true });
+              headers:zHeadersFor(t.workspace_id), json:true });
             const post = (got && got.post) || got || {};
             const pStatus = String(post.status || '').toLowerCase();
             const targetsZ = Array.isArray(post.platforms) ? post.platforms : [];

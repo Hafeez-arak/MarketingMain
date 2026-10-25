@@ -62,10 +62,12 @@ const receivedIso = (s) => {
 /**
  * Ask the model about one enquiry, with what the sender's website says when
  * there is one to check. Records the call in agent_usage (so the company's
- * monthly cap counts it) whether it worked or not. Returns { verdict, site }
+ * monthly cap counts it) whether it worked or not. `checks` are the warning
+ * signs found in code (_mail.js mailChecks), applied over the model's reading.
+ * Returns { verdict, site }
  * or { error }.
  */
-export async function askModel(deps, { workspaceId, env, brand, surface = 'lead_qualifier' }) {
+export async function askModel(deps, { workspaceId, env, brand, surface = 'lead_qualifier', checks = {} }) {
   const domain = websiteDomain(env, { ownDomains: brand?.ownDomains || [] })
   let site = null
   if (domain && deps.website) site = await deps.website(domain).catch(() => null)
@@ -83,7 +85,7 @@ export async function askModel(deps, { workspaceId, env, brand, surface = 'lead_
     },
   }).catch(() => {})
   if (res.error) return { error: String(res.error).slice(0, 300), cost, model: body.model, site }
-  return { verdict: parseVerdict(res.text), cost, model: body.model, site }
+  return { verdict: parseVerdict(res.text, checks), cost, model: body.model, site }
 }
 
 /**
@@ -137,6 +139,9 @@ export async function intakeWebsite(deps, { key, rows = [] }) {
   if (deps.checkMail) {
     try { mail = await deps.checkMail({ workspaceId, deadline: started + TOTAL_BUDGET_MS }) } catch (err) { mail = { error: String(err.message || err).slice(0, 300) } }
   }
+  // The battle cards read back from Odoo, when one of the two daily times
+  // (07:50, 13:00 Riyadh) has passed since the last read; else a no-op.
+  if (deps.crmPull) await deps.crmPull({ workspaceId }).catch(() => {})
   // Is everything still working? (at most every 10 minutes; see _health.js)
   if (deps.health) await deps.health({ workspaceId }).catch(() => {})
   // New qualified leads get an owner by the routing rules (_control.js), if

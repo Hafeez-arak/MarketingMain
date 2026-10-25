@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { BRIEF_SCHEMA, mergeBrief, planPrompt, withRefs, withGapIds, bindIdeas, datedRule, briefEmptiness, SYNTHESISE_PROMPT } from './brief'
 import { volatileFragment, buildRequest } from './prompt'
+import { stripRefs, cleanBriefProse } from './refs'
+import { readableReport } from '../researchBrief'
 
 const gathered = {
   headline: 'Nothing moved measurably this week.',
@@ -377,5 +379,107 @@ describe('mergeBrief — rule sources', () => {
     expect(merged.proposed_rules).toEqual([])
     expect(merged.rules_dropped_uncited).toBe(1)
     expect(merged.rules_dropped[0]).toMatchObject({ rule: 'Invented.', cited: ['F9', 'https://nobody.example'] })
+  })
+})
+
+// On 2026-10-25 a reader met "(F19, F23, F32)" at the end of a sentence and
+// took F19 for project 19 on the page. The page never shows refs.
+describe('refs never reach a sentence a reader sees', () => {
+  const gapIds = ['G1', 'G2', 'G3', 'G4']
+
+  it.each([
+    ['Huda opened a showroom (F12).', 'Huda opened a showroom.'],
+    ['Huda is buying presence (F19, F23, F32).', 'Huda is buying presence.'],
+    ['One stored trace (S2) points the same way.', 'One stored trace points the same way.'],
+    ['This closes the spec gap (G4).', 'This closes the spec gap.'],
+    ['Huda is expanding, see F3.', 'Huda is expanding.'],
+    ['Huda is expanding (see F3 and S2) in Riyadh.', 'Huda is expanding in Riyadh.'],
+    ['Tenders are up [F3; F7].', 'Tenders are up.'],
+    ['Three pieces agree (three signals: F3, F7, S2).', 'Three pieces agree (three signals).'],
+    ['A new stand (F3, from the expo page) at INDEX.', 'A new stand (from the expo page) at INDEX.'],
+    ['Searches are rising — F19, F23.', 'Searches are rising.'],
+    ['Pitch the tower first, (F3), then the mall.', 'Pitch the tower first, then the mall.'],
+  ])('%s', (input, expected) => {
+    expect(stripRefs(input, { gapIds })).toBe(expected)
+  })
+
+  it('leaves a lamp base alone when it is not one of the brief\'s gaps', () => {
+    expect(stripRefs('Capsule lamps (G9) are selling.', { gapIds })).toBe('Capsule lamps (G9) are selling.')
+    expect(stripRefs('Capsule lamps (G4) are selling.')).toBe('Capsule lamps (G4) are selling.')
+  })
+
+  it('leaves text with no refs exactly as it was', () => {
+    const s = 'KNX and DALI (both open standards) win the spec , often.'
+    expect(stripRefs(s, { gapIds })).toBe(s)
+    expect(stripRefs('Reached 2,300 members (n=3).', { gapIds })).toBe('Reached 2,300 members (n=3).')
+  })
+
+  it('does not touch a ref written as the subject of a sentence', () => {
+    // Removing it would break the sentence; the prompt is what stops these.
+    expect(stripRefs('Mondrian Riyadh now has a contractor.')).toBe('Mondrian Riyadh now has a contractor.')
+  })
+
+  const brief = {
+    headline: 'Huda is buying physical presence (F1, S1).',
+    top_three: [{ finding: 'Huda opened a showroom (F1).', action: 'Visit it, see F1.', team: 'sales', refs: ['F1', 'S1'] }],
+    competitor_moves: [{
+      competitor: 'Technolight', what_changed: 'New stand at INDEX (F2).', picture: 'Two pieces (F1, F2).',
+      effect_on_us: 'Book ours (G1).', relevance: 'high', refs: ['F1', 'F2'],
+    }],
+    market_direction: [{ movement: 'Rivals buy floor space (F1).', basis: 'web', so_what: 'We need a stand (G1).' }],
+    gaps: [{ id: 'G1', gap: 'No showroom (F1).', basis: 'web', our_position: 'None (S1).', suggested_response: 'Open one (F2).' }],
+    proposed_rules: [{ rule: 'Lead with showroom visits (F1).', detail: 'Two rivals did (F1, F2).', scope: 'caption', sources: ['F1'], confidence: 0.6 }],
+    proposed_ideas: [{ title: 'Showroom tour (G1)', angle: 'Walk it (F1).', rationale: 'Closes the showroom gap (see G1).', answers: 'G1', suggested_format: 'reel' }],
+    agenda_changes: [{ action: 'add', subject: 'Showrooms (F1)', why: 'Two rivals (F1, F2).' }],
+    new_competitors: [{ name: 'Lumo', why: 'Same market (F2).', source_url: '' }],
+    unanswered: ['Alnasser was not reached (F9).'],
+  }
+  const findings = withRefs([
+    { headline: 'Huda showroom', sources: ['https://read.example/a'] },
+    { headline: 'Technolight stand', sources: ['https://read.example/b'] },
+  ])
+  const allowed = new Set(['https://read.example/a', 'https://read.example/b'])
+  const signals = [{ ref: 'S1', source_url: 'https://old-run.example/s' }]
+  const merged = mergeBrief(gathered, brief, allowed, findings, signals)
+  const prose = r => JSON.stringify([
+    r.headline, r.top_three.map(t => [t.finding, t.action]),
+    r.competitor_moves.map(m => [m.what_changed, m.picture, m.effect_on_us]),
+    r.competitor_board.map(c => c.read), r.market_direction.map(m => [m.movement, m.so_what]),
+    r.gaps.map(g => [g.gap, g.our_position, g.suggested_response]), r.proposed_rules.map(x => [x.rule, x.detail]),
+    r.proposed_ideas.map(i => [i.title, i.angle, i.rationale]), r.agenda_changes.map(a => [a.subject, a.why]),
+    r.new_competitors.map(c => c.why), r.unanswered,
+  ])
+
+  it('mergeBrief stores no ref in any written sentence', () => {
+    expect(prose(merged)).not.toMatch(/\b[FSG]\d+\b/)
+    expect(merged.headline).toBe('Huda is buying physical presence.')
+    expect(merged.competitor_board[0].read).toBe('New stand at INDEX.')
+  })
+
+  it('mergeBrief keeps every structured ref, so sources and bindings still resolve', () => {
+    expect(merged.top_three[0].refs).toEqual(['F1', 'S1'])
+    expect(merged.competitor_moves[0].refs).toEqual(['F1', 'F2'])
+    expect(merged.gaps[0].id).toBe('G1')
+    expect(merged.proposed_rules[0].sources).toEqual(['https://read.example/a'])
+    expect(merged.proposed_ideas[0].answers).toBe('G1')
+    expect(merged.proposed_ideas[0].answers_ref).toEqual({ kind: 'gap', id: 'G1' })
+  })
+
+  it('a report stored before the fix reads clean at render time', () => {
+    const old = { ...brief, gaps: withGapIds(brief.gaps), competitor_board: [{ name: 'Technolight', read: 'New stand (F2).' }] }
+    const shown = readableReport(old)
+    expect(shown.top_three[0].finding).toBe('Huda opened a showroom.')
+    expect(shown.top_three[0].refs).toEqual(['F1', 'S1'])
+    expect(shown.gaps[0].gap).toBe('No showroom.')
+    expect(shown.competitor_board[0].read).toBe('New stand.')
+    expect(shown.proposed_ideas[0].answers).toBe('G1')
+    expect(old.top_three[0].finding).toBe('Huda opened a showroom (F1).') // the stored copy is not mutated
+    expect(cleanBriefProse(null)).toBe(null)
+    expect(readableReport(undefined)).toEqual({})
+  })
+
+  it('the synthesis prompt keeps refs out of sentences', () => {
+    expect(SYNTHESISE_PROMPT).toMatch(/REFS ARE FOR CODE, NEVER FOR THE READER/)
+    expect(SYNTHESISE_PROMPT).toMatch(/never in the sentence/)
   })
 })

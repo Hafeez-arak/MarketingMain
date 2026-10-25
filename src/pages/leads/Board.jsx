@@ -68,9 +68,10 @@ function CrmCell({ lead, canApprove, onAsk }) {
   const CRM = leadLabels(lang).crm
   const st = lead.crm_status
   if (st === 'sent') {
+    const testTag = lead.crm_test ? <span className="block text-[10px] font-bold text-amber-800 uppercase tracking-wide">{t.test}</span> : null
     return lead.crm_url
-      ? <a href={lead.crm_url} target="_blank" rel="noreferrer" onClick={stop} className="text-xs font-semibold text-sage-700 hover:underline">{t.inOdoo}</a>
-      : <span className="text-xs font-semibold text-sage-700">{CRM.sent}</span>
+      ? <span className="block"><a href={lead.crm_url} target="_blank" rel="noreferrer" onClick={stop} className="text-xs font-semibold text-sage-700 hover:underline">{t.inOdoo}</a>{testTag}</span>
+      : <span className="text-xs font-semibold text-sage-700">{CRM.sent}{testTag}</span>
   }
   if (st === 'queued') return <span className="text-[11px] font-semibold text-amber-800 leading-tight block">{CRM.queued}</span>
   if (st === 'sending') return <span className="text-[11px] text-text-secondary">{CRM.sending}</span>
@@ -388,10 +389,14 @@ function AskAboutLead({ lead }) {
  * It goes with a salesperson: the one it is assigned to, or one chosen here
  * (which forwards them the email, as Assign does).
  */
-function ApproveDialog({ lead, team, busy, error, onCancel, onConfirm }) {
+function ApproveDialog({ lead, team, busy, error, onCancel, onConfirm, canTest = false }) {
   const { t, lang, dir } = useT(LW)
   const L = leadLabels(lang)
   const [to, setTo] = useState(lead.assigned_to || '')
+  // "Test only" (the access admin, 2026-10-20): no salesperson, nothing
+  // forwarded; in Odoo it belongs to the connection's own user.
+  const [test, setTest] = useState(false)
+  const testable = canTest && !lead.assigned_to && lead.crm_status !== 'failed'
   const person = team.find((m) => m.user_id === to)
   const changing = to && to !== lead.assigned_to
   const phones = phonesOf(lead)
@@ -416,21 +421,31 @@ function ApproveDialog({ lead, team, busy, error, onCancel, onConfirm }) {
             </div>
           ))}
         </dl>
-        <Select label={t.assignedTo} value={to} onChange={(e) => setTo(e.target.value)} disabled={lead.crm_status === 'failed' && Boolean(lead.assigned_to)}>
-          <option value="">{t.chooseWho}</option>
-          <PersonOptions team={team} />
-        </Select>
-        {changing && <p className="text-xs text-text-secondary leading-relaxed">{forwardWords(lead, person, lang)}</p>}
+        {testable && (
+          <label className="flex items-start gap-2 text-xs text-text cursor-pointer border border-amber-300 bg-amber-50 px-3 py-2">
+            <input type="checkbox" checked={test} onChange={(e) => setTest(e.target.checked)} className="mt-0.5" />
+            <span><b>{t.testOnly}</b> {t.testOnlyBody}</span>
+          </label>
+        )}
+        {!test && (
+          <>
+            <Select label={t.assignedTo} value={to} onChange={(e) => setTo(e.target.value)} disabled={lead.crm_status === 'failed' && Boolean(lead.assigned_to)}>
+              <option value="">{t.chooseWho}</option>
+              <PersonOptions team={team} />
+            </Select>
+            {changing && <p className="text-xs text-text-secondary leading-relaxed">{forwardWords(lead, person, lang)}</p>}
+          </>
+        )}
         <p className="text-xs text-text-secondary leading-relaxed">
-          {t.approveBody(person ? shortName(person) : t.them)}
+          {test ? t.testBody : t.approveBody(person ? shortName(person) : t.them)}
           {notQualified ? t.alsoQualified : ''}
-          {' '}{t.ifNotConnected}
+          {test ? '' : <>{' '}{t.ifNotConnected}</>}
         </p>
         {error && <p className="text-xs text-red-600">{error}</p>}
         <div className="flex gap-3 pt-1">
           <Button variant="secondary" className="flex-1 justify-center" disabled={busy} onClick={onCancel}>{t.cancel}</Button>
-          <Button className="flex-1 justify-center" disabled={busy || !to} onClick={() => onConfirm(to)}>
-            {busy ? <Spinner size="sm" /> : null}{busy ? t.sending : t.approveSend}
+          <Button className="flex-1 justify-center" disabled={busy || (!test && !to)} onClick={() => onConfirm(test ? null : to, test)}>
+            {busy ? <Spinner size="sm" /> : null}{busy ? t.sending : test ? t.sendTest : t.approveSend}
           </Button>
         </div>
       </div>
@@ -438,7 +453,7 @@ function ApproveDialog({ lead, team, busy, error, onCancel, onConfirm }) {
   )
 }
 
-export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mailboxes = [], canApprove = false, team = [], me = '' }) {
+export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mailboxes = [], canApprove = false, team = [], me = '', canTest = false }) {
   const { t, lang, dir } = useT(LW)
   const L = leadLabels(lang)
   const [filters, setFilters] = useState(EMPTY_FILTERS)
@@ -501,9 +516,9 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
   // any, stays on the row (Retry) rather than in the dialog.
   const [asking, setAsking] = useState(null)
   const [approving, setApproving] = useState({ busy: false, error: '' })
-  async function approve(assignTo) {
+  async function approve(assignTo, test = false) {
     setApproving({ busy: true, error: '' })
-    const r = await leadsApi('approve', workspaceId, { lead_id: asking.id, assign_to: assignTo })
+    const r = await leadsApi('approve', workspaceId, test ? { lead_id: asking.id, test: true } : { lead_id: asking.id, assign_to: assignTo })
     if (r.error) return setApproving({ busy: false, error: r.error })
     replaceRow(asking.id, r.lead)
     setApproving({ busy: false, error: '' })
@@ -640,7 +655,7 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
           </div>
         )}
       </div>
-      {asking && <ApproveDialog lead={asking} team={team} busy={approving.busy} error={approving.error} onCancel={() => setAsking(null)} onConfirm={approve} />}
+      {asking && <ApproveDialog lead={asking} team={team} busy={approving.busy} error={approving.error} onCancel={() => setAsking(null)} onConfirm={approve} canTest={canTest} />}
       {assigning && <AssignDialog lead={assigning} team={team} busy={assignState.busy} error={assignState.error} onCancel={() => setAssigning(null)} onConfirm={assign} />}
     </div>
   )

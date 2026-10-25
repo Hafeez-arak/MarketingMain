@@ -360,6 +360,36 @@ How it talks to Odoo: JSON-RPC (`api/leads/_odoo.js`), because 18.0 has no
 JSON-2 API. Odoo removes JSON-RPC in Online 21.1; that file is the only one
 to change then.
 
+**Where it lands in Odoo (2026-10-20).** An approved lead goes straight onto
+the CRM **Pipeline** board as an opportunity, in the column for its phase:
+Tender → "RFQ Received (TENDER)", JIH → "RFQ Received (JIH)", otherwise the
+first column ("New"). The salesperson is the person it is assigned to.
+
+**The battle card on it.** Agent settings → CRM (Odoo) → **Choose team**:
+the leads go into that team, and the team gets a "Battle card: record after
+the call" block of six fields (decision, quote due, target price, who decides,
+who else is quoting, call notes). Odoo attaches such fields to a whole team,
+so every deal already in that team shows the block too, empty. The lead's
+**Internal Notes** tab holds the suggestions: 1. who they are (with their
+history read from Odoo: orders, quotations, deals won and lost, and a ⚠ when
+someone already has an open deal with them) and 2. what to do (2–4 moves).
+The next step and follow-up date become an Odoo to-do for the salesperson.
+Saved here, a card goes to Odoo at once; changed in Odoo, it comes back here
+at 07:50 and 13:00 (Odoo wins). Choosing the team needs Sales: Administrator
+for the Odoo user. With no team chosen, leads go without the card.
+
+**Moving to the real team later is one step.** Today (2026-10-20) the team is
+**SMART**, the owner's choice until the sales team says which one they want.
+To switch: **Change team** → tick "Also move the N deals already sent" (on by
+default) → pick the team. The new team gets the fields first, then the deals
+already sent move there with their battle-card values; new approvals go
+there from then on. Test pushes ("Test only") are never moved.
+
+**Test only.** The access admin can approve an unassigned lead with "Test
+only": it goes to the Pipeline owned by the Odoo connection's own user, with
+no salesperson and nothing forwarded, marked TEST (leads.crm_test), to be
+taken out of Odoo afterwards.
+
 ## 8. Assigning a lead, and forwarding its email
 
 A sales admin (or the access admin) gives each lead to one person, at any
