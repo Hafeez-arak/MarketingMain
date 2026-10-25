@@ -62,10 +62,12 @@ const receivedIso = (s) => {
 /**
  * Ask the model about one enquiry, with what the sender's website says when
  * there is one to check. Records the call in agent_usage (so the company's
- * monthly cap counts it) whether it worked or not. Returns { verdict, site }
+ * monthly cap counts it) whether it worked or not. `checks` are the warning
+ * signs found in code (_mail.js mailChecks), applied over the model's reading.
+ * Returns { verdict, site }
  * or { error }.
  */
-export async function askModel(deps, { workspaceId, env, brand, surface = 'lead_qualifier' }) {
+export async function askModel(deps, { workspaceId, env, brand, surface = 'lead_qualifier', checks = {} }) {
   const domain = websiteDomain(env, { ownDomains: brand?.ownDomains || [] })
   let site = null
   if (domain && deps.website) site = await deps.website(domain).catch(() => null)
@@ -83,7 +85,7 @@ export async function askModel(deps, { workspaceId, env, brand, surface = 'lead_
     },
   }).catch(() => {})
   if (res.error) return { error: String(res.error).slice(0, 300), cost, model: body.model, site }
-  return { verdict: parseVerdict(res.text), cost, model: body.model, site }
+  return { verdict: parseVerdict(res.text, checks), cost, model: body.model, site }
 }
 
 /**

@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { skipReason, stripQuoted, requestKey, messageToEnvelope, checkMailbox, checkMail, finishConnect, tenantOf, NEW_LEADS_FROM, isWarmupEmail, emailFile, leadPhones } from './_mail.js'
 import { intakeWebsite } from './_intake.js'
+import { CRITERIA_VERSION } from '../../src/lib/leads/qualify.js'
+import * as phish from '../../src/lib/leads/fixtures/phishingRfq.js'
 
 // Made-up mail only: this repo is public.
 const WS = '00000000-0000-0000-0000-0000000000bb'
@@ -182,7 +184,7 @@ describe('checkMailbox: new mail', () => {
     ] })
     await run(w)
     expect(w.state.leads.map((l) => l.folder)).toEqual(['junk', 'inbox', 'other'])
-    expect(w.state.leads[0]).toMatchObject({ email_kind: 'company', criteria_version: 2, sender_type: 'contractor', source_check: 'verified' })
+    expect(w.state.leads[0]).toMatchObject({ email_kind: 'company', criteria_version: CRITERIA_VERSION, sender_type: 'contractor', source_check: 'verified' })
   })
 
   it('a reminder for the same referenced RFQ is not a new lead, even in a new conversation', async () => {
@@ -242,6 +244,45 @@ describe('checkMailbox: new mail', () => {
     const out = await run(w, { calls: 2, deadline: Infinity })
     expect(out.counts).toMatchObject({ qualified: 2, waiting: 1 })
     expect(w.state.mailboxes[0].read_from).toBe('2026-10-06T02:00:00Z')
+  })
+})
+
+describe('the phishing RFQ (lead 8bfaffbe, 2026-10-23)', () => {
+  it('comes out of Junk unqualified, flagged, with no address stored and no model call', async () => {
+    const w = world({ messages: [phish.message()] })
+    const out = await run(w)
+    expect(out.counts).toMatchObject({ unqualified: 1, qualified: 0, needs_review: 0 })
+    expect(w.state.modelCalls).toBe(0)
+    expect(w.state.leads).toHaveLength(1)
+    const lead = w.state.leads[0]
+    expect(lead).toMatchObject({ verdict: 'unqualified', rule: 'bad_sender', category: 'spam', source_check: 'not_verified', folder: 'junk', email: '', email_kind: 'none' })
+    expect(lead.reason).toMatch(/sender address is not a real address/)
+    expect(JSON.stringify(lead)).not.toMatch(/awstrack|zoom\.no|spectrumbusiness/)
+    expect(w.state.mailboxes[0].read_from).toBe('2026-10-06T02:44:40Z')
+  })
+
+  it('asks Graph for Reply-To and attachments, which the checks read', async () => {
+    const w = world({ messages: [] })
+    await run(w)
+    const list = w.state.graphCalls.find((c) => c.url.includes('/me/messages?'))
+    expect(new URL(list.url).searchParams.get('$select')).toMatch(/replyTo.*hasAttachments/)
+  })
+
+  it('with a clean sender, the model\'s real answer (Verified, quotation_request) still cannot make it a lead', async () => {
+    const w = world({ messages: [phish.message({ from: { emailAddress: { name: 'Terry Ferreira', address: phish.HIJACKED } } })] })
+    w.replies.push({ text: JSON.stringify({ ...phish.MODEL_REPLY, sender_fit: 'unrelated' }), usage: { cost: 0.0002 } })
+    await run(w)
+    expect(w.state.modelCalls).toBe(1)
+    expect(w.state.leads[0]).toMatchObject({ verdict: 'unqualified', rule: 'warning_signs', source_check: 'not_verified', email: phish.HIJACKED })
+  })
+
+  it('a Reply-To on another domain sends an Inbox enquiry to a person; on our own domain it is fine', async () => {
+    const other = world({ messages: [msg(1, { parentFolderId: 'inbox-id', replyTo: [{ emailAddress: { address: 'payments@elsewhere.example' } }] })] })
+    await run(other)
+    expect(other.state.leads[0]).toMatchObject({ verdict: 'needs_review', rule: 'warning_signs', source_check: 'not_verified' })
+    const ours = world({ messages: [msg(1, { parentFolderId: 'inbox-id', replyTo: [{ emailAddress: { address: 'sales@example-co.sa' } }, { emailAddress: { address: 'buyer@mail.client.example' } }] })] })
+    await run(ours)
+    expect(ours.state.leads[0]).toMatchObject({ verdict: 'qualified', rule: '' })
   })
 })
 

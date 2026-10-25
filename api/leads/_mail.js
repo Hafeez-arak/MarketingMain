@@ -1,6 +1,6 @@
 import { linkToFile, MAX_BIG_FILE } from './_files.js'
 import { READ_SCOPES, refreshTokens, exchangeCode, whoAmI, packTokens, unpackTokens, classifyGraphError, tenantOf } from '../email/_graph.js'
-import { toEnvelope, findDuplicate, verdictColumns, emailKind, extractPhones, mergePhones } from '../../src/lib/leads/qualify.js'
+import { toEnvelope, findDuplicate, verdictColumns, emailKind, extractPhones, mergePhones, senderAddress, redirectLinks, baseDomain, decidedBeforeModel, codeVerdict } from '../../src/lib/leads/qualify.js'
 import { capDecision } from '../../src/lib/agent/budget.js'
 import { outlookLink } from '../../src/lib/leads/view.js'
 import { askModel, askPhonesInImages, loadBrand, monthSpent, upsertLead } from './_intake.js'
@@ -153,7 +153,11 @@ export function requestKey(email, subject) {
   return `${domain}|${s}`
 }
 
-/** A Graph message → the qualifier's envelope. */
+/**
+ * A Graph message → the qualifier's envelope. The sender is stored only when
+ * it is one real address (senderAddress): a chain of tracking links is
+ * dropped, and mailChecks() flags the lead for it.
+ */
 export function messageToEnvelope(msg) {
   const from = senderOf(msg)
   const body = stripQuoted(msg?.body?.content || msg?.bodyPreview || '')
@@ -161,13 +165,34 @@ export function messageToEnvelope(msg) {
     sourceRef: msg.internetMessageId || msg.id,
     receivedAt: msg.receivedDateTime || '',
     name: from.name || '',
-    email: from.address || '',
+    email: senderAddress(from.address).email,
     company: '',
     phone: '',
     subject: msg.subject || '',
     message: body,
     language: /\p{Script=Arabic}/u.test(`${msg.subject || ''} ${body}`) ? 'ar' : 'en',
   })
+}
+
+/**
+ * The warning signs an email carries before any model reads it
+ * (qualify.js, "Warning signs"): a sender that is not one real address,
+ * redirect or tracking links in the sender or the new part of the text, and a
+ * Reply-To on another domain than the sender's (our own domains excepted).
+ * Returns the `checks` the verdict is derived with.
+ */
+export function mailChecks(msg, { folder = '', ownDomains = [] } = {}) {
+  const raw = String(senderOf(msg).address || '')
+  const body = stripQuoted(msg?.body?.content || msg?.bodyPreview || '')
+  const flags = []
+  const sender = senderAddress(raw)
+  if (sender.problem === 'not_an_address') flags.push('bad_sender')
+  if (redirectLinks(`${raw}\n${body}`).length) flags.push('tracking_links')
+  const own = new Set(ownDomains.map(lower))
+  const fromBase = baseDomain(domainOf(sender.email))
+  const replies = (msg?.replyTo || []).map((r) => domainOf(r?.emailAddress?.address)).filter((d) => d && !own.has(d))
+  if (fromBase && replies.some((d) => baseDomain(d) !== fromBase)) flags.push('reply_to_mismatch')
+  return { flags, folder, hasAttachments: Boolean(msg?.hasAttachments), text: `${msg?.subject || ''}\n${body}` }
 }
 
 const authError = (reason) => Object.assign(new Error(reason), { kind: 'auth', reason })
@@ -224,7 +249,7 @@ async function listMail(deps, token, { from, until }) {
     $filter: filter,
     $orderby: 'receivedDateTime asc',
     $top: String(PAGE),
-    $select: 'id,internetMessageId,conversationId,parentFolderId,subject,from,sender,receivedDateTime,body,bodyPreview,internetMessageHeaders,webLink,isDraft',
+    $select: 'id,internetMessageId,conversationId,parentFolderId,subject,from,sender,replyTo,hasAttachments,receivedDateTime,body,bodyPreview,internetMessageHeaders,webLink,isDraft',
   })
   const res = await deps.fetch(`${GRAPH}/me/messages?${q}`, {
     headers: { Authorization: `Bearer ${token}`, Prefer: 'outlook.body-content-type="text"' },
@@ -361,11 +386,14 @@ async function readPage(deps, ctx, { mb, token, from, until, budget, folders }) 
     const sameRequest = key && requests.has(key) && requests.get(key) !== ref
     if (skipReason(m, { ownDomains: ctx.ownDomains, warmupTags: ctx.warmupTags }) || sameThread || sameRequest) { plan.push({ m, kind: 'skip' }); continue }
     const env = messageToEnvelope(m)
+    const checks = mailChecks(m, { folder: folderOf(m, folders), ownDomains: ctx.ownDomains })
+    // The code's own warning signs settle it: rejected, no model call, no spend.
+    if (decidedBeforeModel(checks)) { plan.push({ m, kind: 'blocked', env, checks }); continue }
     const dup = findDuplicate(env, known.filter((k) => k.sourceRef !== ref), { days: 7 })
     if (dup) { plan.push({ m, kind: 'dup', env, dup }); continue }
     if (asks >= budget.calls || deps.now().getTime() > budget.deadline) break
     asks++
-    plan.push({ m, kind: 'ask', env })
+    plan.push({ m, kind: 'ask', env, checks })
     threads.set(m.conversationId, ref)
     if (key) requests.set(key, ref)
     known.push({ id: null, sourceRef: ref, email: env.email, phone: '', message: env.message, receivedAt: m.receivedDateTime })
@@ -381,7 +409,7 @@ async function readPage(deps, ctx, { mb, token, from, until, budget, folders }) 
       break
     }
     budget.calls -= chunk.length
-    const outs = await Promise.all(chunk.map((p) => askModel(deps, { workspaceId: mb.workspace_id, env: p.env, brand: ctx.brand })))
+    const outs = await Promise.all(chunk.map((p) => askModel(deps, { workspaceId: mb.workspace_id, env: p.env, brand: ctx.brand, checks: p.checks })))
     chunk.forEach((p, k) => { p.out = outs[k]; ctx.spent += outs[k].cost || 0 })
   }
 
@@ -398,6 +426,10 @@ async function readPage(deps, ctx, { mb, token, from, until, budget, folders }) 
     })
     if (p.kind === 'seen') { to = m.receivedDateTime; continue }
     if (p.kind === 'skip') { counts.skipped++; to = m.receivedDateTime; continue }
+    if (p.kind === 'blocked') {
+      await upsertLead(deps.db, { ...base(), ...verdictColumns(codeVerdict(p.checks), { folder: p.checks.folder, email: p.env.email }), phones: [], error: '' })
+      counts.unqualified++; to = m.receivedDateTime; continue
+    }
     if (p.kind === 'dup') {
       await upsertLead(deps.db, { ...base(), verdict: 'duplicate', reason: 'Same sender and message as an earlier email.', duplicate_of: p.dup.id || null, error: '' })
       counts.duplicate++; to = m.receivedDateTime; continue
