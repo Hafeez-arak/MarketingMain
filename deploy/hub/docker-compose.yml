@@ -1,0 +1,101 @@
+# ─── arak-hub: the app, without Vercel (2026-10-27) ─────────────────────────
+# The web server (screens + api/), the Caddy router in front of it and
+# Supabase, and the two read-only gatekeepers that a TEST copy uses so nothing
+# reaches Instagram, LinkedIn or Odoo. Supabase (/data/arak/supabase) and n8n
+# (n8n/docker) are their own compose projects; all three meet on the external
+# Docker network `arak-hub`:  docker network create arak-hub
+#
+# Settings come from deploy/hub/.env (never in git). Run from this folder:
+#     docker compose up -d --build
+#
+# Only Caddy has a host port, and only on 127.0.0.1: reach it through
+#     ssh -N -L 5682:127.0.0.1:5682 ubuntu@<server>
+
+services:
+  web:
+    build:
+      context: ../..
+      dockerfile: deploy/hub/web.Dockerfile
+      args:
+        VITE_SUPABASE_URL: ${PUBLIC_URL}
+        VITE_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+    image: arak-web:latest
+    container_name: arak-web
+    restart: unless-stopped
+    mem_limit: 2g
+    dns: [1.1.1.1, 8.8.8.8]
+    environment:
+      # Supabase, over the Docker network (not through the public address).
+      SUPABASE_URL: http://api-gw:8000
+      VITE_SUPABASE_URL: http://api-gw:8000
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      VITE_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      PUBLIC_APP_URL: ${PUBLIC_URL}
+      N8N_WEBHOOK_SECRET: ${N8N_WEBHOOK_SECRET}
+      CRON_SECRET: ${CRON_SECRET}
+      WEB_CRONS: ${WEB_CRONS:-off}
+      # Zernio: the read-only gatekeeper on a test copy, zernio.com when live.
+      ZERNIO_BASE_URL: ${ZERNIO_BASE_URL:-}
+      ZERNIO_API_KEY: ${WEB_ZERNIO_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      GOOGLE_SA_KEY: ${GOOGLE_SA_KEY:-}
+      META_IG_TOKEN: ${META_IG_TOKEN:-}
+      META_IG_USER_ID: ${META_IG_USER_ID:-}
+      AGENT_RUN_SECRET: ${AGENT_RUN_SECRET:-}
+      OPENROUTER_MANAGEMENT_KEY: ${OPENROUTER_MANAGEMENT_KEY:-}
+      # Sending: empty on a test copy, so no email can leave.
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_WEBHOOK_SECRET: ${RESEND_WEBHOOK_SECRET:-}
+    networks: [arak-hub]
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: arak-caddy
+    restart: unless-stopped
+    mem_limit: 256m
+    ports:
+      - "127.0.0.1:5682:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    networks: [arak-hub]
+    depends_on: [web]
+
+  zernio-readonly:
+    image: node:22-alpine
+    container_name: arak-zernio-readonly
+    restart: unless-stopped
+    mem_limit: 128m
+    dns: [1.1.1.1, 8.8.8.8]
+    command: ["node", "/srv/zernio.mjs"]
+    volumes:
+      - ../../server/readonly/zernio.mjs:/srv/zernio.mjs:ro
+    environment:
+      ZERNIO_API_KEY: ${ZERNIO_API_KEY}
+    networks: [arak-hub]
+    profiles: [test-copy]
+
+  odoo-readonly:
+    image: node:22-alpine
+    container_name: arak-odoo-readonly
+    restart: unless-stopped
+    mem_limit: 128m
+    dns: [1.1.1.1, 8.8.8.8]
+    command: ["node", "/srv/odoo.mjs"]
+    volumes:
+      - ../../server/readonly/odoo.mjs:/srv/odoo.mjs:ro
+    environment:
+      ODOO_URL: ${ODOO_URL}
+      ODOO_API_KEY: ${ODOO_API_KEY}
+    networks: [arak-hub]
+    profiles: [test-copy]
+
+volumes:
+  caddy_data:
+
+networks:
+  arak-hub:
+    external: true

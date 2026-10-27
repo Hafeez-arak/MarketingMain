@@ -79,7 +79,10 @@ export function zernioKeyFor(workspaceId, env = {}) {
 // decisions below turn on the code — PLATFORM_BETA_RESTRICTED and
 // instagram_audio_requires_facebook_login mean "this will never work as
 // asked" rather than "try again".
-export function createZernio({ apiKey, fetchImpl = fetch, base = ZERNIO_BASE }) {
+// ZERNIO_BASE_URL is for a self-hosted copy that must only read (the
+// arak-hub test server points it at its read-only gatekeeper). Vercel leaves
+// it unset.
+export function createZernio({ apiKey, fetchImpl = fetch, base = process.env.ZERNIO_BASE_URL || ZERNIO_BASE }) {
   if (!apiKey) {
     console.error('[config] ZERNIO_API_KEY is not set on this deployment')
     throw new Error('Social accounts aren’t available right now. Contact your admin.')

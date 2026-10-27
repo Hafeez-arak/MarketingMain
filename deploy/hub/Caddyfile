@@ -1,0 +1,18 @@
+# One address for the whole app: Supabase's paths go to its gateway, the rest
+# to the web server. The browser never needs a second origin, so no CORS.
+# On a real domain, replace ":80" with the name and Caddy fetches HTTPS itself.
+:80 {
+	encode zstd gzip
+	@supabase path /rest/v1/* /auth/v1/* /storage/v1/* /realtime/v1/* /functions/v1/* /graphql/v1/*
+	handle @supabase {
+		reverse_proxy api-gw:8000
+	}
+	handle {
+		reverse_proxy web:3000 {
+			# Long AI calls; Vercel's 300s ceiling does not exist here.
+			transport http {
+				read_timeout 15m
+			}
+		}
+	}
+}

@@ -1,0 +1,17 @@
+# For deploy/hub/web.Dockerfile only (the root .dockerignore is the agent's,
+# and leaves out public/, which the screens need).
+.git
+.claude
+node_modules
+dist
+dist-ssr
+brand-assets
+docs
+n8n
+supabase
+deploy
+.env
+.env.*
+**/*.test.js
+**/*.local
+.DS_Store
