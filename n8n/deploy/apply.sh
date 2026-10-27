@@ -27,8 +27,9 @@ echo "$(grep -c . <<<"$changed") file(s) changed"
 
 # 1. Containers. Rebuilding first, because redeploy.sh imports into the running
 # n8n and a rebuild after it would only restart it again for nothing.
-if has '^n8n/docker/(docker-compose\.yml|Dockerfile)$'; then
-  echo "compose or n8n Dockerfile changed: rebuilding both containers"
+if has '^n8n/docker/(docker-compose\.yml|Dockerfile|metrics/)'; then
+  # Only the containers whose image or config changed are recreated.
+  echo "compose, n8n Dockerfile or resource logger changed: rebuilding the containers"
   (cd "$COMPOSE_DIR" && run docker compose up -d --build) || { echo "rebuild FAILED"; exit 2; }
   rebuilt_agent=1
 elif has '^(server/(Dockerfile|agent\.js|agentHandlers/)|api/agent/|api/zernio/_zernio\.js|src/lib/)'; then
