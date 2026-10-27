@@ -40,3 +40,6 @@ dev/v2db/supabase/.branches/
 
 # The local copy of production rows (dev/v2db/prod-copy): never committed
 dev/v2db/prod-copy/data/
+
+# Musa ERP pilot scratch (his code is not ours to publish)
+dev/erp-pilot/.work/
