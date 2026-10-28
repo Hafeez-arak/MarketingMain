@@ -42,8 +42,11 @@ The owner asked for it to look like Odoo's home:
 - The pin sits on the icon's top corner. On a computer it appears on hover;
   on a phone, which has no hover, it is always shown, and there are no
   description cards.
-- The icons stay in v2's neutral greys. Colour was ruled out for the UI on
-  2026-10-19, so Odoo-style coloured icons are the owner's call.
+- The icons are in colour (the owner, "try colours"). Each app has two
+  colours: the icon is drawn in the first, with a soft round shape behind it
+  in the second (`APP_COLOURS` in `src/pages/home/index.jsx`). Only this grid
+  is coloured; the rest of v2 stays grey. `COLOURED = false` brings back the
+  grey icons. A new section with no colours set is drawn in grey.
 
 ### The left bar
 

@@ -32,6 +32,27 @@ const HW = {
 // rail's grid button opens. Each tile has a pin that puts the section on
 // the left bar or takes it off (lib/shell/pins.js); one screen, not two.
 
+/**
+ * Each app's colours, as on Odoo's home (the owner, 2026-10-28: "try
+ * colours"): the icon in the first, a soft round shape behind it in the
+ * second. Only the Home grid is coloured; the rest of v2 stays grey.
+ * Set COLOURED to false to go back to plain grey icons.
+ */
+const COLOURED = true
+const APP_COLOURS = {
+  ceo: ['#7c3aed', '#f59e0b'],
+  sales: ['#ea580c', '#facc15'],
+  crm: ['#0f766e', '#2dd4bf'],
+  marketing: ['#db2777', '#fb923c'],
+  insights: ['#2563eb', '#38bdf8'],
+  hr: ['#9d4e8d', '#2dd4bf'],
+  contacts: ['#0e7490', '#fb7185'],
+  admin: ['#334155', '#a78bfa'],
+  technical: ['#b45309', '#fbbf24'],
+  finance: ['#15803d', '#38bdf8'],
+}
+const GREY = ['#18181b', '#a1a1aa']
+
 export function HomePage() {
   const { user, who, activeWorkspace } = useAuth()
   const { t, lang, dir } = useT(HW)
@@ -66,6 +87,7 @@ export function HomePage() {
           const on = pins.sections?.some(p => p.key === s.key)
           const name = labelOf(s, lang)
           const blurb = (lang === 'ar' && s.blurbAr) || s.blurb
+          const [ink, glow] = COLOURED ? APP_COLOURS[s.key] || GREY : GREY
           return (
             <li key={s.key} className="group relative flex justify-center">
               <Link to={s.pages[0].to} aria-describedby={`app-${s.key}-about`}
@@ -74,7 +96,14 @@ export function HomePage() {
                   shadow-[0_1px_2px_rgba(9,9,11,0.06)] transition-[transform,box-shadow,border-color] duration-200 ease-out
                   group-hover:-translate-y-1 group-hover:scale-[1.06] group-hover:border-stone-300 group-hover:shadow-[0_10px_24px_-6px_rgba(9,9,11,0.16),0_2px_6px_rgba(9,9,11,0.06)]
                   group-active:scale-[0.98] group-active:translate-y-0 motion-reduce:transform-none">
-                  <NavIcon name={s.icon} className="w-8 h-8 md:w-9 md:h-9" />
+                  {COLOURED && (
+                    // Clipped on its own layer, so the badge on the corner is not.
+                    <span className="absolute inset-0 rounded-2xl overflow-hidden" aria-hidden="true">
+                      <span className="absolute w-11 h-11 md:w-12 md:h-12 rounded-full top-[16%] start-[36%] opacity-30 transition-transform duration-300 ease-out group-hover:scale-110"
+                        style={{ background: glow }} />
+                    </span>
+                  )}
+                  <NavIcon name={s.icon} className="relative w-9 h-9 md:w-10 md:h-10" strokeWidth={COLOURED ? 1.9 : 1.75} style={{ color: ink }} />
                   {n > 0 && (
                     <span className="absolute -top-1.5 -end-1.5 min-w-[20px] h-5 px-1.5 flex items-center justify-center text-[11px] font-semibold text-white bg-red-500 rounded-full ring-2 ring-white">
                       {n > 99 ? '99+' : n}

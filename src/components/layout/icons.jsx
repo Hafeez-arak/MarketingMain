@@ -37,9 +37,9 @@ const P = {
 }
 
 /** One navigation icon. Unknown names draw an empty box rather than nothing, so a typo shows. */
-export function NavIcon({ name, className = 'w-4 h-4' }) {
+export function NavIcon({ name, className = 'w-4 h-4', strokeWidth = 1.75, style }) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24" aria-hidden="true">
+    <svg className={className} style={style} fill="none" stroke="currentColor" strokeWidth={strokeWidth} viewBox="0 0 24 24" aria-hidden="true">
       {P[name] || <rect x="4" y="4" width="16" height="16" rx="2" />}
     </svg>
   )
