@@ -118,11 +118,10 @@ beforeAll(async () => {
       ('${ARAK}', '${U.manager}', 'contacts', 'manage'), ('${ARAK}', '${U.outsider}', 'marketing', 'manage'),
       ('${GHUSN}', '${U.ghusn}', 'contacts', 'manage');
   `)
-  await pg.exec(migration('20261120_contacts_1_tables'))
-  await pg.exec(migration('20261120_contacts_2_rules'))
-  // Both files are safe to re-run.
-  await pg.exec(migration('20261120_contacts_1_tables'))
-  await pg.exec(migration('20261120_contacts_2_rules'))
+  const files = ['20261120_contacts_1_tables', '20261120_contacts_2_rules', '20261120_contacts_3_musa_parity']
+  for (const f of files) await pg.exec(migration(f))
+  // Every file is safe to re-run.
+  for (const f of files) await pg.exec(migration(f))
 })
 
 describe('company separation', () => {
@@ -185,12 +184,13 @@ describe('levels', () => {
     expect(back.archived_at).toBeNull()
   })
 
-  it('manage deletes an organisation nobody uses, but not one with people', async () => {
+  it('manage deletes an organisation nobody uses; its contact persons go with it (his cascade)', async () => {
     const lone = await addOrg('worker', ARAK, 'Deletable (test)')
     expect((await as('manager', 'delete from public.contacts_orgs where id = $1 returning id', [lone])).rows).toHaveLength(1)
-    const used = await addOrg('worker', ARAK, 'In use (test)')
-    await as('worker', `insert into public.contacts_people (workspace_id, org_id, name) values ($1, $2, 'Keeps it (test)')`, [ARAK, used])
-    expect(await refusal('manager', 'delete from public.contacts_orgs where id = $1', [used])).not.toBeNull()
+    const withPeople = await addOrg('worker', ARAK, 'With people (test)')
+    await as('worker', `insert into public.contacts_people (workspace_id, org_id, name) values ($1, $2, 'Goes with it (test)')`, [ARAK, withPeople])
+    expect((await as('manager', 'delete from public.contacts_orgs where id = $1 returning id', [withPeople])).rows).toHaveLength(1)
+    expect((await as('manager', 'select id from public.contacts_people where org_id = $1', [withPeople])).rows).toEqual([])
   })
 })
 
@@ -266,5 +266,77 @@ describe('rules', () => {
     ])
     const two = (await as('manager', `select roles from public.contacts_orgs where name = 'Imported two (test)'`)).rows[0]
     expect(two.roles).toEqual(['client', 'consultant'])
+  })
+})
+
+describe('the rest of his clients and suppliers', () => {
+  it('every record gets a number, per company and year, that never changes', async () => {
+    const y = new Date().getFullYear()
+    const a = await addOrg('worker', ARAK, 'Numbered one (test)')
+    const b = await addOrg('worker', ARAK, 'Numbered two (test)')
+    const g = await addOrg('ghusn', GHUSN, 'Numbered Ghusn (test)')
+    const no = async id => (await as('admin', 'select contact_no from public.contacts_orgs where id = $1', [id])).rows[0].contact_no
+    const [na, nb, ng] = [await no(a), await no(b), await no(g)]
+    expect(na).toMatch(new RegExp(`^C-${y}-\\d{6}$`))
+    expect(Number(nb.slice(-6))).toBe(Number(na.slice(-6)) + 1)
+    expect(ng.startsWith(`C-${y}-`)).toBe(true)
+    await as('worker', `update public.contacts_orgs set contact_no = 'C-1999-000001', notes = 'x' where id = $1`, [a])
+    expect(await no(a)).toBe(na)
+  })
+
+  it('supplier categories: named by managers, read by everyone with access, switched off rather than deleted', async () => {
+    const add = (who, name) => as(who, `insert into public.contacts_categories (workspace_id, name, name_en) values ($1, $2, 'Lighting units') returning id`, [ARAK, name])
+    expect(await refusal('worker', `insert into public.contacts_categories (workspace_id, name) values ($1, 'No (test)')`, [ARAK])).not.toBeNull()
+    const cat = (await add('manager', 'وحدات إنارة')).rows[0].id
+    expect(await refusal('manager', `insert into public.contacts_categories (workspace_id, name) values ($1, ' وحدات إنارة ')`, [ARAK])).not.toBeNull()
+    expect((await as('viewer', 'select id from public.contacts_categories where id = $1', [cat])).rows).toHaveLength(1)
+    expect((await as('ghusn', 'select id from public.contacts_categories where id = $1', [cat])).rows).toEqual([])
+    expect((await as('manager', 'delete from public.contacts_categories where id = $1 returning id', [cat]).catch(() => ({ rows: [] }))).rows).toEqual([])
+
+    const s = (await as('worker', `insert into public.contacts_orgs (workspace_id, name, roles, category_id) values ($1, 'Categorised (test)', '{supplier}', $2) returning id`, [ARAK, cat])).rows[0].id
+    // Another company cannot use this company's category.
+    expect(await refusal('ghusn', `insert into public.contacts_orgs (workspace_id, name, category_id) values ($1, 'Borrowed (test)', $2)`, [GHUSN, cat])).not.toBeNull()
+    // Switched off: kept where it is, not given anew.
+    await as('manager', 'update public.contacts_categories set is_active = false where id = $1', [cat])
+    await expect(as('worker', `update public.contacts_orgs set notes = 'still here' where id = $1`, [s])).resolves.toBeTruthy()
+    expect((await refusal('worker', `insert into public.contacts_orgs (workspace_id, name, category_id) values ($1, 'Late (test)', $2)`, [ARAK, cat])).code).toBe('CONTACTS_CATEGORY_INACTIVE')
+  })
+
+  it('IBAN: Saudi shape in the Kingdom, any country\'s shape outside it; SWIFT and payment terms have a shape too', async () => {
+    const ins = (name, country, iban, swift = null, terms = null) => as('worker',
+      'insert into public.contacts_orgs (workspace_id, name, country, iban, swift, payment_terms_days) values ($1, $2, $3, $4, $5, $6) returning iban, swift',
+      [ARAK, name, country, iban, swift, terms])
+    expect((await ins('Saudi bank (test)', 'SA', 'sa03 8000 0000 6080 1016 7519')).rows[0].iban).toBe('SA0380000000608010167519')
+    expect(await refusal('worker', `insert into public.contacts_orgs (workspace_id, name, country, iban) values ($1, 'Foreign IBAN in SA (test)', 'SA', 'IT60X0542811101000000123456')`, [ARAK])).not.toBeNull()
+    expect((await ins('Italian bank (test)', 'IT', 'IT60X0542811101000000123456', 'bcitit mm')).rows[0]).toEqual({ iban: 'IT60X0542811101000000123456', swift: 'BCITITMM' })
+    expect(await refusal('worker', `insert into public.contacts_orgs (workspace_id, name, swift) values ($1, 'Bad SWIFT (test)', 'BC1')`, [ARAK])).not.toBeNull()
+    expect(await refusal('worker', `insert into public.contacts_orgs (workspace_id, name, payment_terms_days) values ($1, 'Bad terms (test)', 4000)`, [ARAK])).not.toBeNull()
+  })
+
+  it('the activity log: who did what, field by field, kept after a delete, read by managers only', async () => {
+    const a = await addOrg('worker', ARAK, 'Logged (test)')
+    await as('worker', `update public.contacts_orgs set city = 'Riyadh', notes = 'n' where id = $1`, [a])
+    await as('worker', `update public.contacts_orgs set city = 'Riyadh' where id = $1`, [a]) // no change: no row
+    await as('worker', `insert into public.contacts_people (workspace_id, org_id, name) values ($1, $2, 'Logged person (test)')`, [ARAK, a])
+    await as('manager', 'delete from public.contacts_orgs where id = $1', [a])
+    const log = (await as('manager', 'select action, label, changes, actor, person_id is not null as person from public.contacts_activity where org_id = $1 order by id', [a])).rows
+    expect(log.map(r => [r.action, r.person])).toEqual([['insert', false], ['update', false], ['insert', true], ['delete', false], ['delete', true]])
+    expect(log[1].changes).toEqual({ city: [null, 'Riyadh'], notes: ['', 'n'] })
+    expect(log[1].actor).toBe(U.worker)
+    expect(log[3].actor).toBe(U.manager)
+    expect(log[3].label).toBe('Logged (test)')
+    expect((await as('worker', 'select id from public.contacts_activity where org_id = $1', [a])).rows).toEqual([])
+    expect(await refusal('manager', `insert into public.contacts_activity (workspace_id, action) values ($1, 'insert')`, [ARAK])).not.toBeNull()
+  })
+
+  it('the import takes the new fields', async () => {
+    const out = (await as('manager', 'select * from public.contacts_import_orgs($1, $2::jsonb)', [ARAK, JSON.stringify([
+      { name: 'Imported bank (test)', roles: ['supplier'], country: 'IT', iban: 'IT60X0542811101000000123456', payment_terms_days: '60', address: 'Via Roma 1, Milano' },
+      { name: 'Imported bad terms (test)', payment_terms_days: 'sixty' },
+    ])])).rows
+    expect(out.map(r => Boolean(r.org_id))).toEqual([true, false])
+    const r = (await as('manager', 'select payment_terms_days, address, contact_no from public.contacts_orgs where id = $1', [out[0].org_id])).rows[0]
+    expect(r).toMatchObject({ payment_terms_days: 60, address: 'Via Roma 1, Milano' })
+    expect(r.contact_no).toMatch(/^C-\d{4}-\d{6}$/)
   })
 })
