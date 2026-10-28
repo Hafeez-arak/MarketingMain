@@ -8,7 +8,7 @@ import { orgRow, personRow } from './logic'
 // 20261120_contacts_2_rules.sql decide what goes through. Every query names
 // its company: RLS is membership, not isolation.
 
-const ORG_COLS = 'id,workspace_id,kind,name,name_ar,roles,status,vat_number,cr_number,country,nat_building_no,nat_street,nat_district,city,nat_postal_code,nat_additional_no,phone,email,website,notes,archived_at,archived_by,created_by,created_at,updated_at'
+const ORG_COLS = 'id,workspace_id,contact_no,kind,name,name_ar,roles,status,vat_number,cr_number,country,nat_building_no,nat_street,nat_district,city,nat_postal_code,nat_additional_no,address,phone,email,website,category_id,iban,swift,payment_terms_days,notes,archived_at,archived_by,created_by,created_at,updated_at'
 const PERSON_COLS = 'id,workspace_id,org_id,name,name_ar,job_title,phone,email,is_primary,notes,created_at,updated_at'
 
 // The API returns at most 1,000 rows a request; a company's book is read whole.
@@ -36,7 +36,9 @@ export const ERROR_WORDS = {
     CONTACTS_NEEDS_MANAGE: () => 'Archiving, restoring and importing need Manage access to Contacts.',
     CONTACTS_WORKSPACE_FIXED: () => 'A contact cannot move to another company.',
     CONTACTS_IMPORT_TOO_BIG: () => 'At most 2,000 rows can be imported at once.',
-    inUse: () => 'It is still in use (it has contact persons), so it cannot be deleted. Archive it instead.',
+    CONTACTS_CATEGORY_INACTIVE: () => 'That category is switched off. Choose another, or switch it on in Supplier categories.',
+    inUse: () => 'Another record still points at it, so it cannot be deleted. Archive it instead.',
+    categoryTaken: () => 'There is already a category with that name.',
     notAllowed: () => 'You do not have access to do that in Contacts.',
     notFound: () => 'That record is not there any more, or you cannot see it.',
     failed: () => 'It did not work. Try again.',
@@ -50,7 +52,9 @@ export const ERROR_WORDS = {
     CONTACTS_NEEDS_MANAGE: () => 'الأرشفة والاستعادة والاستيراد تحتاج صلاحية الإدارة في جهات الاتصال.',
     CONTACTS_WORKSPACE_FIXED: () => 'لا يمكن نقل جهة اتصال إلى شركة أخرى.',
     CONTACTS_IMPORT_TOO_BIG: () => 'يمكن استيراد 2,000 صف كحد أقصى في المرة الواحدة.',
-    inUse: () => 'ما زالت مستخدمة (لها أشخاص اتصال)، فلا يمكن حذفها. أرشفها بدلًا من ذلك.',
+    CONTACTS_CATEGORY_INACTIVE: () => 'هذا التصنيف موقوف. اختر غيره، أو فعّله من تصنيفات الموردين.',
+    inUse: () => 'ما زال سجل آخر يشير إليها، فلا يمكن حذفها. أرشفها بدلًا من ذلك.',
+    categoryTaken: () => 'يوجد تصنيف بهذا الاسم.',
     notAllowed: () => 'ليست لديك صلاحية لهذا في جهات الاتصال.',
     notFound: () => 'هذا السجل لم يعد موجودًا، أو لا يمكنك رؤيته.',
     failed: () => 'لم ينجح ذلك. حاول مجددًا.',
@@ -68,6 +72,7 @@ export function errorText(err, lang = getLang()) {
   // Postgres's own: a race past the duplicate guard, a delete blocked by people, RLS.
   if (msg.includes('contacts_orgs_vat_uq')) return W.CONTACTS_DUPLICATE_VAT('')
   if (msg.includes('contacts_orgs_cr_uq')) return W.CONTACTS_DUPLICATE_CR('')
+  if (msg.includes('contacts_categories_name_uq')) return W.categoryTaken()
   if (err?.code === '23503' || msg.includes('contacts_people_org_fk')) return W.inUse()
   if (err?.code === '42501' || msg.includes('row-level security')) return W.notAllowed()
   return msg && !/^[A-Z_]+$/.test(msg) ? msg : W.failed()
@@ -105,7 +110,10 @@ export async function setOrgStatus(ws, id, status) {
   return data ? { org: data } : { error: errorText('notAllowed') }
 }
 
-/** Delete an organisation nobody uses (no people). Managing only. */
+/**
+ * Delete an organisation nothing else points at; its contact persons go
+ * with it (his rule). Managing only.
+ */
 export async function deleteOrg(ws, id) {
   const { data, error } = await supabase.from('contacts_orgs').delete().eq('workspace_id', ws).eq('id', id).select('id')
   if (error) return fail(error)
@@ -154,4 +162,42 @@ export async function importOrgs(ws, rows) {
       error: r.error_code ? errorText({ message: r.error_code, details: r.error_detail || '' }) : null,
     })),
   }
+}
+
+// ── Supplier categories (Musa's: the company names them) ──
+
+const CATEGORY_COLS = 'id,workspace_id,name,name_en,is_active,created_at'
+
+export async function fetchCategories(ws) {
+  if (!ws) return { rows: [] }
+  const { data, error } = await supabase.from('contacts_categories').select(CATEGORY_COLS).eq('workspace_id', ws).order('name').limit(1000)
+  return error ? { rows: [], ...fail(error) } : { rows: data || [] }
+}
+
+/** Add or change one (managing only): { name, name_en, is_active }. */
+export async function saveCategory(ws, id, fields) {
+  const row = { name: String(fields.name || '').trim(), name_en: String(fields.name_en || '').trim() || null, is_active: fields.is_active !== false }
+  const q = id
+    ? supabase.from('contacts_categories').update(row).eq('workspace_id', ws).eq('id', id)
+    : supabase.from('contacts_categories').insert({ ...row, workspace_id: ws })
+  const { data, error } = await q.select(CATEGORY_COLS).maybeSingle()
+  if (error) return fail(error)
+  return data ? { category: data } : { error: errorText('notAllowed') }
+}
+
+// ── The activity log (managing only; RLS returns nothing to the rest) ──
+
+/** One organisation's history, its people's included, newest first, with who did it. */
+export async function fetchActivity(ws, orgId, limit = 50) {
+  const { data, error } = await supabase.from('contacts_activity')
+    .select('id,org_id,person_id,action,label,changes,actor,at')
+    .eq('workspace_id', ws).eq('org_id', orgId).order('id', { ascending: false }).limit(limit)
+  if (error) return { rows: [], ...fail(error) }
+  const actors = [...new Set((data || []).map(r => r.actor).filter(Boolean))]
+  let names = {}
+  if (actors.length) {
+    const people = await supabase.rpc('task_people', { ws })
+    names = Object.fromEntries((people.data || []).map(p => [p.user_id, p.name]))
+  }
+  return { rows: (data || []).map(r => ({ ...r, actorName: r.actor ? names[r.actor] || null : null })) }
 }
