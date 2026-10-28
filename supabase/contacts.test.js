@@ -118,7 +118,7 @@ beforeAll(async () => {
       ('${ARAK}', '${U.manager}', 'contacts', 'manage'), ('${ARAK}', '${U.outsider}', 'marketing', 'manage'),
       ('${GHUSN}', '${U.ghusn}', 'contacts', 'manage');
   `)
-  const files = ['20261120_contacts_1_tables', '20261120_contacts_2_rules', '20261120_contacts_3_musa_parity']
+  const files = ['20261120_contacts_1_tables', '20261120_contacts_2_rules', '20261120_contacts_3_musa_parity', '20261126_contacts_company_delete']
   for (const f of files) await pg.exec(migration(f))
   // Every file is safe to re-run.
   for (const f of files) await pg.exec(migration(f))
@@ -327,6 +327,20 @@ describe('the rest of his clients and suppliers', () => {
     expect(log[3].label).toBe('Logged (test)')
     expect((await as('worker', 'select id from public.contacts_activity where org_id = $1', [a])).rows).toEqual([])
     expect(await refusal('manager', `insert into public.contacts_activity (workspace_id, action) values ($1, 'insert')`, [ARAK])).not.toBeNull()
+  })
+
+  it('deleting a whole company takes its organisations, people and history with it', async () => {
+    const GONE = '00000000-0000-0000-0000-0000000000a9'
+    await pg.exec(`insert into public.workspaces values ('${GONE}', 'Closing (test)');
+      insert into public.workspace_members values ('${GONE}', '${U.admin}');
+      insert into public.section_access values ('${GONE}', '${U.admin}', 'contacts', 'manage');`)
+    const a = await addOrg('admin', GONE, 'Closing org (test)')
+    await as('admin', `insert into public.contacts_people (workspace_id, org_id, name) values ($1, $2, 'Closing person (test)')`, [GONE, a])
+    await pg.query('delete from public.workspace_members where workspace_id = $1', [GONE]) // this test's stand-in table has no cascade
+    await pg.query('delete from public.workspaces where id = $1', [GONE])
+    for (const table of ['contacts_orgs', 'contacts_people', 'contacts_activity']) {
+      expect((await pg.query(`select count(*)::int as n from public.${table} where workspace_id = $1`, [GONE])).rows[0].n).toBe(0)
+    }
   })
 
   it('the import takes the new fields', async () => {
