@@ -52,6 +52,28 @@ export const SECTIONS = [
     ],
   },
   {
+    // Musa's CRM rewritten in our stack (2026-10-28, dev/erp-pilot/CRM.md):
+    // his opportunities, pipeline, activities, analysis and settings, as
+    // their own section (his menu has CRM as its own app beside Clients),
+    // apart from Sales' lead-agent pipeline. view reads, work does the
+    // day-to-day (his crm.manage), manage sets it up (his crm.settings).
+    key: 'crm', label: 'CRM', ar: 'الفرص البيعية', icon: 'kanban', base: '/crm', adminOnly: true,
+    blurb: 'Sales opportunities through your stages to won or lost, with their activities and analysis.',
+    blurbAr: 'الفرص البيعية عبر مراحلكم حتى الكسب أو الخسارة، مع أنشطتها وتحليلها.',
+    pages: [
+      { to: '/crm', label: 'Pipeline', ar: 'مسار البيع', icon: 'kanban', exact: true, translated: true },
+      { to: '/crm/mine', label: 'My opportunities', ar: 'فرصي', icon: 'target', translated: true },
+      { to: '/crm/activities', label: 'Planned activities', ar: 'الأنشطة المخططة', icon: 'calendar', translated: true },
+      { to: '/crm/list', label: 'All opportunities', ar: 'كل الفرص', icon: 'grid', translated: true },
+      { to: '/crm/analysis', label: 'Analysis', ar: 'التحليل', icon: 'bars', translated: true },
+      { to: '/crm/settings', label: 'CRM settings', ar: 'إعدادات الفرص', icon: 'gear', translated: true },
+      // Reached from the lists, not the menu.
+      { to: '/crm/lead', label: 'Opportunity', ar: 'الفرصة', icon: 'kanban', hidden: true, translated: true },
+      { to: '/crm/new', label: 'New opportunity', ar: 'فرصة جديدة', icon: 'kanban', hidden: true, min: 'work', translated: true },
+      { to: '/crm/edit', label: 'Edit opportunity', ar: 'تعديل الفرصة', icon: 'kanban', hidden: true, min: 'work', translated: true },
+    ],
+  },
+  {
     key: 'marketing', label: 'Marketing', ar: 'التسويق', icon: 'megaphone', base: '/marketing',
     blurb: 'Plan, create, schedule and publish, and the brand behind it.',
     blurbAr: 'التخطيط والإنشاء والجدولة والنشر، والعلامة التجارية خلف ذلك.',

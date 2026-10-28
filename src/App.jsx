@@ -46,6 +46,12 @@ import { BrandBrain } from './pages/settings/BrandBrain'
 import { CreativeStudio } from './pages/studio/index'
 import { HomePage } from './pages/home/index'
 import { TasksPage } from './pages/tasks/index'
+import { CrmPipeline, CrmMine, CrmAll } from './pages/crm/Leads'
+import { CrmLead } from './pages/crm/Lead'
+import { CrmLeadForm } from './pages/crm/LeadForm'
+import { CrmActivities } from './pages/crm/Activities'
+import { CrmAnalysis } from './pages/crm/Analysis'
+import { CrmSettings } from './pages/crm/Settings'
 import { ContactsPage } from './pages/contacts/index'
 import { ContactsOrgPage } from './pages/contacts/Org'
 import { ContactsPeoplePage } from './pages/contacts/People'
@@ -240,6 +246,16 @@ function ProtectedApp() {
             <Route path="/hr/attendance"         element={<HrAttendance />} />
             <Route path="/hr/documents"          element={<HrDocuments />} />
             <Route path="/hr/settings"           element={<HrSettings />} />
+            {/* ── CRM ── Musa's CRM, in our stack (dev/erp-pilot/CRM.md). */}
+            <Route path="/crm"                   element={<CrmPipeline />} />
+            <Route path="/crm/mine"              element={<CrmMine />} />
+            <Route path="/crm/list"              element={<CrmAll />} />
+            <Route path="/crm/lead"              element={<CrmLead />} />
+            <Route path="/crm/new"               element={<CrmLeadForm />} />
+            <Route path="/crm/edit"              element={<CrmLeadForm key="edit" />} />
+            <Route path="/crm/activities"        element={<CrmActivities />} />
+            <Route path="/crm/analysis"          element={<CrmAnalysis />} />
+            <Route path="/crm/settings"          element={<CrmSettings />} />
             {/* ── Contacts ── Musa's ERP item 3, in our stack. */}
             <Route path="/contacts"              element={<ContactsPage />} />
             <Route path="/contacts/people"       element={<ContactsPeoplePage />} />

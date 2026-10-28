@@ -11,8 +11,8 @@ import { leadRow, LIST_TABLES } from './logic'
 
 const LEAD_COLS = 'id,workspace_id,lead_no,title,contact_name,organization,phone,email,city,client_org_id,consultant,project_owner,bid_due_date,tender_ref,stage_id,source_id,assigned_to,status,expected_revenue,probability,expected_close_date,priority,lost_reason_id,lost_note,closed_at,closed_by,notes,created_by,created_at,updated_at'
 const ACTIVITY_COLS = 'id,workspace_id,lead_id,activity_type,summary,due_date,assigned_to,done_at,done_by,outcome,created_by,created_at'
-const LIST_COLS = { stages: 'id,workspace_id,name,name_en,sequence,is_active,auto_event,created_at', tags: 'id,workspace_id,name,name_en,color,is_active,created_at' }
-const listCols = kind => LIST_COLS[kind] || 'id,workspace_id,name,name_en,is_active,created_at'
+const LIST_COLS = { stages: 'id,workspace_id,name,name_en,sequence,is_active,auto_event,created_at,updated_at', tags: 'id,workspace_id,name,name_en,color,is_active,created_at,updated_at' }
+const listCols = kind => LIST_COLS[kind] || 'id,workspace_id,name,name_en,is_active,created_at,updated_at'
 
 // The API returns at most 1,000 rows a request; a company's pipeline is read whole.
 const PAGE = 1000

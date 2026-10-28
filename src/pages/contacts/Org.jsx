@@ -11,6 +11,7 @@ import {
 import { CW } from './words'
 import { Dialog, OrgForm, PersonForm, RoleBadges } from './parts'
 import { categoryName } from './useContactsBook'
+import { OrgLeads } from '../crm/OrgLeads'
 
 // ─── Contacts → one organisation (v2) ──────────────────────────────────────
 // 2026-10-28, dev/erp-pilot/CONTACTS.md. Everything about one organisation
@@ -189,6 +190,8 @@ export function ContactsOrgPage() {
           <p className="text-sm text-text whitespace-pre-wrap" dir="auto">{org.notes || <span className="text-text-tertiary">{w.noNotes}</span>}</p>
         </section>
       </div>
+
+      <OrgLeads org={org} />
 
       <section className="space-y-2">
         <div className="flex items-center justify-between">
