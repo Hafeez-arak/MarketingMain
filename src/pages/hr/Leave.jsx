@@ -6,8 +6,9 @@ import {
   nameOf, balanceOf, leaveActions, leaveProblem, offOn, workingDays, spanDays, monthDays, riyadhToday, weekday,
 } from '../../lib/hr/logic'
 import {
-  fetchLeaveTypes, fetchLeaveRequests, fetchBalances, fetchSettings, fetchPeople, askLeave, decideLeave, saveBalance,
+  fetchLeaveTypes, fetchLeaveRequests, fetchBalances, fetchPeople, askLeave, decideLeave, saveBalance,
 } from '../../lib/hr/client'
+import { fetchAttendanceSettings } from '../../lib/hr/attendanceClient'
 import { HW } from './words'
 import { useHrBase, field, fmtDate, empName, STATE_TONE } from './useHrBase'
 import { Dialog, ErrorText, Field, Pill, Tabs, EmployeeSelect, NoAccess } from './parts'
@@ -42,7 +43,7 @@ export function HrLeave() {
 
   const load = useCallback(async () => {
     if (!ws) return
-    const [ty, r, b, s, p] = await Promise.all([fetchLeaveTypes(ws), fetchLeaveRequests(ws), fetchBalances(ws, year), fetchSettings(ws), fetchPeople(ws)])
+    const [ty, r, b, s, p] = await Promise.all([fetchLeaveTypes(ws), fetchLeaveRequests(ws), fetchBalances(ws, year), fetchAttendanceSettings(ws), fetchPeople(ws)])
     setTypes(ty.rows); setRequests(r.rows); setBalances(b.rows); setSettings(s.row); setPeople(p.rows)
     setError(ty.error || r.error || b.error || '')
   }, [ws, year])
