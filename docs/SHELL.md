@@ -28,6 +28,23 @@ database in `dev/v2db`. Nothing here touches production.
 | The palette (↑ ↓ Enter Esc) and a Search button in the top bar | `SearchPalette.jsx`, `Topbar.jsx`, `AppLayout.jsx` |
 | Database rules test | `supabase/shell.test.js` |
 
+### The apps grid (Home), restyled the same day
+
+The owner asked for it to look like Odoo's home:
+
+- Each module is a big white rounded icon with its name underneath. The
+  grid is 3 icons across on a phone and up to 6 on a wide screen.
+- Hovering lifts the icon slightly, with a soft shadow.
+- Resting on an icon for about half a second (550 ms), or reaching it with
+  the keyboard, shows a dark card below with the module's description and
+  how many things are waiting there. A quick pass across the grid shows
+  nothing.
+- The pin sits on the icon's top corner. On a computer it appears on hover;
+  on a phone, which has no hover, it is always shown, and there are no
+  description cards.
+- The icons stay in v2's neutral greys. Colour was ruled out for the UI on
+  2026-10-19, so Odoo-style coloured icons are the owner's call.
+
 ### The left bar
 
 - **What it shows:** the logo, the grid button, the person's pinned

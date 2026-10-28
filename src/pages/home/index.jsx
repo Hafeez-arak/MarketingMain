@@ -56,34 +56,58 @@ export function HomePage() {
 
       {pins.saveError && <p role="alert" className="text-xs text-red-600">{c.pinSaveFailed}</p>}
 
-      <ul className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+      {/* The apps, as on Odoo's home (the owner, 2026-10-28): a big icon and
+          its name. Hovering lifts the icon a little; resting on it for a
+          moment shows what is inside. The pin (top corner, on hover; always
+          on a phone) puts the section on the left bar. */}
+      <ul className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-x-3 gap-y-7 pt-2">
         {sections.map(s => {
           const n = sectionBadge(s, badges)
           const on = pins.sections?.some(p => p.key === s.key)
+          const name = labelOf(s, lang)
+          const blurb = (lang === 'ar' && s.blurbAr) || s.blurb
           return (
-            <li key={s.key} className="relative">
-              <Link to={s.pages[0].to}
-                className="group relative flex flex-col h-full bg-white border border-border rounded-xl px-4 py-4 hover:bg-stone-50 hover:border-stone-300 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-300">
-                <span className="w-9 h-9 rounded-lg flex items-center justify-center bg-stone-100 text-text border border-border">
-                  <NavIcon name={s.icon} className="w-5 h-5" />
+            <li key={s.key} className="group relative flex justify-center">
+              <Link to={s.pages[0].to} aria-describedby={`app-${s.key}-about`}
+                className="flex flex-col items-center gap-2.5 w-full rounded-xl focus:outline-none [&:focus-visible>span:first-child]:ring-2 [&:focus-visible>span:first-child]:ring-stone-400">
+                <span className="relative w-[76px] h-[76px] md:w-[84px] md:h-[84px] rounded-2xl bg-white border border-border flex items-center justify-center text-text
+                  shadow-[0_1px_2px_rgba(9,9,11,0.06)] transition-[transform,box-shadow,border-color] duration-200 ease-out
+                  group-hover:-translate-y-1 group-hover:scale-[1.06] group-hover:border-stone-300 group-hover:shadow-[0_10px_24px_-6px_rgba(9,9,11,0.16),0_2px_6px_rgba(9,9,11,0.06)]
+                  group-active:scale-[0.98] group-active:translate-y-0 motion-reduce:transform-none">
+                  <NavIcon name={s.icon} className="w-8 h-8 md:w-9 md:h-9" />
+                  {n > 0 && (
+                    <span className="absolute -top-1.5 -end-1.5 min-w-[20px] h-5 px-1.5 flex items-center justify-center text-[11px] font-semibold text-white bg-red-500 rounded-full ring-2 ring-white">
+                      {n > 99 ? '99+' : n}
+                    </span>
+                  )}
                 </span>
-                <span className="text-sm font-semibold text-text mt-3">{labelOf(s, lang)}</span>
-                <span className="text-[11px] text-text-secondary leading-snug mt-1 line-clamp-3">{(lang === 'ar' && s.blurbAr) || s.blurb}</span>
-                {n > 0 && (
-                  <span className="absolute top-3 end-12 min-w-[20px] h-5 px-1.5 flex items-center justify-center text-[11px] font-semibold text-white bg-red-500 rounded-full"
-                    title={t.waiting(n)}>
-                    {n}
-                  </span>
-                )}
+                <span className="text-[13px] font-medium text-text-secondary group-hover:text-text text-center leading-tight transition-colors">{name}</span>
               </Link>
+
+              {/* What is inside: after a short rest on the icon (or keyboard
+                  focus), never on a quick pass across the grid. Desktop only:
+                  a phone has no hover, and a tap opens the section. */}
+              <div id={`app-${s.key}-about`} role="tooltip"
+                className="hidden md:block pointer-events-none absolute top-full start-1/2 -ms-[88px] mt-2 w-44 z-30
+                  rounded-lg bg-stone-900 text-white px-3 py-2.5 shadow-dropdown
+                  opacity-0 translate-y-1 transition duration-150 ease-out
+                  group-hover:opacity-100 group-hover:translate-y-0 group-hover:delay-[550ms]
+                  group-has-[a:focus-visible]:opacity-100 group-has-[a:focus-visible]:translate-y-0 group-has-[a:focus-visible]:delay-[550ms]
+                  motion-reduce:transition-none">
+                <span className="absolute -top-1 start-1/2 -ms-1 w-2 h-2 rotate-45 bg-stone-900" aria-hidden="true" />
+                <span className="block text-[11px] leading-snug text-stone-200">{blurb}</span>
+                {n > 0 && <span className="block text-[11px] font-semibold text-white mt-1.5">{t.waiting(n)}</span>}
+              </div>
+
               {/* Beside the link, not in it: a button inside a link is invalid. */}
               {pinnable && (
                 <button type="button" onClick={() => pins.toggle(s.key)} aria-pressed={on}
-                  title={on ? c.unpin : c.pin} aria-label={`${on ? c.unpin : c.pin}: ${labelOf(s, lang)}`}
-                  className={`absolute top-2.5 end-2.5 w-7 h-7 rounded-md flex items-center justify-center transition-colors
-                    focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-300
-                    ${on ? 'text-text bg-stone-100 hover:bg-stone-200' : 'text-text-tertiary hover:bg-stone-100 hover:text-text'}`}>
-                  <NavIcon name="pin" className={`w-4 h-4 ${on ? '[&>path]:fill-current' : ''}`} />
+                  title={on ? c.unpin : c.pin} aria-label={`${on ? c.unpin : c.pin}: ${name}`}
+                  className={`absolute -top-2 start-1/2 -ms-[50px] md:-ms-[54px] w-6 h-6 rounded-full flex items-center justify-center border transition
+                    focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-400 focus-visible:opacity-100
+                    md:opacity-0 md:group-hover:opacity-100 md:group-hover:-translate-y-1
+                    ${on ? 'bg-stone-900 border-stone-900 text-white' : 'bg-white border-border text-text-tertiary hover:text-text hover:border-stone-400'}`}>
+                  <NavIcon name="pin" className={`w-3.5 h-3.5 ${on ? '[&>path]:fill-current' : ''}`} />
                 </button>
               )}
             </li>
