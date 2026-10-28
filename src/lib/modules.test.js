@@ -46,7 +46,7 @@ describe('old addresses', () => {
 
 describe('who sees what', () => {
   it('an admin gets every section; a member gets Marketing and Insights', () => {
-    expect(sectionsFor({ isAccessAdmin: true }).map(s => s.key)).toEqual(['ceo', 'sales', 'marketing', 'insights', 'hr', 'contacts', 'admin'])
+    expect(sectionsFor({ isAccessAdmin: true }).map(s => s.key)).toEqual(['ceo', 'sales', 'crm', 'marketing', 'insights', 'hr', 'contacts', 'admin'])
     expect(sectionsFor({ isAccessAdmin: false }).map(s => s.key)).toEqual(['marketing', 'insights'])
   })
 })
@@ -152,5 +152,22 @@ describe('HR (2026-10-28)', () => {
     expect(canVisit('/hr/settings', { sections: { hr: 'manage' } })).toBe(true)
     expect(canVisit('/hr', { sections: { sales: 'manage' } })).toBe(false)
     expect(pageTitle('/hr/leave', 'ar')).toBe('الإجازات')
+  })
+})
+
+describe('CRM (2026-10-28)', () => {
+  it('is its own section, granted per person, its pages at the right level', async () => {
+    const { GRANTABLE } = await import('./sectionAccess.js')
+    expect(GRANTABLE).toContain('crm')
+    const view = { sections: { crm: 'view' } }
+    for (const p of ['/crm', '/crm/mine', '/crm/list', '/crm/activities', '/crm/analysis', '/crm/settings', '/crm/lead']) expect(canVisit(p, view)).toBe(true)
+    expect(canVisit('/crm/new', view)).toBe(false)
+    expect(canVisit('/crm/edit', view)).toBe(false)
+    expect(canVisit('/crm/new', { sections: { crm: 'work' } })).toBe(true)
+    // Sales' own pipeline does not open the CRM, and the reverse.
+    expect(canVisit('/crm', { sections: { sales: 'manage' } })).toBe(false)
+    expect(canVisit('/sales/leads', view)).toBe(false)
+    expect(pageTitle('/crm/activities', 'ar')).toBe('الأنشطة المخططة')
+    expect(pageTitle('/crm/lead', 'en')).toBe('Opportunity')
   })
 })

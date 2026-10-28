@@ -7,6 +7,7 @@ import { useTaskBoard } from '../tasks/useTaskBoard'
 import { TaskList } from '../tasks/parts'
 import { bucketOf } from '../../lib/tasks/logic'
 import { useT, labelOf } from '../../lib/i18n'
+import { CrmHomeItems } from '../crm/HomeItems'
 
 const HW = {
   en: {
@@ -42,6 +43,7 @@ export function HomePage() {
       </header>
 
       <Today />
+      <CrmHomeItems />
 
       <ul className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
         {sections.map(s => {
