@@ -6,7 +6,9 @@ import { useBadges, sectionBadge } from '../../components/layout/useNavBadges'
 import { useTaskBoard } from '../tasks/useTaskBoard'
 import { TaskList } from '../tasks/parts'
 import { bucketOf } from '../../lib/tasks/logic'
-import { useT, labelOf } from '../../lib/i18n'
+import { useT, labelOf, COMMON } from '../../lib/i18n'
+import { usePins } from '../../components/layout/usePins'
+import { canPin } from '../../lib/shell/pins'
 import { CrmHomeItems } from '../crm/HomeItems'
 
 const HW = {
@@ -25,12 +27,19 @@ const HW = {
 // as on Odoo's home, each saying in a line what is inside and how many things
 // wait there. On a phone it is the way in, since the rail is behind the menu.
 // v1's dashboard is Marketing's Dashboard now (/marketing), unchanged.
+//
+// 2026-10-28 (docs/SHELL.md): this is also the "all modules" screen the
+// rail's grid button opens. Each tile has a pin that puts the section on
+// the left bar or takes it off (lib/shell/pins.js); one screen, not two.
 
 export function HomePage() {
   const { user, who, activeWorkspace } = useAuth()
   const { t, lang, dir } = useT(HW)
   const badges = useBadges()
   const sections = sectionsFor(who)
+  const pins = usePins()
+  const pinnable = canPin(who) && pins.ready
+  const c = COMMON[lang]
   const name = String(user?.user_metadata?.full_name || user?.email?.split('@')[0] || '').split(/[.\s_]/)[0]
 
   return (
@@ -45,11 +54,14 @@ export function HomePage() {
       <Today />
       <CrmHomeItems />
 
+      {pins.saveError && <p role="alert" className="text-xs text-red-600">{c.pinSaveFailed}</p>}
+
       <ul className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
         {sections.map(s => {
           const n = sectionBadge(s, badges)
+          const on = pins.sections?.some(p => p.key === s.key)
           return (
-            <li key={s.key}>
+            <li key={s.key} className="relative">
               <Link to={s.pages[0].to}
                 className="group relative flex flex-col h-full bg-white border border-border rounded-xl px-4 py-4 hover:bg-stone-50 hover:border-stone-300 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-300">
                 <span className="w-9 h-9 rounded-lg flex items-center justify-center bg-stone-100 text-text border border-border">
@@ -58,12 +70,22 @@ export function HomePage() {
                 <span className="text-sm font-semibold text-text mt-3">{labelOf(s, lang)}</span>
                 <span className="text-[11px] text-text-secondary leading-snug mt-1 line-clamp-3">{(lang === 'ar' && s.blurbAr) || s.blurb}</span>
                 {n > 0 && (
-                  <span className="absolute top-3 end-3 min-w-[20px] h-5 px-1.5 flex items-center justify-center text-[11px] font-semibold text-white bg-red-500 rounded-full"
+                  <span className="absolute top-3 end-12 min-w-[20px] h-5 px-1.5 flex items-center justify-center text-[11px] font-semibold text-white bg-red-500 rounded-full"
                     title={t.waiting(n)}>
                     {n}
                   </span>
                 )}
               </Link>
+              {/* Beside the link, not in it: a button inside a link is invalid. */}
+              {pinnable && (
+                <button type="button" onClick={() => pins.toggle(s.key)} aria-pressed={on}
+                  title={on ? c.unpin : c.pin} aria-label={`${on ? c.unpin : c.pin}: ${labelOf(s, lang)}`}
+                  className={`absolute top-2.5 end-2.5 w-7 h-7 rounded-md flex items-center justify-center transition-colors
+                    focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-300
+                    ${on ? 'text-text bg-stone-100 hover:bg-stone-200' : 'text-text-tertiary hover:bg-stone-100 hover:text-text'}`}>
+                  <NavIcon name="pin" className={`w-4 h-4 ${on ? '[&>path]:fill-current' : ''}`} />
+                </button>
+              )}
             </li>
           )
         })}

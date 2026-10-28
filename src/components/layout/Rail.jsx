@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { useAuth } from '../../store/auth'
 import { HOME, GLOBAL_PAGES, sectionsFor, sectionOf, sectionMenu } from '../../lib/modules'
+import { usePins } from './usePins'
 import { NavIcon } from './icons'
 import { useBadges, sectionBadge } from './useNavBadges'
 import { ArakMark } from './ArakMark'
@@ -14,6 +15,11 @@ import { useLang, labelOf, COMMON } from '../../lib/i18n'
 // Requests, Settings). One click moves between sections, which a launcher
 // alone cannot do: it sends you back to Home each time. See lib/modules.js
 // and docs/COMPANY-HUB-PLAN.md.
+//
+// 2026-10-28 (docs/SHELL.md): the grid button at the top opens Home, where
+// every section this person may open is a tile with a pin. The rail draws
+// only the pinned ones (lib/shell/pins.js), plus the open section while you
+// are in it, so you can always see where you are.
 
 // Light and quiet (shadcn/ui), with a short label under each icon, as in
 // Slack's rail (the owner asked for it, 2026-10-19): an icon alone made people
@@ -45,8 +51,12 @@ export function Rail({ onNavigate, menuHidden = false }) {
   const { who } = useAuth()
   const lang = useLang()
   const badges = useBadges()
-  const sections = sectionsFor(who)
+  const pins = usePins()
+  const all = sectionsFor(who)
   const here = sectionOf(pathname)?.key || null
+  // Until the pins are read, no sections rather than the wrong ones.
+  const pinned = pins.sections ?? (pins.ready ? all : [])
+  const sections = all.filter(s => s.key === here || pinned.some(p => p.key === s.key))
 
   // ── The hover panel ──
   const [peek, setPeek] = useState(null) // a section key, or null
@@ -64,7 +74,7 @@ export function Rail({ onNavigate, menuHidden = false }) {
     if (!canHover()) return
     clear()
     // The open section's own menu is already on screen, unless it is hidden.
-    const s = sections.find(x => x.key === key)
+    const s = all.find(x => x.key === key)
     const wanted = s && sectionMenu(s, who).length && (key !== here || menuHidden) ? key : null
     openT.current = setTimeout(() => setPeek(wanted), peek ? 0 : OPEN_MS)
   }
@@ -74,7 +84,7 @@ export function Rail({ onNavigate, menuHidden = false }) {
   }
   const keep = () => clearTimeout(closeT.current)
   const done = () => { clear(); setPeek(null); onNavigate?.() }
-  const peeked = peek && sections.find(x => x.key === peek)
+  const peeked = peek && all.find(x => x.key === peek)
 
   const link = (to, label, icon, active, n, key = null) => (
     <NavLink key={to} to={to} aria-current={active ? 'page' : undefined} onClick={done}
@@ -97,7 +107,8 @@ export function Rail({ onNavigate, menuHidden = false }) {
         <div className="h-12 flex items-center justify-center mb-1 flex-shrink-0">
           <ArakMark />
         </div>
-        {link(HOME.to, labelOf(HOME, lang), HOME.icon, pathname === '/', 0)}
+        {/* The grid button: Home, with every section as a tile. */}
+        {link(HOME.to, COMMON[lang].allModules, 'grid', pathname === '/', 0)}
         <span className="w-8 border-t border-border my-1.5 flex-shrink-0" aria-hidden="true" />
         {sections.map(s => link(s.pages[0].to, labelOf(s, lang), s.icon, here === s.key, sectionBadge(s, badges), s.key))}
         <div className="flex-1 min-h-4" />

@@ -115,12 +115,18 @@ export const COMMON = {
     home: 'Home', language: 'العربية', languageLabel: 'Switch to Arabic', signOut: 'Sign out', workspace: 'Workspace',
     notifications: 'Notifications', markAllRead: 'Mark all read', allCaughtUp: 'All caught up', menu: 'Menu',
     showMenu: 'Show menu', hideMenu: 'Hide menu', sections: 'Sections', openInOdoo: 'Open in Odoo', loading: 'Loading…',
+    allModules: 'Apps', pin: 'Pin to the left bar', unpin: 'Unpin from the left bar', pinSaveFailed: 'Your left bar could not be saved. Try again.',
+    search: 'Search', searchPh: 'Search pages, leads, contacts, people…', searchNone: 'Nothing found', searchFailed: 'Some parts could not be searched:',
+    searchHint: 'Type to search everything you can open.', searchClose: 'Close', searching: 'Searching…',
     notFoundTitle: "That page doesn't exist", notFoundBody: 'The link may be out of date. Everything is reachable from Home.', backHome: 'Back to Home',
   },
   ar: {
     home: 'الرئيسية', language: 'English', languageLabel: 'التبديل إلى الإنجليزية', signOut: 'تسجيل الخروج', workspace: 'الشركة',
     notifications: 'الإشعارات', markAllRead: 'تعليم الكل كمقروء', allCaughtUp: 'لا جديد', menu: 'القائمة',
     showMenu: 'إظهار القائمة', hideMenu: 'إخفاء القائمة', sections: 'الأقسام', openInOdoo: 'فتح في أودو', loading: 'جارٍ التحميل…',
+    allModules: 'التطبيقات', pin: 'تثبيت في الشريط الجانبي', unpin: 'إزالة من الشريط الجانبي', pinSaveFailed: 'تعذّر حفظ الشريط الجانبي. حاول مرة أخرى.',
+    search: 'بحث', searchPh: 'ابحث في الصفحات والعملاء وجهات الاتصال والأشخاص…', searchNone: 'لا توجد نتائج', searchFailed: 'تعذّر البحث في:',
+    searchHint: 'اكتب للبحث في كل ما يمكنك فتحه.', searchClose: 'إغلاق', searching: 'جارٍ البحث…',
     notFoundTitle: 'هذه الصفحة غير موجودة', notFoundBody: 'ربما الرابط قديم. كل شيء متاح من الرئيسية.', backHome: 'العودة إلى الرئيسية',
   },
 }
