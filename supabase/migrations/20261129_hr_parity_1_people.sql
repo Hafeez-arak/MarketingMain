@@ -357,6 +357,10 @@ create table if not exists public.hr_audit (
 );
 create index if not exists hr_audit_employee_idx on public.hr_audit (workspace_id, employee_id, id desc);
 create index if not exists hr_audit_row_idx on public.hr_audit (workspace_id, table_name, row_id, id desc);
+-- A company's history goes with the company.
+do $$ begin
+  alter table public.hr_audit add constraint hr_audit_workspace_fk foreign key (workspace_id) references public.workspaces(id) on delete cascade;
+exception when duplicate_object then null; end $$;
 alter table public.hr_audit enable row level security;
 drop policy if exists hr_audit_read on public.hr_audit;
 create policy hr_audit_read on public.hr_audit for select to authenticated

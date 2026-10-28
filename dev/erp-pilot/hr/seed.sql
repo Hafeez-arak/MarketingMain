@@ -86,15 +86,24 @@ begin
       (arak, e_store, 'open', '2020-08-16', null, ''),
       (arak, e_left, 'fixed', '2019-01-06', '2026-06-30', '');
 
+    -- Contract states from the dates (draft / running / expired) and job positions from the titles.
+    update public.hr_contracts set status = case when end_date is not null and end_date < public.hr_today() then 'expired'
+      when start_date > public.hr_today() then 'draft' else 'running' end where workspace_id = arak;
+    update public.hr_contracts set weekly_hours = 48 where workspace_id = arak and contract_type = 'open';
+    insert into public.hr_job_positions (workspace_id, name_en, name_ar) select distinct workspace_id, job_title, '' from public.hr_employees where workspace_id = arak and job_title <> '';
+    update public.hr_employees e set job_id = p.id from public.hr_job_positions p where p.workspace_id = e.workspace_id and p.name_en = e.job_title and e.workspace_id = arak;
+    update public.hr_departments set parent_id = d_admin where id = d_store;
+
     insert into public.hr_leave_types (workspace_id, name_en, name_ar, paid, needs_balance) values (arak, 'Annual leave', 'إجازة سنوية', true, true) returning id into t_annual;
     insert into public.hr_leave_types (workspace_id, name_en, name_ar, paid, needs_balance) values (arak, 'Sick leave', 'إجازة مرضية', true, false) returning id into t_sick;
     insert into public.hr_leave_types (workspace_id, name_en, name_ar, paid, needs_balance) values (arak, 'Unpaid leave', 'إجازة بدون راتب', false, false) returning id into t_unpaid;
     insert into public.hr_leave_types (workspace_id, name_en, name_ar, paid, needs_balance) values (arak, 'Emergency leave', 'إجازة اضطرارية', true, true) returning id into t_emergency;
 
+    -- Yearly balances as allocations of the calendar year (the ledger of 20261129_hr_parity_4).
     for emp in select id from public.hr_employees where workspace_id = arak and status = 'active' loop
-      insert into public.hr_leave_balances (workspace_id, employee_id, leave_type_id, year, days, note, updated_by)
-      values (arak, emp.id, t_annual, 2026, case when emp.id in (e_ceo, e_sales, e_pm) then 30 else 21 end, 'Test balance', approver),
-             (arak, emp.id, t_emergency, 2026, 5, 'Test balance', approver);
+      insert into public.hr_leave_allocations (workspace_id, employee_id, leave_type_id, days, valid_from, valid_to, reason, approved_by)
+      values (arak, emp.id, t_annual, case when emp.id in (e_ceo, e_sales, e_pm) then 30 else 21 end, '2026-01-01', '2026-12-31', 'Test balance', approver),
+             (arak, emp.id, t_emergency, 5, '2026-01-01', '2026-12-31', 'Test balance', approver);
     end loop;
 
     -- Approved in the past (attendance skips those days), approved now (today
@@ -151,6 +160,8 @@ begin
     insert into public.hr_employees (workspace_id, employee_no, name_en, name_ar, job_title, department_id, manager_id, hire_date)
     values (ghusn, 'G-002', 'Tariq Ghusn (test)', 'طارق غصن (تجربة)', 'Coordinator', d_admin, e_ceo, '2025-03-02');
     insert into public.hr_leave_types (workspace_id, name_en, name_ar, paid, needs_balance) values (ghusn, 'Annual leave', 'إجازة سنوية', true, true);
+    insert into public.hr_job_positions (workspace_id, name_en) select distinct workspace_id, job_title from public.hr_employees where workspace_id = ghusn and job_title <> '';
+    update public.hr_employees e set job_id = p.id from public.hr_job_positions p where p.workspace_id = e.workspace_id and p.name_en = e.job_title and e.workspace_id = ghusn;
     raise notice 'Ghusn: HR test data added';
   end if;
 end $$;
