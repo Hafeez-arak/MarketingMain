@@ -262,7 +262,8 @@ export function quickCounts(orgs = []) {
   return Object.fromEntries(QUICK.map(x => [x.key, active.filter(o => hasAny(o, x.roles)).length]))
 }
 
-const normalizeSearch = s => String(s || '').toLowerCase()
+/** Text as searches compare it (Arabic letter forms folded); shell_fold() in SQL is the same. */
+export const normalizeSearch = s => String(s || '').toLowerCase()
   .replace(/[ً-ْـ]/g, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي')
   .replace(/\s+/g, ' ').trim()
 
