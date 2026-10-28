@@ -85,6 +85,23 @@ export const SECTIONS = [
     ],
   },
   {
+    // Musa's HR rewritten in our stack (2026-10-28, dev/erp-pilot/HR.md):
+    // view reads, work does the day-to-day entry, manage sets it up and
+    // approves leave. No pay or payroll: out of scope by the owner's decision.
+    key: 'hr', label: 'HR', ar: 'الموارد البشرية', icon: 'id-card', base: '/hr', adminOnly: true,
+    blurb: 'Employees and their papers, leave and who is off, and daily attendance.',
+    blurbAr: 'الموظفون ووثائقهم، والإجازات ومن هو في إجازة، والحضور اليومي.',
+    pages: [
+      { to: '/hr', label: 'Employees', ar: 'الموظفون', icon: 'users', exact: true, translated: true },
+      { to: '/hr/employee', label: 'Employee', ar: 'الموظف', icon: 'users', hidden: true, translated: true },
+      { to: '/hr/departments', label: 'Departments', ar: 'الأقسام', icon: 'building', translated: true },
+      { to: '/hr/leave', label: 'Leave', ar: 'الإجازات', icon: 'calendar', translated: true },
+      { to: '/hr/attendance', label: 'Attendance', ar: 'الحضور', icon: 'check-square', translated: true },
+      { to: '/hr/documents', label: 'Expiring papers', ar: 'الوثائق المنتهية', icon: 'file-check', min: 'work', translated: true },
+      { to: '/hr/settings', label: 'HR settings', ar: 'إعدادات الموارد البشرية', icon: 'gear', min: 'manage', translated: true },
+    ],
+  },
+  {
     key: 'admin', label: 'Admin', ar: 'الإدارة', icon: 'users', base: '/admin', adminOnly: true,
     blurb: 'Who can sign in, and which sections each person gets.',
     blurbAr: 'من يمكنه الدخول، وأي الأقسام يحصل عليها كل شخص.',

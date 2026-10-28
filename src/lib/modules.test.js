@@ -46,7 +46,7 @@ describe('old addresses', () => {
 
 describe('who sees what', () => {
   it('an admin gets every section; a member gets Marketing and Insights', () => {
-    expect(sectionsFor({ isAccessAdmin: true }).map(s => s.key)).toEqual(['ceo', 'sales', 'marketing', 'insights', 'admin'])
+    expect(sectionsFor({ isAccessAdmin: true }).map(s => s.key)).toEqual(['ceo', 'sales', 'marketing', 'insights', 'hr', 'admin'])
     expect(sectionsFor({ isAccessAdmin: false }).map(s => s.key)).toEqual(['marketing', 'insights'])
   })
 })
@@ -136,5 +136,21 @@ describe('parked until Musa\'s ERP (2026-10-25)', () => {
     expect(PARKED_SECTIONS.every(s => s.pages.length)).toBe(true)
     expect(SECTIONS.some(s => PARKED.has(s.key))).toBe(false)
     expect(GRANTABLE.some(k => PARKED.has(k))).toBe(false)
+  })
+})
+
+describe('HR (2026-10-28)', () => {
+  it('is granted per person, and its pages ask for the right level', async () => {
+    const { GRANTABLE } = await import('./sectionAccess.js')
+    expect(GRANTABLE).toContain('hr')
+    const view = { sections: { hr: 'view' } }
+    expect(canVisit('/hr', view)).toBe(true)
+    expect(canVisit('/hr/employee', view)).toBe(true)
+    expect(canVisit('/hr/documents', view)).toBe(false)
+    expect(canVisit('/hr/documents', { sections: { hr: 'work' } })).toBe(true)
+    expect(canVisit('/hr/settings', { sections: { hr: 'work' } })).toBe(false)
+    expect(canVisit('/hr/settings', { sections: { hr: 'manage' } })).toBe(true)
+    expect(canVisit('/hr', { sections: { sales: 'manage' } })).toBe(false)
+    expect(pageTitle('/hr/leave', 'ar')).toBe('الإجازات')
   })
 })
