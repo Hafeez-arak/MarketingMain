@@ -10,32 +10,32 @@ import { controlState, controlAnswer } from './controlFixture'
 const params = new URLSearchParams(window.location.search)
 export const MODE = params.get('mode') || 'data' // data | empty | fail | hang | clear | nomigration
 
-export const ME = { user_id: 'u-ceo', email: 'mkader@arak-sa.com', full_name: 'mkader', role: 'admin', status: 'approved' }
+export const ME = { user_id: 'u-ceo', email: 'staff.ceo@arak-sa.com', full_name: 'nasser', role: 'admin', status: 'approved' }
 const ago = h => new Date(Date.now() - h * 3_600_000).toISOString()
 
 const db = {
   requests: [
-    { id: 'r1', kind: 'content', title: 'Redo the Friday caption', body: 'this caption is weak', brief: 'Rewrite the Friday post caption with a stronger opening line about the Diriyah project. Keep it under 120 words, Arabic and English.', page: '/schedule', status: 'new', resolution: '', link: '', created_by: 'u-ceo', assigned_to: 'u-shadia', created_at: ago(3), updated_at: ago(3), closed_at: null },
-    { id: 'r2', kind: 'improvement', title: 'Add a monthly sales report', body: 'I want one page every month with leads, quotes and what we won.', brief: '', page: '/leads', status: 'in_progress', resolution: '', link: '', created_by: 'u-ceo', assigned_to: 'u-hafeez', created_at: ago(30), updated_at: ago(5), closed_at: null },
+    { id: 'r1', kind: 'content', title: 'Redo the Friday caption', body: 'this caption is weak', brief: 'Rewrite the Friday post caption with a stronger opening line about the Diriyah project. Keep it under 120 words, Arabic and English.', page: '/schedule', status: 'new', resolution: '', link: '', created_by: 'u-ceo', assigned_to: 'u-sara', created_at: ago(3), updated_at: ago(3), closed_at: null },
+    { id: 'r2', kind: 'improvement', title: 'Add a monthly sales report', body: 'I want one page every month with leads, quotes and what we won.', brief: '', page: '/leads', status: 'in_progress', resolution: '', link: '', created_by: 'u-ceo', assigned_to: 'u-omar', created_at: ago(30), updated_at: ago(5), closed_at: null },
     { id: 'r3', kind: 'bug', title: 'Analytics shows zero reach for LinkedIn', body: 'why is it zero', brief: '', page: '/analytics', status: 'done', resolution: 'LinkedIn does not report reach for company pages; the card now says so.', link: 'https://github.com/Hafeez-arak/MarketingMain/pull/240', created_by: 'u-ceo', assigned_to: null, created_at: ago(80), updated_at: ago(20), closed_at: ago(20) },
   ],
   events: [
     { id: 'e1', request_id: 'r2', kind: 'created', body: 'I want one page every month', actor: 'u-ceo', created_at: ago(30) },
-    { id: 'e2', request_id: 'r2', kind: 'status', body: '', actor: 'u-hafeez', to_status: 'in_progress', created_at: ago(5) },
-    { id: 'e3', request_id: 'r2', kind: 'comment', body: 'Draft ready by Thursday.', actor: 'u-hafeez', created_at: ago(4) },
+    { id: 'e2', request_id: 'r2', kind: 'status', body: '', actor: 'u-omar', to_status: 'in_progress', created_at: ago(5) },
+    { id: 'e3', request_id: 'r2', kind: 'comment', body: 'Draft ready by Thursday.', actor: 'u-omar', created_at: ago(4) },
   ],
   notifications: [
     { id: 'n1', kind: 'request_done', title: 'Done: Analytics shows zero reach for LinkedIn', body: 'LinkedIn does not report reach for company pages; the card now says so.', link: '/requests?id=r3', request_id: 'r3', workspace_id: 'ws-arak', created_at: ago(20), read_at: null },
-    { id: 'n2', kind: 'comment', title: 'hafeez commented on: Add a monthly sales report', body: 'Draft ready by Thursday.', link: '/requests?id=r2', request_id: 'r2', workspace_id: 'ws-arak', created_at: ago(4), read_at: null },
+    { id: 'n2', kind: 'comment', title: 'omar commented on: Add a monthly sales report', body: 'Draft ready by Thursday.', link: '/requests?id=r2', request_id: 'r2', workspace_id: 'ws-arak', created_at: ago(4), read_at: null },
   ],
   people: [
-    { user_id: 'u-ceo', name: 'mkader' },
-    { user_id: 'u-shadia', name: 'shadia' },
-    { user_id: 'u-hafeez', name: 'hafeez' },
+    { user_id: 'u-ceo', name: 'nasser' },
+    { user_id: 'u-sara', name: 'sara' },
+    { user_id: 'u-omar', name: 'omar' },
   ],
   taggable: [
-    { user_id: 'u-shadia', name: 'shadia', label: 'Marketing' },
-    { user_id: 'u-hafeez', name: 'hafeez', label: 'Builds the app' },
+    { user_id: 'u-sara', name: 'sara', label: 'Marketing' },
+    { user_id: 'u-omar', name: 'omar', label: 'Builds the app' },
   ],
 }
 // A made-up brief in the stored shape, for looking at the CEO page.

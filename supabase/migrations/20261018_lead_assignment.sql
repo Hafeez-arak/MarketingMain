@@ -1,6 +1,6 @@
 -- ─── Who works a lead (2026-10-13) ────────────────────────────────────────
 -- The owner's decisions:
---   · A lead is assigned to one salesperson (Ammar, Haitham…), at any time.
+--   · A lead is assigned to one salesperson (Faisal, Khaled…), at any time.
 --     Approving needs one: Odoo shows an unassigned lead to every salesperson
 --     whose access is "Own Documents Only", so a lead never goes in without.
 --   · Assigning forwards the customer's original email to that person, from
@@ -8,7 +8,7 @@
 --     so they reply from their own mailbox.
 --   · A salesperson sees only the leads assigned to them, here as in Odoo.
 --     A sales admin (and the access admin) sees them all. One switch per
---     seat lets a person also see every website enquiry (Ammar, today).
+--     seat lets a person also see every website enquiry (Faisal, today).
 --   · Only a sales admin or the access admin assigns.
 
 -- ── 1. The owner, and the forward of the email ────────────────────────────

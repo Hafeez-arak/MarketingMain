@@ -31,8 +31,8 @@ const db = {
   // Arak's real public logo and a project photo, so the design editor's
   // picture picker has something to show. Read-only public URLs.
   brand_assets: [
-    { id: 'a1', workspace_id: WS, kind: 'logo', title: 'arak-logo-black', created_at: now(), public_url: 'https://vxjhfvehccftvajgtqtv.supabase.co/storage/v1/object/public/brand-assets/00000000-0000-0000-0000-000000000001/logo/1789976769585_arak-logo-black.png' },
-    { id: 'a2', workspace_id: WS, kind: 'project_photo', title: 'Project photo', created_at: now(), public_url: 'https://vxjhfvehccftvajgtqtv.supabase.co/storage/v1/object/public/brand-assets/00000000-0000-0000-0000-000000000001/project_photo/1782973356066_WhatsApp_Image_2026-07-01_at_15.37.37.jpeg' },
+    { id: 'a1', workspace_id: WS, kind: 'logo', title: 'arak-logo-black', created_at: now(), public_url: 'https://<production-project>.supabase.co/storage/v1/object/public/brand-assets/00000000-0000-0000-0000-000000000001/logo/1789976769585_arak-logo-black.png' },
+    { id: 'a2', workspace_id: WS, kind: 'project_photo', title: 'Project photo', created_at: now(), public_url: 'https://<production-project>.supabase.co/storage/v1/object/public/brand-assets/00000000-0000-0000-0000-000000000001/project_photo/1782973356066_WhatsApp_Image_2026-07-01_at_15.37.37.jpeg' },
   ],
   // One ready week of AI drafts, for the Marketing tab's panel.
   email_ai_drafts: [{
@@ -306,12 +306,12 @@ function api(action, body) {
   if (action === 'send_test') return json({ ok: true, sent_to: body.to, id: 're_test' })
   if (action === 'mailbox_test') {
     const mb = db.email_mailboxes.find(m => m.id === body.mailbox_id)
-    return json({ ok: true, sent_to: body.to || 'hafeez@arak-sa.com', from: mb?.email })
+    return json({ ok: true, sent_to: body.to || 'staff.admin@arak-sa.com', from: mb?.email })
   }
   if (action === 'mailbox_save') {
     const input = body.mailbox || {}
     const isMicrosoft = db.email_mailboxes.find(m => m.id === input.id)?.provider === 'microsoft'
-    const problem = isMicrosoft ? '' : mailboxDomainProblem(input.email, [settings.from_email, settings.reply_to, 'hafeez@arak-sa.com'].map(domainOf))
+    const problem = isMicrosoft ? '' : mailboxDomainProblem(input.email, [settings.from_email, settings.reply_to, 'staff.admin@arak-sa.com'].map(domainOf))
     if (problem) return json({ ok: false, error: problem }, 400)
     if (!input.id && !body.password) return json({ ok: false, error: 'Paste the mailbox\'s app password.' }, 400)
     return new Promise(r => setTimeout(r, 600)).then(() => {
@@ -334,7 +334,7 @@ function api(action, body) {
   }
   if (action === 'mailbox_pause') {
     const mb = db.email_mailboxes.find(m => m.id === body.mailbox_id)
-    Object.assign(mb, body.paused ? { status: 'paused', status_reason: 'Paused by hafeez@arak-sa.com.' } : { status: 'active', status_reason: '' })
+    Object.assign(mb, body.paused ? { status: 'paused', status_reason: 'Paused by staff.admin@arak-sa.com.' } : { status: 'active', status_reason: '' })
     return json({ ok: true })
   }
   if (action === 'mailbox_delete') {
@@ -358,8 +358,8 @@ function api(action, body) {
     const row = db.email_sends.find(x => x.id === body.send_id && x.status === 'sending')
     if (!row) return json({ ok: false, error: 'That email is no longer stuck.' }, 409)
     if (body.outcome === 'sent') Object.assign(row, { status: 'sent', sent_at: row.updated_at, error: '' })
-    if (body.outcome === 'retry') Object.assign(row, { status: 'queued', mailbox_id: null, error: 'Sent again by hafeez@arak-sa.com.' })
-    if (body.outcome === 'drop') Object.assign(row, { status: 'skipped', error: 'Dropped by hafeez@arak-sa.com: not sent.' })
+    if (body.outcome === 'retry') Object.assign(row, { status: 'queued', mailbox_id: null, error: 'Sent again by staff.admin@arak-sa.com.' })
+    if (body.outcome === 'drop') Object.assign(row, { status: 'skipped', error: 'Dropped by staff.admin@arak-sa.com: not sent.' })
     row.updated_at = now()
     return json({ ok: true, send_id: row.id, outcome: body.outcome })
   }
@@ -395,7 +395,7 @@ const realFetch = window.fetch.bind(window)
 window.fetch = (input, init) => {
   const url = typeof input === 'string' ? input : input.url
   if (url.includes('/rest/v1/')) return rest(url, init)
-  if (url.includes('/auth/v1/user')) return json({ id: 'u1', email: 'hafeez@arak-sa.com' })
+  if (url.includes('/auth/v1/user')) return json({ id: 'u1', email: 'staff.admin@arak-sa.com' })
   if (url.startsWith('/api/email/')) return api(url.split('/').pop(), init?.body ? JSON.parse(init.body) : {})
   return realFetch(input, init)
 }

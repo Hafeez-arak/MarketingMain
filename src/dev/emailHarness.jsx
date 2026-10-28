@@ -14,7 +14,7 @@ import '../index.css'
 // Served at /dev/email.html?tab=contacts. Vite only builds index.html, so this
 // never reaches production.
 
-const session = { user: { id: 'u1', email: 'hafeez@arak-sa.com' }, access_token: 'dev' }
+const session = { user: { id: 'u1', email: 'staff.admin@arak-sa.com' }, access_token: 'dev' }
 const auth = {
   session, user: session.user, accessToken: 'dev', loading: false, isApproved: true, isAccessAdmin: true,
   workspaces: [{ id: WS, name: 'Harness Co', role: 'owner' }], activeWorkspace: { id: WS, name: 'Harness Co' }, activeWorkspaceId: WS,

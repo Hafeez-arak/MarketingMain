@@ -3,7 +3,7 @@ import { fetchInbox, markRead } from './requests'
 
 // ─── The bell's saved notifications ────────────────────────────────────────
 // Polled, not live: the app uses no realtime anywhere, and a minute's delay
-// on "Shadia finished your request" is fine. Also re-read whenever the tab
+// on "Sara finished your request" is fine. Also re-read whenever the tab
 // comes back into focus, which is when a person actually looks.
 
 const EVERY_MS = 60_000

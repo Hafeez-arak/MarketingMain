@@ -32,7 +32,7 @@ const as = new URLSearchParams(window.location.search).get('as') || 'admin'
 // The made-up sales team (2026-10-13). u1 is whoever is signed in to the
 // harness: the sales admin (?as=sales_admin) or a salesperson (?as=sales).
 const TEAM = [
-  { user_id: 'u1', email: 'sales@example.com', full_name: as === 'sales' ? 'Omar Example' : 'Arif Example', approver: as !== 'sales', all_website_leads: false, odoo_login: '', odoo_user_id: null },
+  { user_id: 'u1', email: 'sales@example.com', full_name: as === 'sales' ? 'Omar Example' : 'Bilal Example', approver: as !== 'sales', all_website_leads: false, odoo_login: '', odoo_user_id: null },
   { user_id: 'u2', email: 'huda@example.com', full_name: 'Huda Example', approver: false, all_website_leads: true, odoo_login: '', odoo_user_id: null },
   { user_id: 'u3', email: 'sami@example.com', full_name: 'Sami Example', approver: false, all_website_leads: false, odoo_login: 'sami.e', odoo_user_id: null },
 ]
@@ -116,7 +116,7 @@ const original = window.fetch.bind(window)
 
 const cards = {}
 const READS = new Set()
-const NOTES = [{ id: 'n1', kind: 'lead', title: 'Arif gave you a lead: Example Fit-Out Co', body: '60 linear profiles and DALI dimming for an office floor, Riyadh', link: '/leads?view=pipeline&lead=m1', workspace_id: WS, created_at: new Date(Date.now() - 20 * 60_000).toISOString(), read_at: null }]
+const NOTES = [{ id: 'n1', kind: 'lead', title: 'Bilal gave you a lead: Example Fit-Out Co', body: '60 linear profiles and DALI dimming for an office floor, Riyadh', link: '/leads?view=pipeline&lead=m1', workspace_id: WS, created_at: new Date(Date.now() - 20 * 60_000).toISOString(), read_at: null }]
 const CARD_CONTEXT = {
   suppliers: ['C°LB', 'Reggiani', 'Zennio'],
   accounts: [{ name: 'Nour Contracting Co', orders: 4, value_sar: 610000, last_order: '2026-05-01', status: 'new' }],

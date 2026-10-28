@@ -15,7 +15,7 @@ const params = new URLSearchParams(window.location.search)
 const AS = params.get('as') || 'admin'
 
 export const USERS = {
-  admin: { user_id: 'u-admin', email: 'hafeez@arak-sa.com', full_name: 'Hafeez', role: 'admin',  status: 'approved' },
+  admin: { user_id: 'u-admin', email: 'staff.admin@arak-sa.com', full_name: 'Omar', role: 'admin',  status: 'approved' },
   sara:  { user_id: 'u-sara',  email: 'sara@example.com',   full_name: 'Sara Ahmed', role: 'member', status: 'approved' },
   omar:  { user_id: 'u-omar',  email: 'omar@example.com',   full_name: 'Omar Khalid', role: 'member', status: 'approved' },
   lina:  { user_id: 'u-lina',  email: 'lina@example.com',   full_name: 'Lina Saleh', role: 'member', status: 'pending' },

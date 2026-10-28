@@ -12,7 +12,7 @@ import { volatileFragment } from './prompt'
 
 const NOW = new Date('2026-10-18T12:00:00Z')
 const daysAgo = d => new Date(NOW.getTime() - d * 86_400_000).toISOString()
-const names = new Map([['u-ammar', 'Ammar Ahmed']])
+const names = new Map([['u-faisal', 'Faisal Ahmed']])
 
 describe('countBy', () => {
   it('counts, sorts largest first, and names blanks "unknown"', () => {
@@ -37,7 +37,7 @@ describe('periodBounds', () => {
 describe('summariseLeads', () => {
   const p = periodBounds(7, NOW)
   const leads = [
-    { id: 1, received_at: daysAgo(1), verdict: 'unqualified', human_verdict: 'qualified', category: 'quotation_request', source: 'email', assigned_to: 'u-ammar', assigned_at: daysAgo(0.5), reviewed_at: daysAgo(0.9) },
+    { id: 1, received_at: daysAgo(1), verdict: 'unqualified', human_verdict: 'qualified', category: 'quotation_request', source: 'email', assigned_to: 'u-faisal', assigned_at: daysAgo(0.5), reviewed_at: daysAgo(0.9) },
     { id: 2, received_at: daysAgo(2), verdict: 'qualified', category: 'project_enquiry', source: 'website_form', project_final: 'tender' },
     { id: 3, received_at: daysAgo(3), verdict: 'needs_review' },
     { id: 4, received_at: daysAgo(10), verdict: 'qualified' },
@@ -57,7 +57,7 @@ describe('summariseLeads', () => {
   })
 
   it('names who leads are assigned to, and counts qualified leads nobody has', () => {
-    expect(out.current.by_assignee).toEqual([{ key: 'Ammar Ahmed', count: 1 }])
+    expect(out.current.by_assignee).toEqual([{ key: 'Faisal Ahmed', count: 1 }])
     expect(out.current.qualified_unassigned).toBe(1)
   })
 
@@ -184,20 +184,20 @@ describe('teamRows', () => {
   it('lists approved people in this company or with a seat here, with no contact details', () => {
     const rows = teamRows({
       access: [
-        { user_id: 'a', email: 'shadia@arak-sa.com', full_name: 'shadia', role: 'member', status: 'approved' },
-        { user_id: 'b', email: 'ammar@arak-sa.com', full_name: 'Ammar Ahmed', role: 'sales', status: 'approved' },
+        { user_id: 'a', email: 'staff.marketing@arak-sa.com', full_name: 'sara', role: 'member', status: 'approved' },
+        { user_id: 'b', email: 'staff.sales@arak-sa.com', full_name: 'Faisal Ahmed', role: 'sales', status: 'approved' },
         { user_id: 'c', email: 'gone@arak-sa.com', role: 'member', status: 'revoked' },
         { user_id: 'd', email: 'other@arak-sa.com', role: 'member', status: 'approved' },
       ],
       members: [{ workspace_id: 'ws', user_id: 'a' }, { workspace_id: 'ws', user_id: 'c' }, { workspace_id: 'other', user_id: 'd' }],
       seats: [{ workspace_id: 'ws', user_id: 'b' }],
     }, 'ws')
-    expect(rows.map(r => r.name)).toEqual(['Ammar Ahmed', 'shadia'])
+    expect(rows.map(r => r.name)).toEqual(['Faisal Ahmed', 'sara'])
     expect(JSON.stringify(rows)).not.toMatch(/@/)
   })
 
   it('nameIndex falls back to the email\'s local part', () => {
-    expect(nameIndex([{ user_id: 'x', email: 'mkader@arak-sa.com' }]).get('x')).toBe('mkader')
+    expect(nameIndex([{ user_id: 'x', email: 'staff.ceo@arak-sa.com' }]).get('x')).toBe('staff.ceo')
   })
 })
 

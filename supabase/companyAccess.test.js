@@ -69,7 +69,7 @@ async function freshDatabase() {
   await pg.exec(PRELUDE)
   // 20260816 backfills its admin by this address, so the row has to exist
   // before the migration runs.
-  await pg.query(`insert into auth.users (id, email) values ($1, 'hafeez@arak-sa.com')`, [ADMIN])
+  await pg.query(`insert into auth.users (id, email) values ($1, 'staff.admin@arak-sa.com')`, [ADMIN])
   for (const name of BEFORE) await pg.exec(migration(name))
   // Supabase wires this trigger in its own auth setup; the migrations only
   // define the function it calls.

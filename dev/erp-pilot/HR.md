@@ -16,7 +16,7 @@ docker exec -i supabase_db_arak-v2 psql -X -U postgres -d postgres -v ON_ERROR_S
 npx vite --mode v2 --port 5182 --strictPort
 ```
 
-Sign in at http://localhost:5182 as `hafeez@arak-sa.com` (password
+Sign in at http://localhost:5182 as `staff.admin@arak-sa.com` (password
 `arak-v2-local`, an admin: HR at Manage everywhere). The rail has **HR**
 (id-card icon, between Insights and Admin). Pages: Employees (`/hr`),
 Departments, Leave, Attendance, Expiring papers (Work and up), HR settings
@@ -52,13 +52,13 @@ request" check compared the caller to an unlinked employee's login with
 `=`, got NULL, and let a View person cancel someone else's request. Fixed
 (null-safe comparison) before anything else was built on it.
 
-In the browser (English and Arabic, as hafeez): the directory, an employee
-page, approving a request (it moved to Approved, "Approved by hafeez"),
+In the browser (English and Arabic, as omar): the directory, an employee
+page, approving a request (it moved to Approved, "Approved by omar"),
 the who-is-off month grid (right to left in Arabic), the day view, adding a
 missing departure (no reason asked, kept as a "departure"), a correction
 (reason required, marked "Corrected", before/after kept), the monthly
 sheet, expiring papers, settings. Over the local API with real logins: the
-admin reads 9 employees; shadia (member, no HR grant) and a sales seat read
+admin reads 9 employees; sara (member, no HR grant) and a sales seat read
 0 and are refused by the decision function.
 
 ## What was built

@@ -312,7 +312,7 @@ export function ownerLabel(lead, team = [], me = '', lang = 'en') {
 
 /**
  * Who a lead can be given to: the salespeople, never a sales admin (the
- * owner, 2026-10-19: "Arif will be the one to assign it"). The sales admin
+ * owner, 2026-10-19: "Bilal will be the one to assign it"). The sales admin
  * hands leads out; they do not work them.
  */
 export const assignable = (team = []) => team.filter((m) => !m.approver)

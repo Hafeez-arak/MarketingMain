@@ -122,8 +122,8 @@ describe('A. connecting Microsoft 365 mailboxes', () => {
 
   it('A8 there is no test-send in production: the actions are gone', async () => {
     const [mb] = await mailboxes()
-    expect((await app.call('mailbox_test', { body: { mailbox_id: mb.id, to: 'hafeez@arak-sa.com' } })).status).toBe(404)
-    expect((await app.call('send_test', { body: { to: 'hafeez@arak-sa.com' } })).status).toBe(404)
+    expect((await app.call('mailbox_test', { body: { mailbox_id: mb.id, to: 'staff.admin@arak-sa.com' } })).status).toBe(404)
+    expect((await app.call('send_test', { body: { to: 'staff.admin@arak-sa.com' } })).status).toBe(404)
     expect(app.world.log.filter(l => l.kind === 'sent')).toHaveLength(0)
   })
 
@@ -201,7 +201,7 @@ describe('B/C. prospects, groups and launching a campaign', () => {
     const t = await app.tick()
     expect(t.status).toBe(200)
     expect(t.body.sent).toBe(0)
-    expect(app.world.log.filter(l => l.kind === 'sent' && l.to[0] !== 'hafeez@arak-sa.com')).toHaveLength(0)
+    expect(app.world.log.filter(l => l.kind === 'sent' && l.to[0] !== 'staff.admin@arak-sa.com')).toHaveLength(0)
   })
 
   it('C6 "What goes out next" says what each mailbox would do, sending nothing', async () => {
@@ -247,7 +247,7 @@ describe('D. the 10-minute sending runs', () => {
     const rows = await sends(G.campaign.id)
     const first = rows.filter(s => s.step === 0)
     expect(first.every(s => s.status === 'sent')).toBe(true)
-    const log = app.world.log.filter(l => l.kind === 'sent' && l.to[0] !== 'hafeez@arak-sa.com')
+    const log = app.world.log.filter(l => l.kind === 'sent' && l.to[0] !== 'staff.admin@arak-sa.com')
     expect(log).toHaveLength(4)
     expect(new Set(log.map(l => l.to[0])).size).toBe(4)
     // Each sent first email queued its follow-up, on the same mailbox, 3 days on.
@@ -270,7 +270,7 @@ describe('D. the 10-minute sending runs', () => {
 // ═══ E. What comes back: replies, stops, bounces, out-of-office ═════════════
 
 const FORGED_DUPLICATES = new Set()
-const outreachLog = () => app.world.log.filter(l => l.kind === 'sent' && l.to[0] !== 'hafeez@arak-sa.com')
+const outreachLog = () => app.world.log.filter(l => l.kind === 'sent' && l.to[0] !== 'staff.admin@arak-sa.com')
 /** Our first email to this address, as Microsoft holds it in Sent Items. */
 function firstEmailTo(address) {
   for (const a of app.world.accounts.values()) {

@@ -1,5 +1,5 @@
 -- ════════════════════════════════════════════════════════════════════════
--- Applied directly to the Arak Marketing project (vxjhfvehccftvajgtqtv) on
+-- Applied directly to the Arak Marketing project (<production-project>) on
 -- 2026-08-10, via the Supabase MCP once it was reconnected to the correct
 -- project. Recorded here so a fresh setup's migration history matches what
 -- is actually live, and so the gap this closes doesn't recur.

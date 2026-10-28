@@ -104,7 +104,7 @@ content with a consistent brand voice, no designer/copywriter per post.
       │  REST + supabase-js      │  writes results back
       ▼                          ▼
             Supabase  (Postgres + Auth + Storage + RLS)
-            project: "Arak Marketing" (vxjhfvehccftvajgtqtv, ap-southeast-1)
+            project: "Arak Marketing" (<production-project>, ap-southeast-1)
 ```
 
 - **No app server.** The React app talks directly to Supabase REST/`supabase-js`
@@ -331,7 +331,7 @@ copy caption); OAuth auto-publishing is post-MVP (see Phase 2). Analytics is pos
 - [ ] **Which test IG/LinkedIn accounts** for dev-mode publishing? (real Arak access comes later)
 - [ ] **Staging strategy:** separate Supabase project vs schema-in-same-project?
 - [ ] **First-customer profile:** which 1–3 GCC brands are the design partners to build toward?
-- [ ] **Access handover from Hafeez:** n8n Cloud login, Supabase project admin, the workflow definitions.
+- [ ] **Access handover from Omar:** n8n Cloud login, Supabase project admin, the workflow definitions.
 
 ---
 

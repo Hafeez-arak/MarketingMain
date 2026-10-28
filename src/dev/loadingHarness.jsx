@@ -52,7 +52,7 @@ export const ROUTES = {
 window.__loadingRoutes = Object.keys(ROUTES)
 
 const WS = '00000000-0000-0000-0000-000000000001'
-const session = { user: { id: 'u1', email: 'hafeez@arak-sa.com' }, access_token: 'dev' }
+const session = { user: { id: 'u1', email: 'staff.admin@arak-sa.com' }, access_token: 'dev' }
 const auth = {
   session, user: session.user, accessToken: 'dev', loading: false,
   access: { status: 'approved', role: 'admin' }, accessStatus: 'approved', isApproved: true, isAccessAdmin: true,

@@ -1,12 +1,12 @@
 // ─── @mentions in the chat box ─────────────────────────────────────────────
 // Pure, so the picker's behaviour is tested without a browser. The assistant
-// reads "@Shadia" in the message and uses tag_person; nothing else about a
+// reads "@Sara" in the message and uses tag_person; nothing else about a
 // mention is special.
 
 /**
  * The @word being typed at the caret, if any: { start, query }. A mention
  * starts at the beginning of the text or after whitespace, so an email
- * address ("hafeez@arak") never opens the picker.
+ * address ("omar@arak") never opens the picker.
  */
 export function mentionQuery(text = '', caret = text.length) {
   const before = String(text).slice(0, caret)

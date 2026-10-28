@@ -50,6 +50,8 @@ node "$here/export.mjs" "$envfile" "$data" "$data/_tables.txt"
 local_key="$(grep '^SUPABASE_SERVICE_ROLE_KEY=' "$repo/.env.v2" | cut -d= -f2- | tr -d "\"'")"
 node "$here/load.mjs" "$data" "$data/_columns.json" "$data/_load.sql" "$local_key"
 psql_db -f - < "$data/_load.sql" >/dev/null
+# Real staff addresses -> the public repo's stand-ins (dev/v2db/people.local.json, git-ignored).
+node "$v2db/mask-people.mjs" >/dev/null
 
 echo "4. checking"
 psql_db -At -c "select json_object_agg(relname, (xpath('/row/c/text()', query_to_xml('select count(*) c from public.'||quote_ident(relname), false, true, '')))[1]::text::int) from pg_class where relnamespace='public'::regnamespace and relkind='r'" > "$data/_local_counts.json"
@@ -63,4 +65,4 @@ psql_db -f - < "$here/check-foreign-keys.sql" 2>&1 | sed -n 's/.*WARNING: */   /
 echo "5. v2's own migrations on the real rows"
 [[ -n "$in_list" ]] && psql_db -c "delete from v2dev.applied where name in ($(sed "/^$/d; s/.*/'&'/" <<<"$v2_only" | paste -sd, -))"
 "$v2db/apply-migrations.sh"
-echo "Done. Sign in at the v2 app with a real email and the password arak-v2-local."
+echo "Done. Sign in at the v2 app with a staff stand-in email (dev/v2db/people.local.json) and the password arak-v2-local."

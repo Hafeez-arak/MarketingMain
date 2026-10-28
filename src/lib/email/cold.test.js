@@ -117,7 +117,7 @@ describe('reading what a reply means', () => {
   it('reads only the prospect\'s own words, not the quoted email', () => {
     expect(replyText('Great, thanks! From: Arak <a@arak-sa.com> Sent: ... reply "stop"')).toBe('Great, thanks!')
     expect(replyText('ممتاز من: أراك ... توقف')).toBe('ممتاز')
-    expect(inboxMessageKind({ from: 'a@hotel.sa', subject: 'RE: x', preview: 'On Sun, 28 Sep 2026 Hafeez wrote: reply "stop"' })).toBe('reply')
+    expect(inboxMessageKind({ from: 'a@hotel.sa', subject: 'RE: x', preview: 'On Sun, 28 Sep 2026 Omar wrote: reply "stop"' })).toBe('reply')
     expect(inboxMessageKind({ from: 'a@hotel.sa', subject: 'RE: x', preview: 'stop' })).toBe('optout')
   })
 })

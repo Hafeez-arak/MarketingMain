@@ -217,7 +217,7 @@ and nothing the team wrote moves or is lost.
 ## 5. Health alerts
 
 When something stops, an email goes to the alert address (Lead Agent →
-Connection → Health alerts; junaid@arak-sa.com, the owner's choice on
+Connection → Health alerts; staff.dev@arak-sa.com, the owner's choice on
 2026-10-07). Again once a day while it lasts, and once when it works again.
 
 It checks: either Sheet silent for 30+ minutes; a mailbox needing reconnecting,
@@ -326,9 +326,9 @@ To connect, in this order:
    It must be able to see every lead and give them to other people; an "Own
    Documents" user cannot. This is a paid seat. Do not use a person's own
    login: every lead would say that person made it.
-3. **Each salesperson** (Ammar, Haitham…) has an Odoo user whose login is the
+3. **Each salesperson** (Faisal, Khaled…) has an Odoo user whose login is the
    same email they use here, with **Sales: User: Own Documents Only**. That
-   setting is what keeps Ammar's leads out of Haitham's sight in Odoo. If a
+   setting is what keeps Faisal's leads out of Khaled's sight in Odoo. If a
    login differs, type it in **Sales team → Odoo login**.
 4. **The key:** sign in to Odoo as Lead Agent → avatar → **My Preferences**
    (or Preferences) → **Account Security** → **New API Key** → name it "Lead

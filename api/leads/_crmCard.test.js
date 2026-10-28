@@ -13,7 +13,7 @@ import { readLeadProps } from './_odoo.js'
 
 const WS = '11111111-1111-4111-8111-111111111111'
 const L1 = '22222222-2222-4222-8222-222222222222'
-const ARIF = { id: '44444444-4444-4444-8444-444444444444' }
+const BILAL = { id: '44444444-4444-4444-8444-444444444444' }
 const OMAR = '55555555-5555-4555-8555-555555555555'
 const TEAM = 42
 
@@ -140,7 +140,7 @@ function world({ salesAdmin = true, teamId = TEAM, sent = false } = {}) {
       crm_status: sent ? 'sent' : null, crm_id: sent ? '900' : '', crm_test: false, crm_url: '', crm_error: '', next_step: '', follow_up: null, updated_at: '2026-10-20T08:00:00Z',
     }],
     lead_cards: [{ lead_id: L1, workspace_id: WS, card: structuredClone(theCard), decision: '', quote_due: null, target_price: '', decides: '', competitors: '', crm_props: null, crm_sync_error: '', updated_at: '2026-10-20T08:00:00Z' }],
-    user_access: [{ user_id: ARIF.id, email: 'arif@example.com', full_name: 'Arif' }, { user_id: OMAR, email: 'omar@example.com', full_name: 'Omar' }],
+    user_access: [{ user_id: BILAL.id, email: 'bilal@example.com', full_name: 'Bilal' }, { user_id: OMAR, email: 'omar@example.com', full_name: 'Omar' }],
     sales_seats: [{ user_id: OMAR, workspace_id: WS, odoo_login: '', odoo_user_id: 21 }],
   }
   const state = { now: '2026-10-20T08:00:00Z' }
@@ -199,7 +199,7 @@ describe('approving sends the card with the lead', () => {
     const w = world()
     const conn = { ...w.tables.lead_crm[0], apiKey: 'key', ready: true }
     await ensureTeamFields(w.deps, conn)
-    const out = await approveLead(w.deps, { workspaceId: WS, leadId: L1, user: ARIF })
+    const out = await approveLead(w.deps, { workspaceId: WS, leadId: L1, user: BILAL })
     expect(out.crm).toBe('sent')
     const odooLead = w.odoo.leads[900]
     expect(odooLead.team_id).toBe(TEAM)
@@ -209,7 +209,7 @@ describe('approving sends the card with the lead', () => {
     expect(w.odoo.writes).toEqual([]) // nothing filled yet, so no field write
     expect(Object.keys(w.odoo.activities)).toEqual([])
     expect(w.odoo.notes).toHaveLength(1)
-    expect(w.odoo.notes[0].body).toBe('<p>From the Arak leads platform, approved by Arif (arif@example.com). The brief to read before the call is in Internal Notes.</p>')
+    expect(w.odoo.notes[0].body).toBe('<p>From the Arak leads platform, approved by Bilal (bilal@example.com). The brief to read before the call is in Internal Notes.</p>')
     expect(w.odoo.notes[0]).toMatchObject({ body_is_html: true, subtype_xmlid: 'mail.mt_note' })
     expect(w.tables.lead_cards[0].crm_sync_error).toBe('')
   })

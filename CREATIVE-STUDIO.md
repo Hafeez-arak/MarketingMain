@@ -923,7 +923,7 @@ click.
 
   ⛔ **The migration can't be applied from here.** The connected Supabase MCP
   only exposes project `fiiifytprcswwoyvyrvm` (**Arak Catalogues** — products,
-  SKUs, catalog matching). The marketing app runs on `vxjhfvehccftvajgtqtv`
+  SKUs, catalog matching). The marketing app runs on `<production-project>`
   (**Arak Marketing**, per `.env`), which that connection cannot see. The SQL
   must be run by hand in the Arak Marketing SQL editor, or the MCP reconnected
   to the account that owns it. Applying it to the Catalogues project would put

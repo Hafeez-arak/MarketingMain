@@ -1,7 +1,7 @@
 -- ─── Read and unread leads (2026-10-19) ───────────────────────────────────
 -- The owner: a lead shows as unread (a dot, the name in bold) until the
 -- person opens it, for the admin and the sales team alike. Each person has
--- their own: Arif opening a lead does not mark it read for Haitham. A lead
+-- their own: Bilal opening a lead does not mark it read for Khaled. A lead
 -- assigned to someone becomes unread for them again (api/leads/_assign.js).
 -- Everything that arrived before 14 October 2026 counts as read.
 --

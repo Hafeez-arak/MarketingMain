@@ -74,7 +74,7 @@ The CEO's rule 7 still holds: anything Odoo owns (deals, invoices, projects) is
 | Home (launcher) | everyone | — | the tile screen, showing only your modules |
 | CEO | CEO, admins | `/ceo` panel (branch `claude/ceo-control-panel-analysis-a08891`, not merged) | live Odoo numbers |
 | Sales | sales team; sales admin manages | Leads, lead agent, battle cards, Targets, Agent Brief, Pipeline (#244, open) | Odoo deals and quotes read back |
-| Marketing | Shadia and the marketing team | Brand Brain, Studio, Content Planning, Schedule, Social, Post Queue, Auto-replies, Analytics, Email, Media | none, regrouping only |
+| Marketing | Sara and the marketing team | Brand Brain, Studio, Content Planning, Schedule, Social, Post Queue, Auto-replies, Analytics, Email, Media | none, regrouping only |
 | Research | marketing, sales admin, CEO | Research runs, competitors, opportunities | none |
 | Finance | CEO, finance person | — | read-only: invoices, collections, overdue >60 days, margin per project (needs Odoo Accounting in use) |
 | Projects | project managers (own projects), CEO (all) | — | read Odoo Project; PM's weekly update written into Odoo (needs Odoo Project in use) |
@@ -179,8 +179,8 @@ zero data retention and no training on prompts (`provider.only`, `zdr`,
    readable by anyone.
 5. **Model bake-off approval.** It spends a few dollars on test calls.
 6. **PR #244** (lead stages in Campai) against rule 7. Decide with the CEO.
-7. **Who gets which module.** A first list: CEO, Shadia, Arif, Ammar, Haitham,
-   Hafeez, Junaid.
+7. **Who gets which module.** A first list: CEO, Sara, Bilal, Faisal, Khaled,
+   Omar, Tariq.
 
 ## Build order, once the owner says go
 

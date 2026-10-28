@@ -308,10 +308,10 @@ Each was taken the safe, reversible way so work could continue.
 - Full suite: **201 files, 3,634 tests, all passing**. Lint: 0 errors (the 7
   warnings are older files).
 - `node dev/v2db/check-contacts.mjs` (live local stack, real logins
-  `hafeez@arak-sa.com`, `junaid@arak-sa.com`, `junaidatif40@gmail.com`):
+  `staff.admin@arak-sa.com`, `staff.dev@arak-sa.com`, `outside.two@example.com`):
   **33/33**. It cleans up its grant and its organisation; the deleted
   organisation's history stays in the log by design.
-- In the running app on :5181, signed in as `hafeez@arak-sa.com`:
+- In the running app on :5181, signed in as `staff.admin@arak-sa.com`:
   - Round 1, every page in English and Arabic: creating an organisation
     (blocking warning, then similar-name warning and save-anyway); edit,
     archive and restore; adding and deleting a person; deleting the
@@ -319,7 +319,7 @@ Each was taken the safe, reversible way so work could continue.
   - Round 2: the list grouped by category and by city, the card view in
     Arabic, Luce Italia's page (category, terms, Italian IBAN, foreign
     badge, the activity log right to left), editing payment terms 60 → 90
-    (logged under "hafeez"), and the categories page in English (adding
+    (logged under "omar"), and the categories page in English (adding
     one, and the "name already taken" refusal).
 
 ## Next Contacts step

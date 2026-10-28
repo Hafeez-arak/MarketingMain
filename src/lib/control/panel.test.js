@@ -8,7 +8,7 @@ import { regionOf, leadRegion } from './region.js'
 const NOW = new Date('2026-10-18T09:00:00Z')
 const hAgo = h => new Date(NOW.getTime() - h * 3_600_000).toISOString()
 const lead = (over = {}) => ({ id: over.id || Math.random().toString(36).slice(2), verdict: 'qualified', received_at: hAgo(2), company: 'Nour Contracting', ...over })
-const TEAM = [{ id: 'u-ammar', name: 'Ammar' }, { id: 'u-haitham', name: 'Haitham' }]
+const TEAM = [{ id: 'u-faisal', name: 'Faisal' }, { id: 'u-khaled', name: 'Khaled' }]
 
 describe('rag', () => {
   it('is grey with no target or no value, never green by default', () => {
@@ -53,12 +53,12 @@ describe('region', () => {
 
 describe('routing', () => {
   const rules = [
-    { id: 'r2', position: 2, sender_type: '', region: '', project_type: 'tender', assign_to: 'u-haitham' },
-    { id: 'r1', position: 1, sender_type: 'contractor', region: 'western', project_type: '', assign_to: 'u-ammar' },
+    { id: 'r2', position: 2, sender_type: '', region: '', project_type: 'tender', assign_to: 'u-khaled' },
+    { id: 'r1', position: 1, sender_type: 'contractor', region: 'western', project_type: '', assign_to: 'u-faisal' },
   ]
   it('takes the first matching rule by position, blanks match anything', () => {
-    expect(routeLead({ sender_type: 'contractor', details: { location: 'Jeddah' } }, rules)).toMatchObject({ to: 'u-ammar', ruleId: 'r1' })
-    expect(routeLead({ sender_type: 'consultant', project_final: 'tender' }, rules)).toMatchObject({ to: 'u-haitham', ruleId: 'r2' })
+    expect(routeLead({ sender_type: 'contractor', details: { location: 'Jeddah' } }, rules)).toMatchObject({ to: 'u-faisal', ruleId: 'r1' })
+    expect(routeLead({ sender_type: 'consultant', project_final: 'tender' }, rules)).toMatchObject({ to: 'u-khaled', ruleId: 'r2' })
   })
   it('falls back, else gives nobody', () => {
     expect(routeLead({ sender_type: 'owner' }, rules, 'u-fallback')).toMatchObject({ to: 'u-fallback', ruleId: null })
@@ -68,7 +68,7 @@ describe('routing', () => {
     const leads = [
       lead({ id: 'old', received_at: hAgo(48) }),
       lead({ id: 'new', received_at: hAgo(1) }),
-      lead({ id: 'owned', received_at: hAgo(1), assigned_to: 'u-ammar' }),
+      lead({ id: 'owned', received_at: hAgo(1), assigned_to: 'u-faisal' }),
       lead({ id: 'dup', received_at: hAgo(1), duplicate_of: 'new' }),
       lead({ id: 'junk', received_at: hAgo(1), verdict: 'unqualified' }),
     ]
@@ -88,7 +88,7 @@ describe('controlKpis', () => {
     }
   })
   it('counts unowned leads in the last 30 days and names the older ones', () => {
-    const leads = [lead(), lead(), lead({ received_at: hAgo(24 * 40) }), lead({ assigned_to: 'u-ammar' })]
+    const leads = [lead(), lead(), lead({ received_at: hAgo(24 * 40) }), lead({ assigned_to: 'u-faisal' })]
     const tile = controlKpis({ leads, now: NOW }).find(t => t.key === 'unowned')
     expect(tile.value.en).toBe('2')
     expect(tile.sub.en).toContain('1 older')
@@ -96,8 +96,8 @@ describe('controlKpis', () => {
   })
   it('gives the median first reply against the target', () => {
     const leads = [
-      lead({ received_at: hAgo(10), first_reply_at: hAgo(8), assigned_to: 'u-ammar' }),
-      lead({ received_at: hAgo(10), first_reply_at: hAgo(7), assigned_to: 'u-ammar' }),
+      lead({ received_at: hAgo(10), first_reply_at: hAgo(8), assigned_to: 'u-faisal' }),
+      lead({ received_at: hAgo(10), first_reply_at: hAgo(7), assigned_to: 'u-faisal' }),
     ]
     const tile = controlKpis({ leads, now: NOW, targets: { first_reply_hours: 4 } }).find(t => t.key === 'response')
     expect(tile.value.en).toBe('2.5 h')
@@ -113,8 +113,8 @@ describe('controlKpis', () => {
 describe('controlDecisions', () => {
   it('shows at most three, one of each kind before a second of any', () => {
     const leads = [
-      lead({ id: 'q1', received_at: hAgo(100), assigned_to: 'u-ammar' }),
-      lead({ id: 'q2', received_at: hAgo(90), assigned_to: 'u-haitham' }),
+      lead({ id: 'q1', received_at: hAgo(100), assigned_to: 'u-faisal' }),
+      lead({ id: 'q2', received_at: hAgo(90), assigned_to: 'u-khaled' }),
       lead({ id: 'o1', received_at: hAgo(10) }),
       lead({ id: 'o2', received_at: hAgo(9) }),
     ]
@@ -122,31 +122,31 @@ describe('controlDecisions', () => {
     const out = controlDecisions({ leads, accounts, team: TEAM, now: NOW })
     expect(out).toHaveLength(MAX_DECISIONS)
     expect(out.map(d => d.kind)).toEqual(['late_quote', 'unassigned', 'account_quiet'])
-    expect(out[0]).toMatchObject({ owner: 'Ammar', action: { type: 'remind', leadId: 'q1', userId: 'u-ammar' } })
+    expect(out[0]).toMatchObject({ owner: 'Faisal', action: { type: 'remind', leadId: 'q1', userId: 'u-faisal' } })
     expect(out[1].action).toMatchObject({ type: 'assign', leadId: 'o1' })
   })
   it('suggests the routing rule\'s person on an unowned lead', () => {
-    const out = controlDecisions({ leads: [lead({ sender_type: 'contractor' })], rules: [{ sender_type: 'contractor', assign_to: 'u-ammar' }], now: NOW })
-    expect(out[0].action.suggested).toBe('u-ammar')
+    const out = controlDecisions({ leads: [lead({ sender_type: 'contractor' })], rules: [{ sender_type: 'contractor', assign_to: 'u-faisal' }], now: NOW })
+    expect(out[0].action.suggested).toBe('u-faisal')
   })
   it('is empty when nothing needs him', () => {
-    expect(controlDecisions({ leads: [lead({ assigned_to: 'u-ammar', first_reply_at: hAgo(1) })], now: NOW })).toEqual([])
+    expect(controlDecisions({ leads: [lead({ assigned_to: 'u-faisal', first_reply_at: hAgo(1) })], now: NOW })).toEqual([])
   })
 })
 
 describe('repRows', () => {
   it('counts open, quotes this month and late per person; won value waits for stages', () => {
     const leads = [
-      lead({ assigned_to: 'u-ammar', received_at: hAgo(100) }),
-      lead({ assigned_to: 'u-ammar', received_at: hAgo(3), quote_sent_at: hAgo(1) }),
-      lead({ assigned_to: 'u-haitham', received_at: hAgo(1) }),
+      lead({ assigned_to: 'u-faisal', received_at: hAgo(100) }),
+      lead({ assigned_to: 'u-faisal', received_at: hAgo(3), quote_sent_at: hAgo(1) }),
+      lead({ assigned_to: 'u-khaled', received_at: hAgo(1) }),
     ]
     const rows = repRows({ leads, team: TEAM, now: NOW })
-    expect(rows[0]).toMatchObject({ name: 'Ammar', open: 2, quotes: 1, late: 1, wonValue: null, tone: 'bad' })
-    expect(rows[1]).toMatchObject({ name: 'Haitham', open: 1, late: 0 })
+    expect(rows[0]).toMatchObject({ name: 'Faisal', open: 2, quotes: 1, late: 1, wonValue: null, tone: 'bad' })
+    expect(rows[1]).toMatchObject({ name: 'Khaled', open: 1, late: 0 })
   })
   it('adds won value this month once leads carry stages', () => {
-    const leads = [lead({ assigned_to: 'u-ammar', stage: 'won', stage_at: hAgo(5), deal_value_sar: 250_000 })]
+    const leads = [lead({ assigned_to: 'u-faisal', stage: 'won', stage_at: hAgo(5), deal_value_sar: 250_000 })]
     expect(repRows({ leads, team: TEAM, now: NOW })[0].wonValue).toBe(250_000)
   })
 })
@@ -201,7 +201,7 @@ describe('weeklyLines and emails', () => {
 
 describe('daily alert', () => {
   it('lists each lateness once, then nothing new', () => {
-    const l = lead({ id: 'x', received_at: hAgo(80), assigned_to: 'u-ammar' })
+    const l = lead({ id: 'x', received_at: hAgo(80), assigned_to: 'u-faisal' })
     const items = dailyAlertItems({ leads: [l, lead({ id: 'y' })], team: TEAM, now: NOW })
     expect(items.map(i => i.kind).sort()).toEqual(['late_quote', 'unassigned'])
     expect(dailyAlertItems({ leads: [{ ...l, late_alerted: { late_quote: hAgo(24) } }], team: TEAM, now: NOW })).toEqual([])

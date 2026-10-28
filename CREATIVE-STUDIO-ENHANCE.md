@@ -10,7 +10,7 @@
 | `CREATIVE_ENHANCE_JS` + `build_creative_enhance()` | `n8n/gen_workflows.py` | **Deployed.** Live in `arak-marketing-n8n` as workflow `5l6o1VZ2Zfb76O9m`, published, webhook `arak-creative-enhance` responding 200. |
 | Provider-mechanics split, `buildPrompt(provider)` | `n8n/gen_workflows.py` (`CREATIVE_GENERATE_JS`) | **Deployed**, updated in place on the existing workflow `s5U2DS1dybYQhHR0` (same id — not a duplicate). Exported and grepped post-deploy to confirm the GPT no-logo line and `buildPrompt('openai')`/`buildPrompt('gemini')` are actually what's running, not just what's on disk. |
 | `requestEnhance()` | `src/lib/creativeStudio.js` | Written, builds clean. |
-| `original_prompt` / `prompt_source` columns | `supabase/migrations/20260810_creative_studio.sql` + `20260810_creative_studio_prompt_source.sql` | **Live on `vxjhfvehccftvajgtqtv`** (Arak Marketing), confirmed via `information_schema.columns` after applying. See "The migration gap" below for why a second file was needed. |
+| `original_prompt` / `prompt_source` columns | `supabase/migrations/20260810_creative_studio.sql` + `20260810_creative_studio_prompt_source.sql` | **Live on `<production-project>`** (Arak Marketing), confirmed via `information_schema.columns` after applying. See "The migration gap" below for why a second file was needed. |
 | ✨ buttons, Undo, auto-enhance toggle | `src/pages/studio/index.jsx` | Written, builds clean. Not click-tested in an authenticated browser session (no workspace login available in this environment). |
 | Webhook field | `src/pages/settings/index.jsx` | Written (`creativeEnhance`). **Still needs the production URL pasted in** — see "One remaining step" below. |
 | Brand context wiring | `src/pages/studio/index.jsx` | Fixed as a side effect — `arak-creative-generate` was never receiving `instructions`, so `BRAND CONTEXT` had been silently empty since Phase C. Now wired. |
@@ -59,7 +59,7 @@ after. `create table if not exists` is a no-op the moment the table already
 exists — it does not diff columns like a real migration tool. So the second
 run silently changed nothing, and the live table was missing both columns.
 
-Confirmed directly against `vxjhfvehccftvajgtqtv` via `information_schema.columns`
+Confirmed directly against `<production-project>` via `information_schema.columns`
 before touching anything. Fixed with a proper idempotent follow-up
 (`20260810_creative_studio_prompt_source.sql`, using `add column if not
 exists` this time, which — unlike `create table if not exists` — really is
@@ -81,7 +81,7 @@ originally authorized against the wrong org and only exposed `Arak
 Catalogues` (`fiiifytprcswwoyvyrvm`) — a completely different Supabase
 project from the one this app runs on. Reconnecting it (Settings →
 Connectors → Supabase → disconnect → reconnect, granting the org that owns
-`Arak Marketing`) is what made `vxjhfvehccftvajgtqtv` visible and this whole
+`Arak Marketing`) is what made `<production-project>` visible and this whole
 check possible.
 
 ---

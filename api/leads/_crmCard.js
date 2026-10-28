@@ -32,7 +32,7 @@ const errText = (err) => String(err?.message || err).slice(0, 400)
 const CARD_SYNC_COLUMNS = 'lead_id,card,decision,quote_due,target_price,decides,competitors,crm_props,crm_sync_error,crm_activity_id'
 const LEAD_SYNC_COLUMNS = 'id,crm_id,crm_status,next_step,follow_up'
 
-/** "Ammar Ahmed" (or the address) for the history note. */
+/** "Faisal Ahmed" (or the address) for the history note. */
 async function personName(deps, userId) {
   if (!isUuid(userId)) return ''
   const [u] = await deps.db(`user_access?user_id=eq.${userId}&select=email,full_name`) || []

@@ -3,7 +3,7 @@ import { runHealth as researchHealth } from '../../src/lib/agent/runHealth.js'
 
 // ─── Lead agent: is everything still working? ──────────────────────────────
 // The owner's decision (2026-10-07): when any part stops, email
-// junaid@arak-sa.com straight away (lead_agent_settings.alert_emails), remind
+// staff.dev@arak-sa.com straight away (lead_agent_settings.alert_emails), remind
 // once a day while it lasts, and say so when it is fixed.
 //
 // Who runs the check: both Google timers. The website Sheet's 5-minute call

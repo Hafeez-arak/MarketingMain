@@ -8,7 +8,7 @@ import { createClient } from '@supabase/supabase-js'
 // "which credentials did this browser tab happen to have typed in."
 //
 // Required in .env (see .env.example):
-//   VITE_SUPABASE_URL=https://vxjhfvehccftvajgtqtv.supabase.co
+//   VITE_SUPABASE_URL=https://<production-project>.supabase.co
 //   VITE_SUPABASE_ANON_KEY=...
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY

@@ -46,14 +46,14 @@ export const REQUEST_TOOLS = [
     name: 'tag_person',
     cost: FREE,
     description:
-      'Give a piece of work to a named colleague when the person tags them ("@Shadia redo this", ' +
-      '"ask Hafeez to fix the report"). Only people on the tag list can be tagged; the result ' +
+      'Give a piece of work to a named colleague when the person tags them ("@Sara redo this", ' +
+      '"ask Omar to fix the report"). Only people on the tag list can be tagged; the result ' +
       'names who is allowed if the name does not match. Write a brief the colleague can act on ' +
       'without reading this conversation: what is wanted, why, which item, by when if they said.',
     input_schema: {
       type: 'object',
       properties: {
-        person: { type: 'string', description: 'The colleague\'s name as the person said it, e.g. "Shadia".' },
+        person: { type: 'string', description: 'The colleague\'s name as the person said it, e.g. "Sara".' },
         title: { type: 'string', description: 'The work, in under 80 characters.' },
         brief: { type: 'string', description: 'Clear instructions for the colleague, written by you.' },
         details: { type: 'string', description: 'What the person said, in their words.' },
@@ -68,7 +68,7 @@ export const REQUEST_TOOLS = [
     cost: FREE,
     description:
       'Requests on the board with their status, who has them, the closing note and history. Use ' +
-      'for "what happened to my request about X?", "what is still open?", "what has Shadia ' +
+      'for "what happened to my request about X?", "what is still open?", "what has Sara ' +
       'done?". Give the real status and the note; never guess progress.',
     input_schema: {
       type: 'object',

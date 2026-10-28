@@ -5,7 +5,7 @@ import { leadsApi } from '../../lib/leads/client'
 // ─── The sales team, on Agent settings (2026-10-13) ────────────────────────
 // Everyone with a sales seat in this company: the people leads are assigned
 // to. Per person: whether they also see every website enquiry (the owner's
-// choice for Ammar; everyone else sees only their own), and who they are in
+// choice for Faisal; everyone else sees only their own), and who they are in
 // Odoo, so a lead goes in with them as its salesperson. Odoo is asked by
 // their email unless an Odoo login is set here. Who is on the team is
 // decided in Team & Access, not here.

@@ -14,6 +14,10 @@
 -- NOT APPLIED. The owner asked for this to stay on its branch until the CEO
 -- agrees the plan. Applied by hand when it is. Safe to re-run.
 
+-- The staff addresses below are the public repo's stand-ins (staff.ceo@,
+-- staff.salesadmin@): the repo is public. Before applying this to production
+-- by hand, swap in the real ones from dev/v2db/people.local.json (git-ignored).
+
 -- ── Targets and who is told (one row per company) ──
 create table if not exists public.company_targets (
   workspace_id          uuid primary key references public.workspaces(id) on delete cascade,
@@ -52,8 +56,8 @@ create policy company_targets_admin_read on public.company_targets
 -- Arak: the CEO and the sales admin get both emails.
 insert into public.company_targets (workspace_id, brief_emails, alert_emails)
 values ('00000000-0000-0000-0000-000000000001',
-        array['mkader@arak-sa.com', 'a.mohammad@arak-sa.com'],
-        array['mkader@arak-sa.com', 'a.mohammad@arak-sa.com'])
+        array['staff.ceo@arak-sa.com', 'staff.salesadmin@arak-sa.com'],
+        array['staff.ceo@arak-sa.com', 'staff.salesadmin@arak-sa.com'])
 on conflict (workspace_id) do nothing;
 
 -- ── Routing rules: which salesperson gets which qualified lead ──
@@ -105,4 +109,4 @@ alter table public.user_access
   add column if not exists landing text not null default ''
   check (landing in ('', 'ceo'));
 
-update public.user_access set landing = 'ceo' where email = 'mkader@arak-sa.com';
+update public.user_access set landing = 'ceo' where email = 'staff.ceo@arak-sa.com';

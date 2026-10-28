@@ -20,17 +20,17 @@ const { runTool } = await import('./_tools.js')
 
 const WS = 'ws-1'
 const CEO = { userId: 'u-ceo', chatId: 'c-1', isAdmin: true }
-const SHADIA = { userId: 'u-shadia', chatId: 'c-2', isAdmin: false }
+const SARA = { userId: 'u-sara', chatId: 'c-2', isAdmin: false }
 const ACCESS = [
-  { user_id: 'u-ceo', email: 'mkader@arak-sa.com', full_name: null },
-  { user_id: 'u-shadia', email: 'shadia@arak-sa.com', full_name: 'shadia' },
-  { user_id: 'u-hafeez', email: 'hafeez@arak-sa.com', full_name: null },
+  { user_id: 'u-ceo', email: 'staff.ceo@arak-sa.com', full_name: null },
+  { user_id: 'u-sara', email: 'staff.marketing@arak-sa.com', full_name: 'sara' },
+  { user_id: 'u-omar', email: 'staff.admin@arak-sa.com', full_name: null },
 ]
-const PEOPLE = [{ user_id: 'u-shadia', label: 'Marketing' }, { user_id: 'u-hafeez', label: 'Builds the app' }]
+const PEOPLE = [{ user_id: 'u-sara', label: 'Marketing' }, { user_id: 'u-omar', label: 'Builds the app' }]
 
 function base({ method, path }) {
   if (path.startsWith('user_access')) return ACCESS
-  if (path.startsWith('request_people') && path.includes('gets_new_requests')) return [{ user_id: 'u-hafeez' }]
+  if (path.startsWith('request_people') && path.includes('gets_new_requests')) return [{ user_id: 'u-omar' }]
   if (path.startsWith('request_people')) return PEOPLE
   if (method === 'POST' && path === 'requests') return [{ id: 'r-new', title: 'x', status: 'new' }]
   return []
@@ -42,11 +42,11 @@ beforeEach(() => { calls.length = 0; route = base })
 
 describe('file_request', () => {
   it('creates the request as the person in the chat, whatever the model says', async () => {
-    const out = await runTool(WS, 'file_request', { title: 'Add a monthly sales report', details: 'I want a report', created_by: 'u-hafeez', workspace_id: 'other' }, CEO)
+    const out = await runTool(WS, 'file_request', { title: 'Add a monthly sales report', details: 'I want a report', created_by: 'u-omar', workspace_id: 'other' }, CEO)
     expect(out.ok).toBe(true)
     const body = posts()[0].body
     expect(body).toMatchObject({ workspace_id: WS, created_by: 'u-ceo', updated_by: 'u-ceo', chat_id: 'c-1', kind: 'improvement', title: 'Add a monthly sales report' })
-    expect(out.result.seen_by).toEqual(['hafeez'])
+    expect(out.result.seen_by).toEqual(['staff.admin'])
   })
 
   it('needs a signed-in chat: no session, no request', async () => {
@@ -58,16 +58,16 @@ describe('file_request', () => {
 
 describe('tag_person', () => {
   it('assigns to someone on the tag list, matched by first name', async () => {
-    const out = await runTool(WS, 'tag_person', { person: '@Shadia', title: 'Redo the Friday caption', brief: 'Stronger hook' }, CEO)
+    const out = await runTool(WS, 'tag_person', { person: '@Sara', title: 'Redo the Friday caption', brief: 'Stronger hook' }, CEO)
     expect(out.ok).toBe(true)
-    expect(out.result.tagged).toBe('shadia')
-    expect(posts()[0].body).toMatchObject({ assigned_to: 'u-shadia', created_by: 'u-ceo', brief: 'Stronger hook', kind: 'task' })
+    expect(out.result.tagged).toBe('sara')
+    expect(posts()[0].body).toMatchObject({ assigned_to: 'u-sara', created_by: 'u-ceo', brief: 'Stronger hook', kind: 'task' })
   })
 
   it('refuses someone not on the list and names who is', async () => {
-    const out = await runTool(WS, 'tag_person', { person: 'Ammar', title: 'x', brief: 'y' }, CEO)
+    const out = await runTool(WS, 'tag_person', { person: 'Faisal', title: 'x', brief: 'y' }, CEO)
     expect(out.ok).toBe(false)
-    expect(out.error).toMatch(/not on the tag list.*shadia, hafeez/)
+    expect(out.error).toMatch(/not on the tag list.*sara, staff\.admin/)
     expect(posts()).toEqual([])
   })
 })
@@ -81,18 +81,18 @@ describe('get_requests', () => {
   })
 
   it('a non-admin asking for "all" still only sees what they asked for or own', async () => {
-    await runTool(WS, 'get_requests', { scope: 'all', search: 'caption' }, SHADIA)
+    await runTool(WS, 'get_requests', { scope: 'all', search: 'caption' }, SARA)
     const read = calls.find(c => c.path.startsWith('requests?'))
-    expect(read.path).toMatch(/and=\(or\(title\.ilike\.\*caption\*,body\.ilike\.\*caption\*\),or\(created_by\.eq\.u-shadia,assigned_to\.eq\.u-shadia\)\)/)
+    expect(read.path).toMatch(/and=\(or\(title\.ilike\.\*caption\*,body\.ilike\.\*caption\*\),or\(created_by\.eq\.u-sara,assigned_to\.eq\.u-sara\)\)/)
   })
 
   it('one request by id, still inside this company and still behind the visibility rule', async () => {
-    await runTool(WS, 'get_requests', { id: 'r9', scope: 'mine' }, SHADIA)
+    await runTool(WS, 'get_requests', { id: 'r9', scope: 'mine' }, SARA)
     const read = calls.find(c => c.path.startsWith('requests?'))
     expect(read.path).toContain('id=eq.r9')
-    expect(read.path).not.toContain('created_by=eq.u-shadia&')
+    expect(read.path).not.toContain('created_by=eq.u-sara&')
     expect(read.path).toContain(`workspace_id=eq.${WS}`)
-    expect(read.path).toContain('or(created_by.eq.u-shadia,assigned_to.eq.u-shadia)')
+    expect(read.path).toContain('or(created_by.eq.u-sara,assigned_to.eq.u-sara)')
   })
 
   it('an admin asking for "all" sees the board', async () => {
@@ -109,17 +109,17 @@ describe('update_request', () => {
   }
 
   it('the assignee can mark it done; updated_by is the person acting', async () => {
-    route = existing({ id: 'r1', title: 'Caption', created_by: 'u-ceo', assigned_to: 'u-shadia', status: 'new' })
-    const out = await runTool(WS, 'update_request', { id: 'r1', status: 'done', note: 'Rewritten' }, SHADIA)
+    route = existing({ id: 'r1', title: 'Caption', created_by: 'u-ceo', assigned_to: 'u-sara', status: 'new' })
+    const out = await runTool(WS, 'update_request', { id: 'r1', status: 'done', note: 'Rewritten' }, SARA)
     expect(out.ok).toBe(true)
     const patch = calls.find(c => c.method === 'PATCH')
     expect(patch.path).toContain(`workspace_id=eq.${WS}`)
-    expect(patch.body).toEqual({ updated_by: 'u-shadia', status: 'done', resolution: 'Rewritten' })
+    expect(patch.body).toEqual({ updated_by: 'u-sara', status: 'done', resolution: 'Rewritten' })
   })
 
   it('someone unrelated who is not an admin cannot move it', async () => {
-    route = existing({ id: 'r1', title: 'Report', created_by: 'u-ceo', assigned_to: 'u-hafeez', status: 'new' })
-    const out = await runTool(WS, 'update_request', { id: 'r1', status: 'done' }, SHADIA)
+    route = existing({ id: 'r1', title: 'Report', created_by: 'u-ceo', assigned_to: 'u-omar', status: 'new' })
+    const out = await runTool(WS, 'update_request', { id: 'r1', status: 'done' }, SARA)
     expect(out.ok).toBe(false)
     expect(calls.some(c => c.method === 'PATCH')).toBe(false)
   })

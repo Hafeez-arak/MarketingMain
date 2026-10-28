@@ -166,7 +166,7 @@ export async function disconnectCrm(deps, workspaceId) {
 
 export const odooCfg = (conn) => ({ url: conn.url, db: conn.db, login: conn.login, apiKey: conn.apiKey })
 
-/** "Ammar Ahmed (ammar@…)" or the email, for messages. */
+/** "Faisal Ahmed (faisal@…)" or the email, for messages. */
 const nameOf = (u) => (u?.full_name ? `${u.full_name} (${u.email})` : u?.email || 'That person')
 
 /**

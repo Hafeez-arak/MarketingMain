@@ -41,7 +41,7 @@ export async function bootApp() {
     insert into public.email_settings (workspace_id, from_name, from_email, reply_to, company_address)
       values ('${WS}', 'Arak Lighting', 'updates@email.arak-sa.com', 'marketing@arak-sa.com', 'ARAK Lighting, Riyadh');
   `)
-  const owner = await world.user('hafeez@arak-sa.com')
+  const owner = await world.user('staff.admin@arak-sa.com')
   await pg.exec(`insert into public.workspace_members (workspace_id, user_id) values ('${WS}', '${owner.id}')`)
 
   /** One request to /api/email/<action>. */

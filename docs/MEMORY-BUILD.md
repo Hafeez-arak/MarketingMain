@@ -108,7 +108,7 @@ than erroring — that is the whole safety story, and it is verified.
 - [x] **1. Migration SQL written** — `supabase/migrations/20260912_agent_memory.sql`: `agent_notes`,
       `agent_digest`, indexes, RLS. Table names verified against the live
       database (`workspace_members` exists with `workspace_id`/`user_id`).
-      ✅ **APPLIED 2026-09-12** to project `vxjhfvehccftvajgtqtv`. Before it was applied,
+      ✅ **APPLIED 2026-09-12** to project `<production-project>`. Before it was applied,
       `agent_notes` / `agent_digest` do not exist and every memory read must
       degrade to "no memory" rather than throwing.
 - [x] **2. Pure logic + tests** — `src/lib/agent/memory.js` + `memory.test.js`.
@@ -156,7 +156,7 @@ than erroring — that is the whole safety story, and it is verified.
 
 ### Verified live, 2026-09-12
 
-Migration applied to project `vxjhfvehccftvajgtqtv` (confirmed against
+Migration applied to project `<production-project>` (confirmed against
 `SUPABASE_URL` before applying). Backfilled from the five real runs already in
 the database:
 
@@ -238,7 +238,7 @@ out.
 ## Progress — part two
 
 - [x] **A. Migration** — `research_lens_results`. ✅ applied to
-      `vxjhfvehccftvajgtqtv` 2026-09-12.
+      `<production-project>` 2026-09-12.
 - [x] **B. Pure logic + tests** — `src/lib/agent/phases.js` + `phases.test.js`,
       **31 tests**.
 - [x] **C. Deadline in `callModel`** — `deadline` (absolute epoch ms) aborts the

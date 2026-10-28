@@ -13,12 +13,12 @@ import { AR_LABELS } from '../../lib/requests'
 const RW = {
   en: {
     title: 'Requests',
-    subtitle: 'Changes, fixes and tagged work from the assistant. Ask for something in the assistant, or tag Shadia or Hafeez with @, and it lands here.',
+    subtitle: 'Changes, fixes and tagged work from the assistant. Ask for something in the assistant, or tag Sara or Omar with @, and it lands here.',
     columns: { new: 'New', in_progress: 'In progress', closed: 'Done' },
     views: { all: 'Everything I can see', mine: 'Asked by me', assigned: 'Assigned to me' },
     loadFailed: e => `The requests could not be loaded: ${e}`,
     emptyTitle: 'No requests yet',
-    emptyBody: 'Tell the assistant what should change, or tag someone with @Shadia or @Hafeez. The request appears here and the right person is notified.',
+    emptyBody: 'Tell the assistant what should change, or tag someone with @Sara or @Omar. The request appears here and the right person is notified.',
     declined: 'Declined', nothing: 'Nothing here.', someone: 'Someone',
     asked: 'asked', movedTo: s => `moved it to ${s}`, reassigned: 'reassigned it', commented: 'commented',
     askedBy: (n, t) => `Asked by ${n} ${t}`, assignedTo: n => ` · assigned to ${n}`, onBoard: ' · on the board for the builders', from: pg => ` · from ${pg}`,
@@ -48,7 +48,7 @@ const RW = {
 // ─── Requests ──────────────────────────────────────────────────────────────
 // 2026-10-18, PR 2 of docs/CEO-ASSISTANT-PLAN.md. Where "this isn't good,
 // change it" lands when the assistant cannot make the change itself, and
-// where tagged work for Shadia or Hafeez lives. Requests are made from the
+// where tagged work for Sara or Omar lives. Requests are made from the
 // assistant's chat; this page is for seeing and moving them.
 //
 // What each person sees is RLS's call: admins the whole board, everyone else

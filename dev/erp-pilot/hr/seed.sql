@@ -17,7 +17,7 @@ do $$
 declare
   arak uuid := '00000000-0000-0000-0000-000000000001';
   ghusn uuid := (select id from public.workspaces where name = 'Ghusn');
-  approver uuid := (select user_id from public.user_access where email = 'hafeez@arak-sa.com');
+  approver uuid := (select user_id from public.user_access where email = 'staff.admin@arak-sa.com');
   d_sales uuid; d_projects uuid; d_admin uuid; d_store uuid;
   e_ceo uuid; e_sales uuid; e_rep uuid; e_pm uuid; e_eng uuid; e_tech uuid; e_hr uuid; e_store uuid; e_left uuid;
   t_annual uuid; t_sick uuid; t_unpaid uuid; t_emergency uuid;

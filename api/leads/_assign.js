@@ -65,7 +65,7 @@ export async function notifyAssigned(deps, { workspaceId, lead, to, by }) {
   } catch { /* the lead is assigned all the same */ }
 }
 
-/** "Arif" (or the address) for the note on top of the forward. */
+/** "Bilal" (or the address) for the note on top of the forward. */
 async function nameOfUser(deps, userId) {
   if (!isUuid(userId)) return ''
   const [u] = await deps.db(`user_access?user_id=eq.${userId}&select=email,full_name`) || []

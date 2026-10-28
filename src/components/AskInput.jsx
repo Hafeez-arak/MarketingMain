@@ -86,7 +86,7 @@ export default function AskInput({
   onPaste,
   canSubmitEmpty = false,
   // People who can be @-tagged (useTaggable). Typing "@" opens a picker; the
-  // assistant reads "@Shadia" in the message and files the request.
+  // assistant reads "@Sara" in the message and files the request.
   mentions = [],
 }) {
   const own = useRef(null)

@@ -43,3 +43,6 @@ dev/v2db/prod-copy/data/
 
 # Musa ERP pilot scratch (his code is not ours to publish)
 dev/erp-pilot/.work/
+
+# Real staff addresses paired with their public stand-ins (dev/v2db/mask-people.mjs). Never commit.
+dev/v2db/people.local.json

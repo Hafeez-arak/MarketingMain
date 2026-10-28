@@ -11,7 +11,7 @@ import { READ_SCOPES } from '../email/_graph.js'
 const WS = '11111111-1111-4111-8111-111111111111'
 const L1 = '22222222-2222-4222-8222-222222222222'
 const WEB = '33333333-3333-4333-8333-333333333333'
-const ARIF = { id: '44444444-4444-4444-8444-444444444444', email: 'arif@example.com', full_name: 'Arif' }
+const BILAL = { id: '44444444-4444-4444-8444-444444444444', email: 'bilal@example.com', full_name: 'Bilal' }
 const OMAR = { id: '55555555-5555-4555-8555-555555555555', email: 'omar@example.com', full_name: 'Omar Saleh' }
 const HUDA = { id: '66666666-6666-4666-8666-666666666666', email: 'huda@example.com', full_name: 'Huda' }
 const STRANGER = '77777777-7777-4777-8777-777777777777'
@@ -25,12 +25,12 @@ function world({ canSend = true, graphRefuses = false, crm = null } = {}) {
       { id: WEB, workspace_id: WS, source: 'website_form', mailbox: '', source_ref: 'row-9', name: 'Nora', company: '', email: 'nora@client.example', phones: ['+966 55 000 2222'], summary: 'Garden lights', message: 'Need <b>12</b> bollards.', assigned_to: null, forward_status: null, crm_status: null, crm_id: '', approved_at: null, updated_at: '2026-10-13T08:00:00Z' },
     ],
     people: [
-      { user_id: ARIF.id, email: ARIF.email, full_name: ARIF.full_name, status: 'approved', role: 'sales', leads_approver: true },
+      { user_id: BILAL.id, email: BILAL.email, full_name: BILAL.full_name, status: 'approved', role: 'sales', leads_approver: true },
       { user_id: OMAR.id, email: OMAR.email, full_name: OMAR.full_name, status: 'approved', role: 'sales', leads_approver: false },
       { user_id: HUDA.id, email: HUDA.email, full_name: HUDA.full_name, status: 'approved', role: 'sales', leads_approver: false },
     ],
     seats: [
-      { user_id: ARIF.id, workspace_id: WS, all_website_leads: false, odoo_login: '', odoo_user_id: null },
+      { user_id: BILAL.id, workspace_id: WS, all_website_leads: false, odoo_login: '', odoo_user_id: null },
       { user_id: OMAR.id, workspace_id: WS, all_website_leads: true, odoo_login: '', odoo_user_id: null },
       { user_id: HUDA.id, workspace_id: WS, all_website_leads: false, odoo_login: '', odoo_user_id: null },
     ],
@@ -94,7 +94,7 @@ function world({ canSend = true, graphRefuses = false, crm = null } = {}) {
 }
 
 const connected = { workspace_id: WS, url: 'https://erp.example.com', db: 'erp', login: 'agent@example.com', api_key: 'key', odoo_uid: 7 }
-const assign = (w, leadId, to, over = {}) => assignLead(w.deps, { workspaceId: WS, leadId, to, user: ARIF, appUrl: 'https://leads.example.com', ...over })
+const assign = (w, leadId, to, over = {}) => assignLead(w.deps, { workspaceId: WS, leadId, to, user: BILAL, appUrl: 'https://leads.example.com', ...over })
 
 describe('assigning an email lead', () => {
   let w
@@ -103,13 +103,13 @@ describe('assigning an email lead', () => {
   it('records the owner and FORWARDS the customer\'s email from the mailbox it came in, to them', async () => {
     const r = await assign(w, L1, OMAR.id)
     expect(r.forward).toEqual({ ok: true, from: 'info@example.com' })
-    expect(r.lead).toMatchObject({ assigned_to: OMAR.id, assigned_by: ARIF.id, forward_status: 'sent', forward_to: OMAR.email, forward_error: '' })
+    expect(r.lead).toMatchObject({ assigned_to: OMAR.id, assigned_by: BILAL.id, forward_status: 'sent', forward_to: OMAR.email, forward_error: '' })
     expect(w.state.sent).toHaveLength(1)
     const [sent] = w.state.sent
     expect(sent.url).toBe('https://graph.microsoft.com/v1.0/me/messages/graph-id-1/forward')
     expect(sent.body.toRecipients).toEqual([{ emailAddress: { address: OMAR.email, name: 'Omar Saleh' } }])
-    expect(sent.body.comment).toBe(forwardNote({ toName: 'Omar Saleh', byName: 'Arif', appUrl: 'https://leads.example.com' }))
-    expect(sent.body.comment).toMatch(/^Omar, this enquiry is assigned to you by Arif\./)
+    expect(sent.body.comment).toBe(forwardNote({ toName: 'Omar Saleh', byName: 'Bilal', appUrl: 'https://leads.example.com' }))
+    expect(sent.body.comment).toMatch(/^Omar, this enquiry is assigned to you by Bilal\./)
   })
 
   it('a mailbox that may only read: assigned all the same, the forward marked failed with what to do', async () => {
@@ -157,7 +157,7 @@ describe('assigning an email lead', () => {
   it('puts the lead in the Pipeline at New (2026-10-19), and taking it back before anyone worked it takes it out', async () => {
     const w = world()
     await assign(w, L1, OMAR.id)
-    expect(w.state.leads[0]).toMatchObject({ stage: 'new', stage_by: ARIF.id, assigned_to: OMAR.id })
+    expect(w.state.leads[0]).toMatchObject({ stage: 'new', stage_by: BILAL.id, assigned_to: OMAR.id })
     await assign(w, L1, null)
     expect(w.state.leads[0]).toMatchObject({ stage: null, assigned_to: null })
     w.state.leads[0].stage = 'contacted'
@@ -169,7 +169,7 @@ describe('assigning an email lead', () => {
     const w = world()
     await assign(w, L1, OMAR.id)
     expect(w.state.notes).toEqual([{
-      user_id: OMAR.id, workspace_id: WS, kind: 'lead', title: 'Arif gave you a lead: Example Dev',
+      user_id: OMAR.id, workspace_id: WS, kind: 'lead', title: 'Bilal gave you a lead: Example Dev',
       body: 'Downlights for a villa', link: `/leads?view=pipeline&lead=${L1}`,
     }])
     expect(w.state.unread).toEqual([`lead_reads?lead_id=eq.${L1}&user_id=eq.${OMAR.id}`])
@@ -178,14 +178,14 @@ describe('assigning an email lead', () => {
   })
 
   it('never to a sales admin: they hand leads out (the owner, 2026-10-19)', async () => {
-    const r = await assign(w, L1, ARIF.id)
+    const r = await assign(w, L1, BILAL.id)
     expect(r).toEqual({ status: 400, error: 'A sales admin assigns leads and does not work them. Choose a salesperson.' })
     expect(w.state.leads[0].assigned_to).toBeNull()
     expect(w.state.sent).toEqual([])
   })
 
   it('a lead of another company is not found', async () => {
-    const r = await assignLead(w.deps, { workspaceId: '99999999-9999-4999-8999-999999999999', leadId: L1, to: OMAR.id, user: ARIF })
+    const r = await assignLead(w.deps, { workspaceId: '99999999-9999-4999-8999-999999999999', leadId: L1, to: OMAR.id, user: BILAL })
     expect(r.status).toBe(404)
   })
 })
@@ -262,9 +262,9 @@ describe('the sales team settings', () => {
   it('lists the team with who sees the website leads and who they are in Odoo', async () => {
     const w = world()
     const team = await teamList(w.deps, WS)
-    expect(team.map((m) => m.full_name)).toEqual(['Arif', 'Huda', 'Omar Saleh'])
+    expect(team.map((m) => m.full_name)).toEqual(['Bilal', 'Huda', 'Omar Saleh'])
     expect(team.find((m) => m.user_id === OMAR.id)).toMatchObject({ all_website_leads: true, approver: false, odoo_user_id: null })
-    expect(team.find((m) => m.user_id === ARIF.id).approver).toBe(true)
+    expect(team.find((m) => m.user_id === BILAL.id).approver).toBe(true)
   })
 
   it('a new Odoo login forgets the user found for the old one', async () => {
@@ -279,7 +279,7 @@ describe('the sales team settings', () => {
   it('checking Odoo finds who is there and names who is not', async () => {
     const w = world({ crm: connected })
     const r = await teamCheckOdoo(w.deps, WS)
-    expect(r.missing).toEqual(['arif@example.com'])
+    expect(r.missing).toEqual(['bilal@example.com'])
     expect(r.team.find((m) => m.user_id === OMAR.id).odoo_user_id).toBe(21)
     expect((await teamCheckOdoo(world().deps, WS)).status).toBe(409)
   })

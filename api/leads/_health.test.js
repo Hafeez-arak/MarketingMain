@@ -104,7 +104,7 @@ describe('alertEmail', () => {
 
 describe('runHealth', () => {
   function world({ settings = {}, claimed = true, sendOk = true } = {}) {
-    const state = { settings: { workspace_id: 'ws', enabled: true, alert_emails: ['junaid@x.sa'], alert_state: {}, ...healthy, ...settings }, sent: [], patches: [] }
+    const state = { settings: { workspace_id: 'ws', enabled: true, alert_emails: ['tariq@x.sa'], alert_state: {}, ...healthy, ...settings }, sent: [], patches: [] }
     const db = async (path, init = {}) => {
       if (path.startsWith('lead_agent_settings?') && init.method === 'PATCH') {
         state.patches.push(path)
@@ -129,7 +129,7 @@ describe('runHealth', () => {
     const w = world({ settings: { last_export_at: minsAgo(60) } })
     const out = await runHealth(w.deps, { workspaceId: 'ws' })
     expect(out.fresh).toBe(1)
-    expect(w.state.sent[0]).toMatchObject({ workspaceId: 'ws', to: ['junaid@x.sa'] })
+    expect(w.state.sent[0]).toMatchObject({ workspaceId: 'ws', to: ['tariq@x.sa'] })
     expect(w.state.settings.alert_state.workbook.sentAt).toBe(NOW.toISOString())
   })
   it('if the email fails, nothing is remembered, so the next check tries again', async () => {

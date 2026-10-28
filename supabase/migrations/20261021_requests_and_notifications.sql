@@ -51,7 +51,7 @@ alter policy research_messages_rw on public.research_messages
   );
 
 -- ── 2. Who can be tagged, and who hears about new requests ───────────────
--- Data, not code: the CEO asked for Shadia and Hafeez now, and more people
+-- Data, not code: the CEO asked for Sara and Omar now, and more people
 -- later should be a row, not a deploy.
 
 create table if not exists public.request_people (
@@ -335,14 +335,14 @@ create trigger request_comment_notify
   for each row execute function public.request_comment_notify();
 
 -- ── 6. Arak Lighting's people ────────────────────────────────────────────
--- Shadia (marketing) and Hafeez can be tagged; Hafeez also hears about every
+-- Sara (marketing) and Omar can be tagged; Omar also hears about every
 -- new request, since he builds the changes.
 insert into public.request_people (workspace_id, user_id, can_be_tagged, gets_new_requests, label)
 select '00000000-0000-0000-0000-000000000001', ua.user_id, true,
-       ua.email = 'hafeez@arak-sa.com',
-       case ua.email when 'shadia@arak-sa.com' then 'Marketing' else 'Builds the app' end
+       ua.email = 'staff.admin@arak-sa.com',
+       case ua.email when 'staff.marketing@arak-sa.com' then 'Marketing' else 'Builds the app' end
   from public.user_access ua
- where ua.email in ('shadia@arak-sa.com', 'hafeez@arak-sa.com')
+ where ua.email in ('staff.marketing@arak-sa.com', 'staff.admin@arak-sa.com')
 on conflict (workspace_id, user_id) do nothing;
 
 -- ── 7. Names for the Requests page ───────────────────────────────────────

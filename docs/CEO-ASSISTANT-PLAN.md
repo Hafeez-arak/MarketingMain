@@ -23,7 +23,7 @@ should not get lost, and he can ask later what happened to it.
      undoable.
    - A change to the app itself becomes a **request** on a new Requests
      board, with his exact words, the page he was on, and any screenshot.
-3. **He can tag Shadia or Hafeez.** "Shadia, redo this caption" files a
+3. **He can tag Sara or Omar.** "Sara, redo this caption" files a
    request assigned to her, with a brief the assistant writes for her. She
    sees it in the app's bell and on the board.
 4. **He gets updates when he asks.** "What happened to my request about the
@@ -48,24 +48,24 @@ should not get lost, and he can ask later what happened to it.
 
 The people involved (from `user_access` / `workspace_members`):
 
-- **hafeez@arak-sa.com** is the **only app admin**. Everything admin-gated
+- **staff.admin@arak-sa.com** is the **only app admin**. Everything admin-gated
   (direct edits, leads, target accounts) works only for this login today.
-- **shadia@arak-sa.com** is a member of Arak Lighting, not an admin. By
+- **staff.marketing@arak-sa.com** is a member of Arak Lighting, not an admin. By
   current rules she cannot see leads or target accounts.
-- junaid@arak-sa.com is a member of Aqeeq, Alo Kheyatah and Ghusn, but
+- staff.dev@arak-sa.com is a member of Aqeeq, Alo Kheyatah and Ghusn, but
   **not** Arak Lighting.
-- Sales (Ammar, Arif, Haitham) have Leads-only seats and do not use the
+- Sales (Faisal, Bilal, Khaled) have Leads-only seats and do not use the
   assistant.
 
 ## Decisions I need from you
 
 **D1. The CEO's login: DECIDED 2026-10-18.** The CEO is
-**mkader@arak-sa.com**. It is now an app admin and a member of Arak
-Lighting. hafeez@ stays yours. #238 added "Change password" in Settings
+**staff.ceo@arak-sa.com**. It is now an app admin and a member of Arak
+Lighting. omar@ stays yours. #238 added "Change password" in Settings
 and "Forgot password?" on sign-in, so the password can be changed in the
 app.
 
-**D2. What Shadia can see.** When the CEO tags her on a lead, she will get
+**D2. What Sara can see.** When the CEO tags her on a lead, she will get
 the request text, but by today's rules she cannot open leads. I'd keep it
 that way: the assistant writes everything she needs into the request.
 *Or should she get lead access?*
@@ -147,13 +147,13 @@ prompt caching keeps working.
   - `request_events`: history and comments on a request.
 - `notifications`: recipient, company, kind, title, text, link, read time.
   It replaces the in-memory list.
-- **Who can be tagged** is a short list stored as data: Shadia and Hafeez
+- **Who can be tagged** is a short list stored as data: Sara and Omar
   now, more later without code changes.
 
 **Assistant tools:**
 - `file_request`: used when he asks for a change it cannot make itself, or
   says "make this a request".
-- `tag_person`: same as `file_request`, but assigned to Shadia or Hafeez;
+- `tag_person`: same as `file_request`, but assigned to Sara or Omar;
   only people on the list can be tagged. The assistant writes the brief.
 - `get_requests`: "What happened to my request about X?" and "What's still
   open?".
@@ -163,7 +163,7 @@ prompt caching keeps working.
 **App:**
 - **Requests page** (`/requests`): columns New, In progress, Done. A detail
   panel shows his words, the brief, page, screenshot, history and a link
-  back to the conversation. Admins see everything; Shadia sees what is
+  back to the conversation. Admins see everything; Sara sees what is
   assigned to her.
 - **@ in the chat box** opens a picker with only the tag-able people.
 - **The bell reads the `notifications` table:**
@@ -211,5 +211,5 @@ This touches different files from PR 1, so it can be built alongside it.
   1. Ask five real cross-department questions and check each number
      against the tables.
   2. File a request.
-  3. Tag Shadia, and confirm it reaches her bell from her login.
+  3. Tag Sara, and confirm it reaches her bell from her login.
   4. Close the request from chat, and confirm the CEO is notified.

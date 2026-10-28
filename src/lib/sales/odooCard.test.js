@@ -68,7 +68,7 @@ describe('Odoo history in words', () => {
     const f = historyFacts({
       ...base,
       orders: [
-        { state: 'sale', amount_total: 85000, date_order: '2026-01-10 09:00:00', user_id: [69, 'Ammar Ahmed - Sales'] },
+        { state: 'sale', amount_total: 85000, date_order: '2026-01-10 09:00:00', user_id: [69, 'Faisal Ahmed - Sales'] },
         { state: 'draft', amount_total: 40000, date_order: '2025-11-01 09:00:00' },
         { state: 'sale', amount_total: 325000, date_order: '2024-03-05 09:00:00' },
       ],
@@ -79,7 +79,7 @@ describe('Odoo history in words', () => {
     }, NOW)
     expect(f.lines).toEqual([
       'In Odoo as Example Dev Co (matched by email domain).',
-      '2 orders since Mar 2024, SAR 410,000; last Jan 2026 (Ammar Ahmed - Sales).',
+      '2 orders since Mar 2024, SAR 410,000; last Jan 2026 (Faisal Ahmed - Sales).',
       '1 quotation that did not become an order.',
       'Deals: 1 won · 1 lost (last Mar 2026: Price) · 0 open.',
     ])
@@ -88,8 +88,8 @@ describe('Odoo history in words', () => {
   })
 
   it('an open deal is the warning: probably the same enquiry when it is fresh, someone else\'s customer when older', () => {
-    const fresh = historyFacts({ ...base, deals: [{ active: true, probability: 10, create_date: '2026-10-15 07:00:00', user_id: [46, 'Haitham Khairi'] }] }, NOW)
-    expect(fresh.alert).toBe('Probably this same enquiry: Haitham Khairi opened a deal for them on 2026-10-15. Check before working it twice.')
+    const fresh = historyFacts({ ...base, deals: [{ active: true, probability: 10, create_date: '2026-10-15 07:00:00', user_id: [46, 'Khaled Khairi'] }] }, NOW)
+    expect(fresh.alert).toBe('Probably this same enquiry: Khaled Khairi opened a deal for them on 2026-10-15. Check before working it twice.')
     const old = historyFacts({ ...base, deals: [{ active: true, probability: 20, create_date: '2026-02-01 07:00:00', user_id: [59, 'Mohamed Gamal'] }] }, NOW)
     expect(old.alert).toBe('Mohamed Gamal already has an open deal with them (since Feb 2026). Talk to them before calling.')
     expect(old.move).toBe('')
@@ -182,8 +182,8 @@ describe('changes', () => {
   })
 
   it('the history line: who, and what changed to what, escaped', () => {
-    expect(changeNote(['la_decision', 'la_competitors'], { la_decision: 'park' }, 'Ammar <x>', { summary: 'Call back', date: '2026-11-02' }))
-      .toBe('<p>Battle card updated on the Arak leads platform by Ammar &lt;x&gt;: Decision: Park until the award; Who else is quoting: cleared; Next step: Call back (by 2026-11-02).</p>')
+    expect(changeNote(['la_decision', 'la_competitors'], { la_decision: 'park' }, 'Faisal <x>', { summary: 'Call back', date: '2026-11-02' }))
+      .toBe('<p>Battle card updated on the Arak leads platform by Faisal &lt;x&gt;: Decision: Park until the award; Who else is quoting: cleared; Next step: Call back (by 2026-11-02).</p>')
     expect(changeNote([], {}, '', null)).toContain('Next step: done/cleared')
   })
 

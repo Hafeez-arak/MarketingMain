@@ -427,7 +427,7 @@ describe('readReplies', () => {
   })
 
   it('our own "reply stop" line in the quoted email is not read as the prospect saying stop', async () => {
-    const preview = 'Sounds good, call me Sunday. From: Hafeez <hafeez@arak-sa.com> Sent: Sunday Hi Sara, ... If this is not relevant to you, just reply "stop"'
+    const preview = 'Sounds good, call me Sunday. From: Omar <staff.admin@arak-sa.com> Sent: Sunday Hi Sara, ... If this is not relevant to you, just reply "stop"'
     const w = inboxWorld([msg({ preview })])
     const out = await readReplies(w.deps, { now: SUNDAY_11 })
     expect(out).toMatchObject({ optOuts: 0, movedToMarketing: 1 })
@@ -560,7 +560,7 @@ describe('resolveStuckByHand', () => {
     ])
     return { deps: { db }, calls }
   }
-  const run = (w, outcome) => resolveStuckByHand(w.deps, { workspaceId: WS, sendId: 's-1', outcome, by: 'hafeez@arak-sa.com', now: NOW })
+  const run = (w, outcome) => resolveStuckByHand(w.deps, { workspaceId: WS, sendId: 's-1', outcome, by: 'staff.admin@arak-sa.com', now: NOW })
 
   it('refuses a row that is not stuck: a send in progress is never second-guessed', async () => {
     const w = handWorld({ found: row({ updated_at: '2026-09-27T08:50:00+00:00' }) })
@@ -579,7 +579,7 @@ describe('resolveStuckByHand', () => {
   it('drop: skipped, and says who dropped it', async () => {
     const w = handWorld()
     await run(w, 'drop')
-    expect(patches(w.calls, /^email_sends/)[0].body).toMatchObject({ status: 'skipped', error: 'Dropped by hafeez@arak-sa.com: not sent.' })
+    expect(patches(w.calls, /^email_sends/)[0].body).toMatchObject({ status: 'skipped', error: 'Dropped by staff.admin@arak-sa.com: not sent.' })
   })
 
   it('it went out: recorded as sent at the claim time, and the follow-up queued', async () => {

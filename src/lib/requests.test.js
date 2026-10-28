@@ -18,16 +18,16 @@ describe('the board', () => {
 })
 
 describe('matchPerson', () => {
-  const people = [{ name: 'shadia' }, { name: 'hafeez' }, { name: 'Haitham Ali' }]
+  const people = [{ name: 'sara' }, { name: 'omar' }, { name: 'Samir Ali' }]
   it('matches exact, first name, @-prefixed and unique prefixes', () => {
-    expect(matchPerson('Shadia', people).name).toBe('shadia')
-    expect(matchPerson('@hafeez', people).name).toBe('hafeez')
-    expect(matchPerson('Haitham', people).name).toBe('Haitham Ali')
-    expect(matchPerson('sha', people).name).toBe('shadia')
+    expect(matchPerson('Sara', people).name).toBe('sara')
+    expect(matchPerson('@omar', people).name).toBe('omar')
+    expect(matchPerson('Samir', people).name).toBe('Samir Ali')
+    expect(matchPerson('sar', people).name).toBe('sara')
   })
   it('refuses ambiguous or unknown names', () => {
-    expect(matchPerson('ha', people)).toBeNull()
-    expect(matchPerson('Ammar', people)).toBeNull()
+    expect(matchPerson('sa', people)).toBeNull()
+    expect(matchPerson('Faisal', people)).toBeNull()
     expect(matchPerson('', people)).toBeNull()
   })
 })

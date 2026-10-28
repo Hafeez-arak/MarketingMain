@@ -2,7 +2,7 @@
 --
 -- The model, in three sentences:
 --   1. Signing up grants NOTHING. It files a pending request, nothing more.
---   2. The access admin (hafeez@arak-sa.com) approves. Approval joins that
+--   2. The access admin (staff.admin@arak-sa.com) approves. Approval joins that
 --      person to EVERY company — present and future — with identical rights.
 --   3. Approved people can do everything in the app, including creating and
 --      deleting companies. The one thing they cannot do is grant or revoke
@@ -258,14 +258,14 @@ create policy workspaces_delete_member on public.workspaces
 insert into public.user_access (user_id, email, status, role, decided_at)
 select u.id, u.email, 'approved', 'admin', now()
 from auth.users u
-where u.email = 'hafeez@arak-sa.com'
+where u.email = 'staff.admin@arak-sa.com'
 on conflict (user_id) do update
   set status = 'approved', role = 'admin';
 
 insert into public.user_access (user_id, email, status, role, decided_at)
 select u.id, u.email, 'approved', 'member', now()
 from auth.users u
-where u.email = 'mkader@arak-sa.com'
+where u.email = 'staff.ceo@arak-sa.com'
 on conflict (user_id) do update
   set status = 'approved';
 

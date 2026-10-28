@@ -5,11 +5,11 @@
 // the same questions through the API, as the app does, after
 // dev/v2db/seed-contacts.sql:
 //
-//   hafeez@arak-sa.com      the access admin (every section, every company)
-//   junaid@arak-sa.com      a member of every company, no Contacts grant:
+//   staff.admin@arak-sa.com      the access admin (every section, every company)
+//   staff.dev@arak-sa.com      a member of every company, no Contacts grant:
 //                           the admin gives one in Arak Lighting for the
 //                           check (view → work → manage) and takes it away
-//   junaidatif40@gmail.com  not a member of Arak Lighting at all
+//   outside.two@example.com  not a member of Arak Lighting at all
 //
 // Cleans up what it made (the grant and the check's organisation). Local
 // database only. Exits 1 on any failure.
@@ -39,9 +39,9 @@ let failed = 0
 const check = (ok, what) => { console.log(`${ok ? '✓' : '✗'} ${what}`); if (!ok) failed++ }
 const count = async (tok, ws) => ((await asUser(tok, `contacts_orgs?workspace_id=eq.${ws}&select=id`)).rows || []).length
 
-const admin = await signIn('hafeez@arak-sa.com')
-const member = await signIn('junaid@arak-sa.com')
-const stranger = await signIn('junaidatif40@gmail.com')
+const admin = await signIn('staff.admin@arak-sa.com')
+const member = await signIn('staff.dev@arak-sa.com')
+const stranger = await signIn('outside.two@example.com')
 const grant = level => asUser(admin, 'section_access?on_conflict=workspace_id,user_id,section', {
   method: 'POST', prefer: 'resolution=merge-duplicates',
   body: { workspace_id: ARAK, user_id: uid(member), section: 'contacts', level, granted_by: uid(admin) },
