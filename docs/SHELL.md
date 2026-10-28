@@ -42,11 +42,13 @@ The owner asked for it to look like Odoo's home:
 - The pin sits on the icon's top corner. On a computer it appears on hover;
   on a phone, which has no hover, it is always shown, and there are no
   description cards.
-- The icons are in colour (the owner, "try colours"). Each app has two
-  colours: the icon is drawn in the first, with a soft round shape behind it
-  in the second (`APP_COLOURS` in `src/pages/home/index.jsx`). Only this grid
-  is coloured; the rest of v2 stays grey. `COLOURED = false` brings back the
-  grey icons. A new section with no colours set is drawn in grey.
+- The icons are in colour, and only the icon's own lines are coloured: each
+  blends between two of the app's colours (`APP_COLOURS` in
+  `src/pages/home/index.jsx`). A first try put a coloured circle behind each
+  icon; the owner disliked it, so it was removed. The squares are 72 px
+  (64 px on a phone). Only this grid is coloured; the rest of v2 stays grey.
+  `COLOURED = false` brings back the grey icons. A new section with no
+  colours set is drawn in grey.
 
 ### The left bar
 

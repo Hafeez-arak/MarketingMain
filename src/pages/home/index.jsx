@@ -33,25 +33,23 @@ const HW = {
 // the left bar or takes it off (lib/shell/pins.js); one screen, not two.
 
 /**
- * Each app's colours, as on Odoo's home (the owner, 2026-10-28: "try
- * colours"): the icon in the first, a soft round shape behind it in the
- * second. Only the Home grid is coloured; the rest of v2 stays grey.
- * Set COLOURED to false to go back to plain grey icons.
+ * Each app's colours, as on Odoo's home (the owner, 2026-10-28): the icon's
+ * lines blend from the first colour to the second. Only the Home grid is
+ * coloured; the rest of v2 stays grey. COLOURED = false goes back to grey.
  */
 const COLOURED = true
 const APP_COLOURS = {
-  ceo: ['#7c3aed', '#f59e0b'],
-  sales: ['#ea580c', '#facc15'],
-  crm: ['#0f766e', '#2dd4bf'],
-  marketing: ['#db2777', '#fb923c'],
-  insights: ['#2563eb', '#38bdf8'],
-  hr: ['#9d4e8d', '#2dd4bf'],
-  contacts: ['#0e7490', '#fb7185'],
-  admin: ['#334155', '#a78bfa'],
-  technical: ['#b45309', '#fbbf24'],
-  finance: ['#15803d', '#38bdf8'],
+  ceo: ['#7c3aed', '#db2777'],
+  sales: ['#ea580c', '#f59e0b'],
+  crm: ['#0f766e', '#0891b2'],
+  marketing: ['#db2777', '#f97316'],
+  insights: ['#2563eb', '#0ea5e9'],
+  hr: ['#a21caf', '#7c3aed'],
+  contacts: ['#0e7490', '#14b8a6'],
+  admin: ['#334155', '#6366f1'],
+  technical: ['#b45309', '#f59e0b'],
+  finance: ['#15803d', '#0d9488'],
 }
-const GREY = ['#18181b', '#a1a1aa']
 
 export function HomePage() {
   const { user, who, activeWorkspace } = useAuth()
@@ -81,29 +79,21 @@ export function HomePage() {
           its name. Hovering lifts the icon a little; resting on it for a
           moment shows what is inside. The pin (top corner, on hover; always
           on a phone) puts the section on the left bar. */}
-      <ul className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-x-3 gap-y-7 pt-2">
+      <ul className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-x-3 gap-y-6 pt-2">
         {sections.map(s => {
           const n = sectionBadge(s, badges)
           const on = pins.sections?.some(p => p.key === s.key)
           const name = labelOf(s, lang)
           const blurb = (lang === 'ar' && s.blurbAr) || s.blurb
-          const [ink, glow] = COLOURED ? APP_COLOURS[s.key] || GREY : GREY
           return (
             <li key={s.key} className="group relative flex justify-center">
               <Link to={s.pages[0].to} aria-describedby={`app-${s.key}-about`}
                 className="flex flex-col items-center gap-2.5 w-full rounded-xl focus:outline-none [&:focus-visible>span:first-child]:ring-2 [&:focus-visible>span:first-child]:ring-stone-400">
-                <span className="relative w-[76px] h-[76px] md:w-[84px] md:h-[84px] rounded-2xl bg-white border border-border flex items-center justify-center text-text
+                <span className="relative w-16 h-16 md:w-[72px] md:h-[72px] rounded-2xl bg-white border border-border flex items-center justify-center text-text
                   shadow-[0_1px_2px_rgba(9,9,11,0.06)] transition-[transform,box-shadow,border-color] duration-200 ease-out
                   group-hover:-translate-y-1 group-hover:scale-[1.06] group-hover:border-stone-300 group-hover:shadow-[0_10px_24px_-6px_rgba(9,9,11,0.16),0_2px_6px_rgba(9,9,11,0.06)]
                   group-active:scale-[0.98] group-active:translate-y-0 motion-reduce:transform-none">
-                  {COLOURED && (
-                    // Clipped on its own layer, so the badge on the corner is not.
-                    <span className="absolute inset-0 rounded-2xl overflow-hidden" aria-hidden="true">
-                      <span className="absolute w-11 h-11 md:w-12 md:h-12 rounded-full top-[16%] start-[36%] opacity-30 transition-transform duration-300 ease-out group-hover:scale-110"
-                        style={{ background: glow }} />
-                    </span>
-                  )}
-                  <NavIcon name={s.icon} className="relative w-9 h-9 md:w-10 md:h-10" strokeWidth={COLOURED ? 1.9 : 1.75} style={{ color: ink }} />
+                  <NavIcon name={s.icon} className="w-8 h-8 md:w-9 md:h-9" gradient={COLOURED ? APP_COLOURS[s.key] || null : null} />
                   {n > 0 && (
                     <span className="absolute -top-1.5 -end-1.5 min-w-[20px] h-5 px-1.5 flex items-center justify-center text-[11px] font-semibold text-white bg-red-500 rounded-full ring-2 ring-white">
                       {n > 99 ? '99+' : n}
@@ -132,7 +122,7 @@ export function HomePage() {
               {pinnable && (
                 <button type="button" onClick={() => pins.toggle(s.key)} aria-pressed={on}
                   title={on ? c.unpin : c.pin} aria-label={`${on ? c.unpin : c.pin}: ${name}`}
-                  className={`absolute -top-2 start-1/2 -ms-[50px] md:-ms-[54px] w-6 h-6 rounded-full flex items-center justify-center border transition
+                  className={`absolute -top-2 start-1/2 -ms-[44px] md:-ms-[48px] w-6 h-6 rounded-full flex items-center justify-center border transition
                     focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-400 focus-visible:opacity-100
                     md:opacity-0 md:group-hover:opacity-100 md:group-hover:-translate-y-1
                     ${on ? 'bg-stone-900 border-stone-900 text-white' : 'bg-white border-border text-text-tertiary hover:text-text hover:border-stone-400'}`}>

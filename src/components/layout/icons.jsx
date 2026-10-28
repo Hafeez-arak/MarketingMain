@@ -1,3 +1,5 @@
+import { useId } from 'react'
+
 // ─── The navigation's icons, by name ───────────────────────────────────────
 // lib/modules.js names an icon per section and page; this draws it. The
 // strokes are v1's sidebar icons, moved here so the rail, the section
@@ -36,10 +38,24 @@ const P = {
   gear: <><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></>,
 }
 
-/** One navigation icon. Unknown names draw an empty box rather than nothing, so a typo shows. */
-export function NavIcon({ name, className = 'w-4 h-4', strokeWidth = 1.75, style }) {
+/**
+ * One navigation icon. Unknown names draw an empty box rather than nothing,
+ * so a typo shows. `gradient` ([from, to]) draws the lines in a two-colour
+ * blend (Home's app grid) instead of the text colour.
+ */
+export function NavIcon({ name, className = 'w-4 h-4', strokeWidth = 1.75, gradient = null }) {
+  const id = useId()
   return (
-    <svg className={className} style={style} fill="none" stroke="currentColor" strokeWidth={strokeWidth} viewBox="0 0 24 24" aria-hidden="true">
+    <svg className={className} fill="none" stroke={gradient ? `url(#${id})` : 'currentColor'} strokeWidth={strokeWidth} viewBox="0 0 24 24" aria-hidden="true">
+      {/* In the icon's own units: a straight line has no width of its own to blend across. */}
+      {gradient && (
+        <defs>
+          <linearGradient id={id} gradientUnits="userSpaceOnUse" x1="2" y1="2" x2="22" y2="22">
+            <stop offset="0" stopColor={gradient[0]} />
+            <stop offset="1" stopColor={gradient[1]} />
+          </linearGradient>
+        </defs>
+      )}
       {P[name] || <rect x="4" y="4" width="16" height="16" rx="2" />}
     </svg>
   )
