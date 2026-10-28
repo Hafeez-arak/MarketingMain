@@ -134,7 +134,7 @@ function Requests({ requests, types, balances, employees, people, me, level, myE
                     <span className="text-text-secondary"> · {nameOf(ty, lang)}</span>
                   </p>
                   <p className="text-xs text-text-secondary mt-0.5">
-                    {fmtDate(r.date_from, lang)}{r.date_to !== r.date_from && ` – ${fmtDate(r.date_to, lang)}`} · {Number(r.days)} {t.days}
+                    {fmtDate(r.date_from, lang)}{r.date_to !== r.date_from && ` – ${fmtDate(r.date_to, lang)}`} · {t.nDays(r.days)}
                     {bal && bal.granted !== null && year === Number(riyadhToday().slice(0, 4)) && (
                       <span className={`ms-2 ${r.status === 'pending' && bal.remaining - r.days < 0 ? 'text-red-600 font-medium' : 'text-text-tertiary'}`}>
                         {r.status === 'pending' ? t.afterThis(bal.remaining - Number(r.days)) : t.leftNow(bal.remaining)}

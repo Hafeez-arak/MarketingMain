@@ -9,7 +9,7 @@ import {
   fetchAttendance, fetchLeaveRequests, fetchSettings, fetchPeople, fetchAttendanceChanges, recordAttendance, updateAttendance, deleteAttendance,
 } from '../../lib/hr/client'
 import { HW } from './words'
-import { useHrBase, field, fmtDate, STATE_TONE } from './useHrBase'
+import { useHrBase, field, fieldInline, fmtDate, STATE_TONE } from './useHrBase'
 import { Dialog, ErrorText, Field, Pill, Tabs, EmployeeSelect, NoAccess } from './parts'
 
 // ─── HR → Attendance (v2) ──────────────────────────────────────────────────
@@ -79,7 +79,7 @@ function DayView({ base, day, today, records, requests, settings, people, setDay
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <Button size="xs" variant="secondary" onClick={() => setDay(addDays(day, -1))} aria-label={t.prev}>{lang === 'ar' ? '→' : '←'}</Button>
-        <input type="date" value={day} max={today} onChange={e => e.target.value && setDay(e.target.value)} className={`${field} w-auto`} aria-label={t.date} />
+        <input type="date" value={day} max={today} onChange={e => e.target.value && setDay(e.target.value)} className={fieldInline} aria-label={t.date} />
         <Button size="xs" variant="secondary" disabled={day >= today} onClick={() => setDay(addDays(day, 1))} aria-label={t.next}>{lang === 'ar' ? '←' : '→'}</Button>
         {day !== today && <Button size="xs" variant="ghost" onClick={() => setDay(today)}>{t.today}</Button>}
         <span className="text-sm text-text-secondary ms-1">{fmtDay(day, lang, { weekday: 'long', day: 'numeric', month: 'long' })}</span>

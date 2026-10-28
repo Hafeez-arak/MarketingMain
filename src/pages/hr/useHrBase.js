@@ -40,6 +40,8 @@ export function useHrBase() {
 
 
 export const field = 'w-full rounded-md border border-border bg-white px-2.5 py-1.5 text-sm text-text focus:outline-none focus:border-stone-400 focus:ring-2 focus:ring-stone-200 disabled:bg-stone-50 disabled:text-text-tertiary'
+/** The same, for a control sized by its content (filters, a date picker). */
+export const fieldInline = field.replace('w-full ', '')
 
 export const STATE_TONE = {
   present: 'green', late: 'amber', absent: 'red', leave: 'blue', none: 'grey',

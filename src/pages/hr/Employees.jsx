@@ -5,7 +5,7 @@ import { useT } from '../../lib/i18n'
 import { filterEmployees, nameOf } from '../../lib/hr/logic'
 import { saveEmployee } from '../../lib/hr/client'
 import { HW } from './words'
-import { useHrBase, field, empName } from './useHrBase'
+import { useHrBase, fieldInline, empName } from './useHrBase'
 import { Dialog, ErrorText, Pill } from './parts'
 import { EmployeeForm } from './EmployeeForm'
 
@@ -38,13 +38,13 @@ export function HrEmployees() {
 
       <div className="flex flex-wrap gap-2 items-center">
         <input type="search" value={q} onChange={e => setParam('q', e.target.value || null)} placeholder={t.searchPlaceholder} aria-label={t.search}
-          className={`${field} max-w-xs`} dir="auto" />
-        <select value={dept} onChange={e => setParam('dept', e.target.value || null)} className={`${field} w-auto`} aria-label={t.department}>
+          className={`${fieldInline} w-full max-w-xs`} dir="auto" />
+        <select value={dept} onChange={e => setParam('dept', e.target.value || null)} className={fieldInline} aria-label={t.department}>
           <option value="">{t.allDepartments}</option>
           {departments.map(d => <option key={d.id} value={d.id}>{nameOf(d, lang)}</option>)}
           <option value="none">{t.noDepartment}</option>
         </select>
-        <select value={status} onChange={e => setParam('status', e.target.value === 'active' ? null : e.target.value)} className={`${field} w-auto`} aria-label={t.status}>
+        <select value={status} onChange={e => setParam('status', e.target.value === 'active' ? null : e.target.value)} className={fieldInline} aria-label={t.status}>
           {['active', 'ended', ''].map(s => <option key={s} value={s}>{t.statuses[s]}</option>)}
         </select>
         {employees && <span className="text-[11px] text-text-tertiary">{t.countOf(shown.length, employees.length)}</span>}

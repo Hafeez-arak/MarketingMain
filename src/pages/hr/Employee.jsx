@@ -134,7 +134,7 @@ export function HrEmployee() {
             {requests.length === 0 ? <p className="text-xs text-text-tertiary">{t.noRequests}</p> : (
               <ul className="space-y-1">{requests.slice(0, 8).map(r => (
                 <li key={r.id} className="flex items-center justify-between gap-2 text-xs">
-                  <span>{nameOf(types.find(ty => ty.id === r.leave_type_id), lang)} · {fmtDate(r.date_from, lang)}{r.date_to !== r.date_from && ` – ${fmtDate(r.date_to, lang)}`} · {Number(r.days)} {t.days}</span>
+                  <span>{nameOf(types.find(ty => ty.id === r.leave_type_id), lang)} · {fmtDate(r.date_from, lang)}{r.date_to !== r.date_from && ` – ${fmtDate(r.date_to, lang)}`} · {t.nDays(r.days)}</span>
                   <Pill tone={STATE_TONE[r.status]}>{t.leaveStatus[r.status]}</Pill>
                 </li>
               ))}</ul>

@@ -3,6 +3,8 @@
 // checks it), and names of people, departments and leave types come from
 // their own _en / _ar columns (lib/hr/logic.js nameOf).
 
+import { arDays } from '../../lib/arabic'
+
 export const HW = {
   en: {
     // The pages
@@ -26,7 +28,7 @@ export const HW = {
     noAccess: 'You do not have access to HR in this company.',
     name: 'Name', nameEn: 'Name (English)', nameAr: 'Name (Arabic)', nameNeeded: 'Give it a name, in English or Arabic.',
     employee: 'Employee', department: 'Department', status: 'Status', notes: 'Notes', reason: 'Reason', date: 'Date',
-    from: 'From', to: 'To', days: 'Days', type: 'Type', year: 'Year', month: 'Month',
+    from: 'From', to: 'To', days: 'Days', nDays: n => (Number(n) === 1 ? '1 day' : `${Number(n)} days`), type: 'Type', year: 'Year', month: 'Month',
     viewOnly: 'You can look here; changes are made by HR.',
 
     // Employees
@@ -156,7 +158,7 @@ export const HW = {
     noAccess: 'ليست لديك صلاحية على الموارد البشرية في هذه الشركة.',
     name: 'الاسم', nameEn: 'الاسم (بالإنجليزية)', nameAr: 'الاسم (بالعربية)', nameNeeded: 'اكتب اسمًا بالعربية أو بالإنجليزية.',
     employee: 'الموظف', department: 'القسم', status: 'الحالة', notes: 'ملاحظات', reason: 'السبب', date: 'التاريخ',
-    from: 'من', to: 'إلى', days: 'الأيام', type: 'النوع', year: 'السنة', month: 'الشهر',
+    from: 'من', to: 'إلى', days: 'الأيام', nDays: n => (Number.isInteger(Number(n)) ? arDays(Number(n)) : `${Number(n)} يوم`), type: 'النوع', year: 'السنة', month: 'الشهر',
     viewOnly: 'يمكنك الاطلاع هنا؛ التعديل للموارد البشرية.',
 
     newEmployee: '+ موظف جديد', searchPlaceholder: 'الاسم أو الرقم أو الوظيفة أو البريد أو الجوال',
