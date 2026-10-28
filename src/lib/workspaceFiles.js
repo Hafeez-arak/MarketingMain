@@ -11,6 +11,7 @@
 //                     <session>/...         renders n8n writes, one folder per
 //                                           creative_sessions row
 //   schedule-uploads  references/<workspace>/...
+//   hr-papers         <workspace>/<employee>/...   scans of employees' papers (private)
 //
 // Not covered, on purpose: instagram-posts, instagram-reels, linkedin-posts and
 // schedule-uploads/instagram|linkedin are flat legacy folders with no company
@@ -28,6 +29,7 @@ export function companyFolders(workspaceId, sessionIds = []) {
     { bucket: 'creative-studio',  prefix: workspaceId },
     ...sessionIds.filter(Boolean).map(id => ({ bucket: 'creative-studio', prefix: String(id) })),
     { bucket: 'schedule-uploads', prefix: `references/${workspaceId}` },
+    { bucket: 'hr-papers',        prefix: workspaceId },
   ]
 }
 

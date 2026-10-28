@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useAuth } from '../../store/auth'
 import { atLeast } from '../../lib/modules'
 import { fmtDay } from '../../lib/i18n'
-import { fetchEmployees, fetchDepartments } from '../../lib/hr/client'
+import { fetchEmployees, fetchDepartments, fetchJobs } from '../../lib/hr/client'
 import { nameOf } from '../../lib/hr/logic'
 
 // ─── HR: what every HR page loads, and small helpers ──────────────────────
@@ -17,25 +17,22 @@ export function useHrBase() {
   const level = sectionLevel('hr')
   const [employees, setEmployees] = useState(null)
   const [departments, setDepartments] = useState([])
+  const [jobs, setJobs] = useState([])
   const [error, setError] = useState('')
 
   const reload = useCallback(async () => {
     if (!ws) return
-    const [e, d] = await Promise.all([fetchEmployees(ws), fetchDepartments(ws)])
+    const [e, d, j] = await Promise.all([fetchEmployees(ws), fetchDepartments(ws), fetchJobs(ws)])
     setEmployees(e.rows)
     setDepartments(d.rows)
-    setError(e.error || d.error || '')
+    setJobs(j.rows)
+    setError(e.error || d.error || j.error || '')
   }, [ws])
   useEffect(() => { queueMicrotask(reload) }, [reload])
 
   const list = employees || []
   const myEmployee = me ? list.find(e => e.user_id === me) || null : null
-  /** Am I this employee's direct manager (through my linked login)? */
-  const managerOf = id => {
-    const e = list.find(x => x.id === id)
-    return Boolean(me && e?.manager_id && list.find(m => m.id === e.manager_id)?.user_id === me)
-  }
-  return { ws, me, level, can: min => atLeast(level, min), employees, departments, myEmployee, managerOf, error, setError, reload }
+  return { ws, me, level, can: min => atLeast(level, min), employees, departments, jobs, myEmployee, error, setError, reload }
 }
 
 
@@ -46,9 +43,13 @@ export const fieldInline = field.replace('w-full ', '')
 export const STATE_TONE = {
   present: 'green', late: 'amber', absent: 'red', leave: 'blue', none: 'grey',
   pending: 'amber', approved: 'green', rejected: 'red', cancelled: 'grey',
+  draft: 'blue', running: 'green',
   expired: 'red', soon: 'amber', ok: 'green',
   current: 'green', upcoming: 'blue', ended: 'grey', active: 'green',
 }
+
+/** A contract status's colour (an expired one is quiet, not an alarm like an expired paper). */
+export const contractTone = status => (status === 'expired' ? 'grey' : STATE_TONE[status] || 'grey')
 
 /** "28 Oct 2026" / "28 أكتوبر 2026". */
 export const fmtDate = (day, lang) => fmtDay(day, lang, { day: 'numeric', month: 'short', year: 'numeric' })

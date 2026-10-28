@@ -88,9 +88,15 @@ function TypeForm({ initial, onSubmit, onCancel }) {
         <Field label={t.nameEn}><input value={f.name_en} onChange={e => set('name_en', e.target.value)} className={field} dir="ltr" lang="en" /></Field>
       </div>
       <div className="flex flex-wrap gap-4 text-sm">
-        {[['paid', t.paid], ['needs_balance', t.needsBalance], ['active', t.active]].map(([k, label]) => (
-          <label key={k} className="flex items-center gap-2"><input type="checkbox" checked={f[k]} onChange={e => set(k, e.target.checked)} />{label}</label>
-        ))}
+        {[['paid', t.paid], ['needs_balance', t.needsBalance], ['active', t.active]].map(([k, label]) => {
+          // Whether a type is paid / keeps a balance is fixed once it exists (his screen, and the database).
+          const locked = Boolean(initial.id) && k !== 'active'
+          return (
+            <label key={k} className="flex items-center gap-2" title={locked ? t.typeLocked : undefined}>
+              <input type="checkbox" checked={f[k]} disabled={locked} onChange={e => set(k, e.target.checked)} />{label}
+            </label>
+          )
+        })}
       </div>
       <ErrorText error={error} />
       <div className="flex gap-2">

@@ -74,6 +74,8 @@ import { AttendanceFlags } from './pages/hr/attendance/Flags'
 import { AttendanceDaily, AttendanceMonthly } from './pages/hr/attendance/Reports'
 import { AttendanceReview, AttendanceDevices, AttendanceEveryone } from './pages/hr/attendance/Devices'
 import { HrDocuments } from './pages/hr/Documents'
+import { HrContracts } from './pages/hr/Contracts'
+import { HrContract } from './pages/hr/Contract'
 import { HrSettings } from './pages/hr/Settings'
 import { fromLegacy, canVisit, PARKED } from './lib/modules'
 import { useLang, COMMON } from './lib/i18n'
@@ -258,6 +260,8 @@ function ProtectedApp() {
             <Route path="/hr/attendance/devices" element={<AttendanceDevices />} />
             <Route path="/hr/attendance/everyone" element={<AttendanceEveryone />} />
             <Route path="/hr/documents"          element={<HrDocuments />} />
+            <Route path="/hr/contracts"          element={<HrContracts />} />
+            <Route path="/hr/contract"           element={<HrContract />} />
             <Route path="/hr/settings"           element={<HrSettings />} />
             {/* ── CRM ── Musa's CRM, in our stack (dev/erp-pilot/CRM.md). */}
             <Route path="/crm"                   element={<CrmPipeline />} />

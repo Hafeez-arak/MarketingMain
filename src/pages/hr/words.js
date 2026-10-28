@@ -4,8 +4,9 @@
 // their own _en / _ar columns (lib/hr/logic.js nameOf).
 
 import { arDays } from '../../lib/arabic'
+import { PW } from './wordsParity'
 
-export const HW = {
+const BASE = {
   en: {
     // The pages
     employeesTitle: 'Employees',
@@ -277,3 +278,7 @@ export const HW = {
     },
   },
 }
+
+// The parity pass's words (wordsParity.js) replace the same keys above; `errors` are joined.
+const join = (a, b) => ({ ...a, ...b, errors: { ...a.errors, ...b.errors } })
+export const HW = { en: join(BASE.en, PW.en), ar: join(BASE.ar, PW.ar) }

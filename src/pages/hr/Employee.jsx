@@ -1,66 +1,74 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Button, PageHeader, Skeleton, Spinner } from '../../components/ui/index'
 import { useT } from '../../lib/i18n'
 import {
-  nameOf, docState, contractState, balanceOf, riyadhToday, matchLogin, DOC_TYPES,
+  nameOf, docState, contractEndingSoon, ledgerBalance, riyadhToday, matchLogin, paperFileProblem, paperPath, formatBytes, DOC_TYPES,
 } from '../../lib/hr/logic'
 import { buildDays, sheetTotals, hm } from '../../lib/hr/attendance'
 import { fetchRecordsBetween, fetchPunchDays, fetchFlags, fetchAttendanceSettings } from '../../lib/hr/attendanceClient'
 import { AW } from './attendance/words'
 import {
-  saveEmployee, fetchDocuments, saveDocument, deleteDocument, fetchContracts, saveContract, deleteContract,
-  fetchLeaveTypes, fetchBalances, fetchLeaveRequests, fetchLogins,
+  saveEmployee, savePrivate, fetchPrivate, deleteEmployee, fetchDocuments, saveDocument, deleteDocument, fetchContracts, saveContract,
+  fetchLeaveTypes, fetchAllocations, fetchLeaveRequests, fetchLogins, uploadPaperFile, removePaperFiles, paperFileUrl,
 } from '../../lib/hr/client'
 import { HW } from './words'
-import { useHrBase, field, fmtDate, empName, STATE_TONE } from './useHrBase'
+import { useHrBase, field, fmtDate, empName, STATE_TONE, contractTone } from './useHrBase'
 import { Dialog, ErrorText, Field, Pill, NoAccess } from './parts'
 import { EmployeeForm } from './EmployeeForm'
+import { ContractForm } from './ContractForm'
+import { History } from './History'
 
 // ─── HR → one employee (v2) ────────────────────────────────────────────────
-// 2026-10-28, dev/erp-pilot/HR.md. /hr/employee?id=. The profile, their
-// team, their leave this year and attendance this month, and, for HR (Work
-// and up) or the person themselves, their papers and contracts. Work edits
-// and ends employment; Manage links a login (matched by the work email).
+// 2026-10-28, parity pass 2026-10-29. /hr/employee?id=. The profile, their
+// team, their leave balances today and attendance this month; for HR
+// managers (his hr.manage) or the person themselves, their papers (each with
+// an optional scan) and contracts; for HR managers also the personal file
+// and the history of every change. Manage edits, ends employment, links a
+// login (matched by the work email), and deletes a person who was never used.
 
 export function HrEmployee() {
   const { t, lang, dir } = useT(HW)
   const { t: at } = useT(AW)
   const base = useHrBase()
-  const { ws, me, can, employees, departments, error, reload } = base
+  const { ws, me, can, employees, departments, jobs, error, reload } = base
+  const navigate = useNavigate()
   const [params] = useSearchParams()
   const id = params.get('id') || ''
   const today = riyadhToday()
-  const year = Number(today.slice(0, 4))
   const month = today.slice(0, 7)
   const e = (employees || []).find(x => x.id === id) || null
   const own = Boolean(e && e.user_id && e.user_id === me)
-  const seesPapers = can('work') || own
+  const manage = can('manage')
+  const seesPapers = manage || own
 
   const [docs, setDocs] = useState(null)
   const [contracts, setContracts] = useState(null)
   const [types, setTypes] = useState([])
-  const [balances, setBalances] = useState([])
+  const [allocations, setAllocations] = useState([])
   const [requests, setRequests] = useState([])
   const [attendance, setAttendance] = useState(null)
   const [settings, setSettings] = useState(null)
   const [logins, setLogins] = useState([])
-  const [dialog, setDialog] = useState(null) // 'edit' | 'end' | 'rehire' | 'login' | {doc} | {contract}
+  const [personal, setPersonal] = useState(null)
+  const [dialog, setDialog] = useState(null) // 'edit' | 'end' | 'rehire' | 'login' | {doc} | 'contract'
   const [loadError, setLoadError] = useState('')
+  const [actionError, setActionError] = useState('')
+  const [tick, setTick] = useState(0)
 
-  const manage = can('manage')
   const load = useCallback(async () => {
     if (!ws || !id) return
-    const [d, c, ty, b, r, a, p, f, s, l] = await Promise.all([
-      fetchDocuments(ws, id), fetchContracts(ws, id), fetchLeaveTypes(ws), fetchBalances(ws, year),
+    const [d, c, ty, al, r, a, p, f, s, l, pr] = await Promise.all([
+      fetchDocuments(ws, id), fetchContracts(ws, id), fetchLeaveTypes(ws), fetchAllocations(ws, id),
       fetchLeaveRequests(ws, { employeeId: id }), fetchRecordsBetween(ws, `${month}-01`, today, [id]),
       fetchPunchDays(ws, { from: `${month}-01`, to: today, employeeIds: [id], all: true }), fetchFlags(ws, { from: `${month}-01`, to: today, employeeIds: [id], all: true }),
-      fetchAttendanceSettings(ws), manage ? fetchLogins(ws) : Promise.resolve({ rows: [] }),
+      fetchAttendanceSettings(ws), manage ? fetchLogins(ws) : Promise.resolve({ rows: [] }), manage ? fetchPrivate(ws, id) : Promise.resolve({ row: null }),
     ])
-    setDocs(d.rows); setContracts(c.rows); setTypes(ty.rows); setBalances(b.rows); setRequests(r.rows)
-    setAttendance({ records: a.rows, punchDays: p.rows, flags: f.rows }); setSettings(s.row); setLogins(l.rows)
-    setLoadError(d.error || c.error || ty.error || b.error || r.error || a.error || p.error || f.error || '')
-  }, [ws, id, year, month, today, manage])
+    setDocs(d.rows); setContracts(c.rows); setTypes(ty.rows); setAllocations(al.rows); setRequests(r.rows)
+    setAttendance({ records: a.rows, punchDays: p.rows, flags: f.rows }); setSettings(s.row); setLogins(l.rows); setPersonal(pr.row)
+    setLoadError(d.error || c.error || ty.error || al.error || r.error || a.error || p.error || f.error || pr.error || '')
+    setTick(x => x + 1)
+  }, [ws, id, month, today, manage])
   useEffect(() => { queueMicrotask(load) }, [load])
 
   // This month so far, as the monthly sheet counts it (lib/hr/attendance.js).
@@ -79,16 +87,45 @@ export function HrEmployee() {
   const close = () => setDialog(null)
   const saved = async out => { if (!out.error) { close(); await reload(); await load() } return out }
 
+  /** A paper and its optional file: upload first, save the row, then drop the replaced file. */
+  async function savePaper(doc, fields, file, dropFile) {
+    let extra = {}
+    if (file) {
+      const path = paperPath(ws, e.id, file)
+      const up = await uploadPaperFile(path, file)
+      if (up.error) return up
+      extra = { file_path: path, file_name: file.name, file_size: file.size, file_type: file.type }
+    } else if (dropFile) extra = { file_path: null, file_name: null, file_size: null, file_type: null }
+    const out = await saveDocument(ws, me, e.id, doc.id, { ...fields, ...extra })
+    if (out.error) { if (file) await removePaperFiles([extra.file_path]); return out }
+    if ((file || dropFile) && doc.file_path) await removePaperFiles([doc.file_path])
+    return out
+  }
+
+  async function openFile(path) {
+    const out = await paperFileUrl(path)
+    if (out.error) setActionError(out.error); else window.open(out.url, '_blank', 'noopener')
+  }
+
+  async function removePerson() {
+    if (!window.confirm(t.confirmDeleteEmployee)) return
+    setActionError('')
+    const out = await deleteEmployee(ws, e.id)
+    if (out.error) { setActionError(out.error); return }
+    await reload()
+    navigate('/hr')
+  }
+
   return (
     <div className="max-w-5xl space-y-5" dir={dir} lang={lang}>
       <PageHeader title={nameOf(e, lang)} subtitle={[e.job_title, nameOf(dept, lang)].filter(Boolean).join(' · ')}>
         <Link to="/hr" className="text-xs text-text-secondary hover:text-text">{dir === 'rtl' ? '→' : '←'} {t.employeesTitle}</Link>
-        {can('work') && <Button size="sm" variant="secondary" onClick={() => setDialog('edit')}>{t.edit}</Button>}
-        {can('work') && (e.status === 'active'
+        {manage && <Button size="sm" variant="secondary" onClick={() => setDialog('edit')}>{t.edit}</Button>}
+        {manage && (e.status === 'active'
           ? <Button size="sm" variant="danger" onClick={() => setDialog('end')}>{t.endEmployment}</Button>
           : <Button size="sm" variant="secondary" onClick={() => setDialog('rehire')}>{t.rehire}</Button>)}
       </PageHeader>
-      <ErrorText error={error || loadError} />
+      <ErrorText error={error || loadError || actionError} />
 
       {/* Profile */}
       <section className="bg-white border border-border p-4">
@@ -97,6 +134,10 @@ export function HrEmployee() {
           <Item label={t.employeeNo}><bdi dir="ltr">{e.employee_no || '—'}</bdi></Item>
           <Item label={t.hireDate}>{fmtDate(e.hire_date, lang)}</Item>
           <Item label={t.manager}>{e.manager_id ? <Link className="hover:underline" to={`/hr/employee?id=${e.manager_id}`}>{empName(employees, e.manager_id, lang)}</Link> : '—'}</Item>
+          <Item label={t.jobPosition}>{e.job_title || '—'}</Item>
+          <Item label={t.trade}><span dir="auto">{e.trade || '—'}</span></Item>
+          <Item label={t.employmentType}>{e.employment_type ? t.employmentTypes[e.employment_type] : '—'}</Item>
+          <Item label={t.labourKind}>{t.labourKinds[String(e.is_direct_labor)]}</Item>
           <Item label={t.workEmail}><bdi dir="ltr">{e.work_email || '—'}</bdi></Item>
           <Item label={t.workPhone}><bdi dir="ltr">{e.work_phone || '—'}</bdi></Item>
           <Item label={lang === 'ar' ? t.nameEn : t.nameAr}>
@@ -104,11 +145,10 @@ export function HrEmployee() {
           </Item>
           <Item label={t.login}>
             {e.user_id ? <span className="text-text"><bdi dir="ltr">{login?.email || (own ? t.yes : '✓')}</bdi></span> : <span className="text-text-tertiary">{t.noLogin}</span>}
-            {can('manage') && <button type="button" className="ms-2 text-[11px] underline text-text-secondary" onClick={() => setDialog('login')}>{e.user_id ? t.edit : t.linkLogin}</button>}
+            {manage && <button type="button" className="ms-2 text-[11px] underline text-text-secondary" onClick={() => setDialog('login')}>{e.user_id ? t.edit : t.linkLogin}</button>}
           </Item>
         </dl>
         {e.status === 'ended' && e.end_reason && <p className="text-xs text-text-secondary mt-3" dir="auto">{t.endReason}: {e.end_reason}</p>}
-        {e.notes && <p className="text-xs text-text-secondary mt-3 whitespace-pre-wrap" dir="auto">{e.notes}</p>}
         {team.length > 0 && (
           <p className="text-xs text-text-secondary mt-3">{t.team}: {team.map((m, i) => (
             <span key={m.id}>{i > 0 && (lang === 'ar' ? '، ' : ', ')}<Link className="hover:underline text-text" to={`/hr/employee?id=${m.id}`}>{nameOf(m, lang)}</Link></span>
@@ -116,18 +156,36 @@ export function HrEmployee() {
         )}
       </section>
 
+      {/* The personal file: Manage only */}
+      {manage && (
+        <section className="bg-white border border-border p-4 space-y-2">
+          <h2 className="text-sm font-semibold text-text">{t.personalFile}</h2>
+          <dl className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-3 text-sm">
+            <Item label={t.nationality}><span dir="auto">{personal?.nationality || '—'}</span></Item>
+            <Item label={t.idType}>{personal?.id_type ? t.idTypes[personal.id_type] : '—'} <bdi dir="ltr">{personal?.id_number || ''}</bdi></Item>
+            <Item label={t.birthDate}>{personal?.birth_date ? fmtDate(personal.birth_date, lang) : '—'}</Item>
+            <Item label={t.gender}>{personal?.gender ? t.genders[personal.gender] : '—'}</Item>
+            <Item label={t.mobile}><bdi dir="ltr">{personal?.mobile || '—'}</bdi></Item>
+            <Item label={t.emergencyContact}><span dir="auto">{personal?.emergency_contact || '—'}</span></Item>
+            <Item label={t.emergencyPhone}><bdi dir="ltr">{personal?.emergency_phone || '—'}</bdi></Item>
+            <Item label={t.address}><span dir="auto">{personal?.address || '—'}</span></Item>
+          </dl>
+          {personal?.notes && <p className="text-xs text-text-secondary whitespace-pre-wrap" dir="auto">{personal.notes}</p>}
+        </section>
+      )}
+
       <div className="grid md:grid-cols-2 gap-4">
-        {/* Leave this year */}
+        {/* Leave today */}
         <section className="bg-white border border-border p-4 space-y-3">
-          <h2 className="text-sm font-semibold text-text">{t.leaveThisYear(year)}</h2>
+          <h2 className="text-sm font-semibold text-text">{t.leaveNow}</h2>
           {balanceTypes.length === 0 ? <p className="text-xs text-text-tertiary">{t.noBalanceTypes}</p> : (
             <table className="w-full text-xs">
               <thead><tr className="text-text-tertiary"><th className="text-start font-medium py-1">{t.leaveType}</th><th className="text-end font-medium">{t.granted}</th><th className="text-end font-medium">{t.used}</th><th className="text-end font-medium">{t.pending}</th><th className="text-end font-medium">{t.remaining}</th></tr></thead>
               <tbody>{balanceTypes.map(ty => {
-                const b = balanceOf({ balances, requests, employeeId: e.id, typeId: ty.id, year })
+                const b = ledgerBalance({ allocations, requests, employeeId: e.id, typeId: ty.id, on: today })
                 return (
                   <tr key={ty.id} className="border-t border-border">
-                    <td className="py-1.5">{nameOf(ty, lang)}</td>
+                    <td className="py-1.5">{nameOf(ty, lang)}{b.until && <span className="block text-[11px] text-text-tertiary">{t.validUntil(fmtDate(b.until, lang))}</span>}</td>
                     <td className="text-end tabular-nums">{b.granted ?? '—'}</td>
                     <td className="text-end tabular-nums">{b.used}</td>
                     <td className="text-end tabular-nums">{b.pending || ''}</td>
@@ -170,12 +228,12 @@ export function HrEmployee() {
       <section className="bg-white border border-border p-4 space-y-3">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-text">{t.papers}</h2>
-          {can('work') && <Button size="xs" variant="secondary" onClick={() => setDialog({ doc: {} })}>{t.addPaper}</Button>}
+          {manage && <Button size="xs" variant="secondary" onClick={() => setDialog({ doc: {} })}>{t.addPaper}</Button>}
         </div>
         {!seesPapers ? <p className="text-xs text-text-tertiary">{t.papersHidden}</p> : docs === null ? <Spinner size="sm" /> : docs.length === 0 ? <p className="text-xs text-text-tertiary">{t.noPapers}</p> : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
-              <thead><tr className="text-text-tertiary"><th className="text-start font-medium py-1">{t.docType}</th><th className="text-start font-medium">{t.docNumber}</th><th className="text-start font-medium">{t.issueDate}</th><th className="text-start font-medium">{t.expiryDate}</th><th /></tr></thead>
+              <thead><tr className="text-text-tertiary"><th className="text-start font-medium py-1">{t.docType}</th><th className="text-start font-medium">{t.docNumber}</th><th className="text-start font-medium">{t.issueDate}</th><th className="text-start font-medium">{t.expiryDate}</th><th className="text-start font-medium">{t.currentFile}</th><th /></tr></thead>
               <tbody>{docs.map(d => {
                 const st = docState(d, today)
                 return (
@@ -184,7 +242,8 @@ export function HrEmployee() {
                     <td><bdi dir="ltr">{d.doc_number}</bdi></td>
                     <td>{fmtDate(d.issue_date, lang)}</td>
                     <td>{d.expiry_date ? <span className="flex flex-wrap items-center gap-1.5">{fmtDate(d.expiry_date, lang)} {st.state !== 'ok' && <Pill tone={STATE_TONE[st.state]}>{st.days < 0 ? `${t.docStates.expired} ${t.expiredAgo(-st.days)}` : t.expiresIn(st.days)}</Pill>}</span> : '—'}</td>
-                    <td className="text-end">{can('work') && <button type="button" className="underline text-text-secondary" onClick={() => setDialog({ doc: d })}>{t.edit}</button>}</td>
+                    <td>{d.file_path ? <button type="button" className="underline text-text-secondary" onClick={() => openFile(d.file_path)} title={d.file_name}>{t.openFile}{d.file_size ? ` (${formatBytes(d.file_size)})` : ''}</button> : <span className="text-text-tertiary">—</span>}</td>
+                    <td className="text-end">{manage && <button type="button" className="underline text-text-secondary" onClick={() => setDialog({ doc: d })}>{t.edit}</button>}</td>
                   </tr>
                 )
               })}</tbody>
@@ -197,32 +256,54 @@ export function HrEmployee() {
       <section className="bg-white border border-border p-4 space-y-3">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-text">{t.contracts}</h2>
-          {can('work') && <Button size="xs" variant="secondary" onClick={() => setDialog({ contract: {} })}>{t.addContract}</Button>}
+          {manage && e.status === 'active' && <Button size="xs" variant="secondary" onClick={() => setDialog('contract')}>{t.addContract}</Button>}
         </div>
         {!seesPapers ? <p className="text-xs text-text-tertiary">{t.contractsHidden}</p> : contracts === null ? <Spinner size="sm" /> : contracts.length === 0 ? <p className="text-xs text-text-tertiary">{t.noContracts}</p> : (
-          <table className="w-full text-xs">
-            <thead><tr className="text-text-tertiary"><th className="text-start font-medium py-1">{t.contractType}</th><th className="text-start font-medium">{t.start}</th><th className="text-start font-medium">{t.end}</th><th className="text-start font-medium">{t.status}</th><th /></tr></thead>
-            <tbody>{contracts.map(c => {
-              const st = contractState(c, today)
-              return (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr className="text-text-tertiary"><th className="text-start font-medium py-1">{t.contractNo}</th><th className="text-start font-medium">{t.contractType}</th><th className="text-start font-medium">{t.start}</th><th className="text-start font-medium">{t.end}</th><th className="text-end font-medium">{t.weeklyHours}</th><th className="text-start font-medium ps-3">{t.status}</th></tr></thead>
+              <tbody>{contracts.map(c => (
                 <tr key={c.id} className="border-t border-border">
-                  <td className="py-1.5">{t.contractTypes[c.contract_type]}{c.notes && <span className="block text-text-tertiary" dir="auto">{c.notes}</span>}</td>
+                  <td className="py-1.5">{manage ? <Link to={`/hr/contract?id=${c.id}`} className="font-medium hover:underline"><bdi dir="ltr">{c.contract_no}</bdi></Link> : <bdi dir="ltr">{c.contract_no}</bdi>}{c.notes && <span className="block text-text-tertiary" dir="auto">{c.notes}</span>}</td>
+                  <td>{t.contractTypes[c.contract_type]}</td>
                   <td>{fmtDate(c.start_date, lang)}</td>
                   <td>{c.end_date ? fmtDate(c.end_date, lang) : '—'}</td>
-                  <td><Pill tone={STATE_TONE[st]}>{t.contractStates[st]}</Pill></td>
-                  <td className="text-end">{can('work') && <button type="button" className="underline text-text-secondary" onClick={() => setDialog({ contract: c })}>{t.edit}</button>}</td>
+                  <td className="text-end tabular-nums">{c.weekly_hours ?? '—'}</td>
+                  <td className="ps-3"><span className="inline-flex flex-wrap gap-1"><Pill tone={contractTone(c.status)}>{t.contractStatuses[c.status]}</Pill>{contractEndingSoon(c, today) && <Pill tone="amber">{t.endingSoon}</Pill>}</span></td>
                 </tr>
-              )
-            })}</tbody>
-          </table>
+              ))}</tbody>
+            </table>
+          </div>
         )}
         <p className="text-[11px] text-text-tertiary">{t.noPay}</p>
       </section>
 
+      {/* History: Manage */}
+      {manage && (
+        <section className="bg-white border border-border p-4 space-y-2">
+          <h2 className="text-sm font-semibold text-text">{t.history}</h2>
+          <History ws={ws} employeeId={e.id} employees={employees} departments={departments} jobs={jobs} refreshKey={tick} />
+        </section>
+      )}
+
+      {manage && (
+        <section className="border border-border p-4 space-y-2 bg-white">
+          <h2 className="text-sm font-semibold text-text">{t.deleteEmployee}</h2>
+          <p className="text-[11px] text-text-tertiary">{t.deleteEmployeeHelp}</p>
+          <Button size="xs" variant="danger" onClick={removePerson}>{t.deleteEmployee}</Button>
+        </section>
+      )}
+
       {dialog === 'edit' && (
         <Dialog title={t.edit} onClose={close}>
-          <EmployeeForm initial={e} employees={employees} departments={departments} onCancel={close}
-            onSubmit={fields => saveEmployee(ws, me, e.id, fields).then(saved)} />
+          <EmployeeForm initial={e} personal={personal || {}} employees={employees} departments={departments} jobs={jobs} onCancel={close}
+            onSubmit={async ({ employee, personal: priv }) => {
+              const out = await saveEmployee(ws, me, e.id, employee)
+              if (out.error) return out
+              const p = await savePrivate(ws, e.id, priv)
+              if (p.error) return p
+              return saved(out)
+            }} />
         </Dialog>
       )}
       {(dialog === 'end' || dialog === 'rehire') && (
@@ -238,15 +319,13 @@ export function HrEmployee() {
       {dialog?.doc && (
         <Dialog title={dialog.doc.id ? t.edit : t.addPaper.replace('+ ', '')} onClose={close}>
           <DocForm initial={dialog.doc} onCancel={close}
-            onSubmit={fields => saveDocument(ws, me, e.id, dialog.doc.id, fields).then(saved)}
-            onDelete={dialog.doc.id ? () => deleteDocument(ws, dialog.doc.id).then(saved) : null} />
+            onSubmit={(fields, file, dropFile) => savePaper(dialog.doc, fields, file, dropFile).then(saved)}
+            onDelete={dialog.doc.id ? () => deleteDocument(ws, dialog.doc.id, dialog.doc.file_path).then(saved) : null} />
         </Dialog>
       )}
-      {dialog?.contract && (
-        <Dialog title={dialog.contract.id ? t.edit : t.addContract.replace('+ ', '')} onClose={close}>
-          <ContractForm initial={dialog.contract} onCancel={close}
-            onSubmit={fields => saveContract(ws, me, e.id, dialog.contract.id, fields).then(saved)}
-            onDelete={dialog.contract.id ? () => deleteContract(ws, dialog.contract.id).then(saved) : null} />
+      {dialog === 'contract' && (
+        <Dialog title={t.addContract.replace('+ ', '')} onClose={close}>
+          <ContractForm onCancel={close} onSubmit={fields => saveContract(ws, me, e.id, null, fields).then(saved)} />
         </Dialog>
       )}
     </div>
@@ -328,10 +407,17 @@ function LoginForm({ employee, logins, employees, onSubmit, onCancel }) {
 function DocForm({ initial, onSubmit, onCancel, onDelete }) {
   const { t, dir } = useT(HW)
   const [f, setF] = useState({ doc_type: initial.doc_type || 'iqama', doc_number: initial.doc_number || '', issue_date: initial.issue_date || '', expiry_date: initial.expiry_date || '', notes: initial.notes || '' })
+  const [file, setFile] = useState(null)
+  const [dropFile, setDropFile] = useState(false)
   const set = (k, v) => setF(x => ({ ...x, [k]: v }))
   const s = useSubmit(onSubmit)
+  const problem = paperFileProblem(file)
   return (
-    <form dir={dir} className="space-y-3" onSubmit={ev => { ev.preventDefault(); s.run(f) }}>
+    <form dir={dir} className="space-y-3" onSubmit={ev => {
+      ev.preventDefault()
+      if (problem) { s.setError(t.errors[problem]); return }
+      s.run(f, file, dropFile)
+    }}>
       <div className="grid grid-cols-2 gap-2">
         <Field label={t.docType}>
           <select value={f.doc_type} onChange={ev => set('doc_type', ev.target.value)} className={field}>
@@ -345,31 +431,15 @@ function DocForm({ initial, onSubmit, onCancel, onDelete }) {
       <Field label={t.notes} hint={f.doc_type === 'other' ? t.otherHelp : null}>
         <input value={f.notes} required={f.doc_type === 'other'} onChange={ev => set('notes', ev.target.value)} className={field} dir="auto" />
       </Field>
-      <FormFoot busy={s.busy} error={s.error} onCancel={onCancel} onDelete={onDelete} />
-    </form>
-  )
-}
-
-function ContractForm({ initial, onSubmit, onCancel, onDelete }) {
-  const { t, dir } = useT(HW)
-  const [f, setF] = useState({ contract_type: initial.contract_type || 'fixed', start_date: initial.start_date || riyadhToday(), end_date: initial.end_date || '', notes: initial.notes || '' })
-  const set = (k, v) => setF(x => ({ ...x, [k]: v }))
-  const s = useSubmit(onSubmit)
-  return (
-    <form dir={dir} className="space-y-3" onSubmit={ev => { ev.preventDefault(); s.run(f) }}>
-      <div className="grid grid-cols-3 gap-2">
-        <Field label={t.contractType}>
-          <select value={f.contract_type} onChange={ev => set('contract_type', ev.target.value)} className={field}>
-            {['fixed', 'open'].map(k => <option key={k} value={k}>{t.contractTypes[k]}</option>)}
-          </select>
-        </Field>
-        <Field label={t.start}><input type="date" required value={f.start_date} onChange={ev => set('start_date', ev.target.value)} className={field} /></Field>
-        <Field label={f.contract_type === 'fixed' ? t.end : `${t.end} ${t.optional}`}>
-          <input type="date" required={f.contract_type === 'fixed'} min={f.start_date} value={f.end_date} onChange={ev => set('end_date', ev.target.value)} className={field} />
-        </Field>
-      </div>
-      <Field label={t.notes}><input value={f.notes} onChange={ev => set('notes', ev.target.value)} className={field} dir="auto" /></Field>
-      <p className="text-[11px] text-text-tertiary">{t.noPay}</p>
+      <Field label={initial.file_path && !dropFile ? t.replaceFile : t.attachFile} hint={t.fileHelp}>
+        <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp" onChange={ev => { setFile(ev.target.files?.[0] || null); setDropFile(false) }} className="block w-full text-xs mt-1" />
+      </Field>
+      {initial.file_path && !file && (
+        <label className="flex items-center gap-2 text-xs text-text-secondary">
+          <input type="checkbox" checked={dropFile} onChange={ev => setDropFile(ev.target.checked)} />{t.removeFile}: <span dir="auto">{initial.file_name}</span>
+        </label>
+      )}
+      {s.busy && file && <p className="text-[11px] text-text-tertiary">{t.uploading}</p>}
       <FormFoot busy={s.busy} error={s.error} onCancel={onCancel} onDelete={onDelete} />
     </form>
   )

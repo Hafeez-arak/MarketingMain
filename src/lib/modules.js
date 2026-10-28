@@ -108,8 +108,9 @@ export const SECTIONS = [
   },
   {
     // Musa's HR rewritten in our stack (2026-10-28, dev/erp-pilot/HR.md):
-    // view reads, work does the day-to-day entry, manage sets it up and
-    // approves leave. No pay or payroll: out of scope by the owner's decision.
+    // view reads, work is his hr.attendance (attendance entry and corrections),
+    // manage is his hr.manage + hr.contracts + hr.leave_approve (files, papers,
+    // contracts, leave decisions and grants). No pay or payroll: out of scope by the owner's decision.
     key: 'hr', label: 'HR', ar: 'الموارد البشرية', icon: 'id-card', base: '/hr', adminOnly: true,
     blurb: 'Employees and their papers, leave and who is off, and daily attendance.',
     blurbAr: 'الموظفون ووثائقهم، والإجازات ومن هو في إجازة، والحضور اليومي.',
@@ -123,7 +124,10 @@ export const SECTIONS = [
       // its tabs and reports live under /hr/attendance; the devices, their
       // keys and the linking are for Manage.
       { to: '/hr/attendance/devices', label: 'Attendance devices', ar: 'أجهزة البصمة', icon: 'check-square', hidden: true, min: 'manage', translated: true },
-      { to: '/hr/documents', label: 'Expiring papers', ar: 'الوثائق المنتهية', icon: 'file-check', min: 'work', translated: true },
+      // His hr.contracts and the papers of hr.manage are Manage here (dev/erp-pilot/HR.md, the mapping).
+      { to: '/hr/contracts', label: 'Contracts', ar: 'العقود', icon: 'file-check', min: 'manage', translated: true },
+      { to: '/hr/contract', label: 'Contract', ar: 'العقد', icon: 'file-check', hidden: true, min: 'manage', translated: true },
+      { to: '/hr/documents', label: 'Expiring papers', ar: 'الوثائق المنتهية', icon: 'file-check', min: 'manage', translated: true },
       { to: '/hr/settings', label: 'HR settings', ar: 'إعدادات الموارد البشرية', icon: 'gear', min: 'manage', translated: true },
     ],
   },

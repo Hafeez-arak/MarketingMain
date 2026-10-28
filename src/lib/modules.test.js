@@ -147,7 +147,12 @@ describe('HR (2026-10-28)', () => {
     expect(canVisit('/hr', view)).toBe(true)
     expect(canVisit('/hr/employee', view)).toBe(true)
     expect(canVisit('/hr/documents', view)).toBe(false)
-    expect(canVisit('/hr/documents', { sections: { hr: 'work' } })).toBe(true)
+    // His hr.manage papers and hr.contracts are Manage here; Work is his hr.attendance.
+    expect(canVisit('/hr/documents', { sections: { hr: 'work' } })).toBe(false)
+    expect(canVisit('/hr/documents', { sections: { hr: 'manage' } })).toBe(true)
+    expect(canVisit('/hr/contracts', { sections: { hr: 'work' } })).toBe(false)
+    expect(canVisit('/hr/contracts', { sections: { hr: 'manage' } })).toBe(true)
+    expect(canVisit('/hr/contract', { sections: { hr: 'manage' } })).toBe(true)
     expect(canVisit('/hr/settings', { sections: { hr: 'work' } })).toBe(false)
     expect(canVisit('/hr/settings', { sections: { hr: 'manage' } })).toBe(true)
     expect(canVisit('/hr', { sections: { sales: 'manage' } })).toBe(false)
