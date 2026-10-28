@@ -20,14 +20,14 @@ import { useT } from '../lib/i18n'
 // is asked in.
 const AW = {
   en: {
-    latest: 'Latest', open: 'Ask the assistant  (⌘K)', title: 'Assistant', thisBrand: 'This brand', canSee: 'can see', new: 'New', close: 'Close',
+    latest: 'Latest', open: 'Ask the assistant', title: 'Assistant', thisBrand: 'This brand', canSee: 'can see', new: 'New', close: 'Close',
     introA: 'Answers come from your own data. It will say when a sample is too small to mean anything, and it can',
     adminCan: 'change the Brand Brain, rules, research sources and drafts when you ask (every change can be undone)',
     memberCan: 'propose rules and drafts', introB: '— never publish. You can attach images and PDFs.',
     askAbout: l => `Ask about ${l}…`, askAnything: 'Ask anything, or @ to tag someone…', stop: 'Stop', ask: 'Ask',
   },
   ar: {
-    latest: 'الأحدث', open: 'اسأل المساعد  (⌘K)', title: 'المساعد', thisBrand: 'هذه الشركة', canSee: 'يرى', new: 'جديد', close: 'إغلاق',
+    latest: 'الأحدث', open: 'اسأل المساعد', title: 'المساعد', thisBrand: 'هذه الشركة', canSee: 'يرى', new: 'جديد', close: 'إغلاق',
     introA: 'الإجابات من بياناتك أنت. سيخبرك إن كانت العينة أصغر من أن تعني شيئًا، ويمكنه',
     adminCan: 'تعديل هوية العلامة والقواعد ومصادر البحث والمسودات عندما تطلب (ويمكن التراجع عن كل تغيير)',
     memberCan: 'اقتراح القواعد والمسودات', introB: '— ولا ينشر أبدًا. يمكنك إرفاق صور وملفات PDF.',
@@ -137,15 +137,12 @@ export function AssistantDrawer() {
     return () => { window.removeEventListener(ASK_EVENT, onAsk); window.__arakAssistant = false }
   }, [])
 
-  // Cmd/Ctrl-K opens it from anywhere, Escape closes. The whole point is
-  // reachability, and a button you have to find with the mouse is less
-  // reachable than a key.
+  // Escape closes. Cmd/Ctrl-K used to open it; since 2026-10-28 that key is
+  // the universal search's (the owner's call, docs/SHELL.md), and the
+  // assistant becomes that palette's "ask" mode when it is built.
   useEffect(() => {
     const onKey = e => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault()
-        setOpen(v => !v)
-      } else if (e.key === 'Escape' && open && !historyOpen) {
+      if (e.key === 'Escape' && open && !historyOpen) {
         // Yielded while the popup is up. That listens for Escape on document
         // and this one listens on window, so both would fire and a single
         // press would close the popup AND the drawer behind it. The popup is
