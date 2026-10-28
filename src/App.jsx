@@ -49,6 +49,7 @@ import { TasksPage } from './pages/tasks/index'
 import { ContactsPage } from './pages/contacts/index'
 import { ContactsOrgPage } from './pages/contacts/Org'
 import { ContactsPeoplePage } from './pages/contacts/People'
+import { ContactsCategoriesPage } from './pages/contacts/Categories'
 import { SalesTasksRedirect } from './pages/leads/SalesTasks'
 import { TechnicalProjects } from './pages/technical/index'
 import { TechnicalProject } from './pages/technical/Project'
@@ -228,6 +229,7 @@ function ProtectedApp() {
             <Route path="/contacts"              element={<ContactsPage />} />
             <Route path="/contacts/people"       element={<ContactsPeoplePage />} />
             <Route path="/contacts/org"          element={<ContactsOrgPage />} />
+            <Route path="/contacts/categories"   element={<ContactsCategoriesPage />} />
 
             {/* ── Admin ── */}
             <Route path="/admin"               element={<Navigate to="/admin/team" replace />} />

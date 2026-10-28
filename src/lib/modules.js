@@ -95,6 +95,8 @@ export const SECTIONS = [
     pages: [
       { to: '/contacts', label: 'Organisations', ar: 'الجهات', icon: 'contacts', exact: true, translated: true },
       { to: '/contacts/people', label: 'People', ar: 'الأشخاص', icon: 'users', translated: true },
+      // Musa's supplier categories: everyone reads them, managing names them.
+      { to: '/contacts/categories', label: 'Supplier categories', ar: 'تصنيفات الموردين', icon: 'grid', translated: true },
       // One organisation's page, reached from the lists.
       { to: '/contacts/org', label: 'Organisation', ar: 'الجهة', icon: 'contacts', hidden: true, translated: true },
     ],
