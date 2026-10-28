@@ -4,11 +4,11 @@ import { Button } from '../../components/ui/index'
 import { useT } from '../../lib/i18n'
 import {
   ROLES, validateOrg, validatePerson, needsAddress, findDuplicates, emptyOrg, emptyPerson,
-  displayName, csvToOrgs, CSV_TEMPLATE,
+  displayName, csvToOrgs, CSV_TEMPLATE, paysUs,
 } from '../../lib/contacts/logic'
 import { importOrgs } from '../../lib/contacts/client'
 import { CW, ROLE_NAMES } from './words'
-import { field } from './useContactsBook'
+import { field, errorWord, categoryName } from './useContactsBook'
 
 // ─── Contacts: the pieces the pages share ──────────────────────────────────
 // 2026-10-28, dev/erp-pilot/CONTACTS.md. The dialog, role badges, the
@@ -89,11 +89,16 @@ export function Duplicates({ found, onOpen }) {
 
 /**
  * An organisation's fields. `orgs`: the company's organisations, for the
- * duplicate guard; `selfId` when editing. onSubmit(fields) → { error? }.
+ * duplicate guard; `selfId` when editing; `categories`: the supplier
+ * categories. onSubmit(fields) → { error? }.
  */
-export function OrgForm({ initial = null, orgs = [], selfId = '', onSubmit, onCancel }) {
+export function OrgForm({ initial = null, orgs = [], categories = [], selfId = '', onSubmit, onCancel }) {
   const { t: w, lang, dir } = useT(CW)
-  const [f, setF] = useState(() => ({ ...emptyOrg(), ...(initial || {}), roles: initial?.roles || [] }))
+  const [f, setF] = useState(() => {
+    const start = { ...emptyOrg(), ...(initial || {}), roles: initial?.roles || [] }
+    for (const k of Object.keys(start)) if (start[k] === null) start[k] = ''
+    return start
+  })
   const [tried, setTried] = useState(false)
   const [confirmSimilar, setConfirmSimilar] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -103,11 +108,12 @@ export function OrgForm({ initial = null, orgs = [], selfId = '', onSubmit, onCa
 
   const errors = validateOrg(f)
   const shown = tried ? errors : {}
-  const err = k => (shown[k] ? w.errors[shown[k]] : '')
+  const err = k => (shown[k] ? errorWord(w, shown[k]) : '')
   const dups = useMemo(() => findDuplicates(f, orgs, selfId), [f, orgs, selfId])
   const blocking = dups.some(d => d.blocking)
   const similar = dups.length > 0 && !blocking
   const address = needsAddress(f)
+  const supplier = paysUs(f)
 
   async function submit(e) {
     e.preventDefault()
@@ -173,6 +179,7 @@ export function OrgForm({ initial = null, orgs = [], selfId = '', onSubmit, onCa
           {text('city', w.city)}
           {text('nat_postal_code', w.postal, { dir: 'ltr', inputMode: 'numeric' })}
           {text('nat_additional_no', w.additional, { dir: 'ltr', inputMode: 'numeric' })}
+          {text('address', w.addressFree, { className: 'col-span-2 sm:col-span-3', help: w.addressFreeHelp })}
         </div>
       </section>
 
@@ -184,6 +191,24 @@ export function OrgForm({ initial = null, orgs = [], selfId = '', onSubmit, onCa
           {text('website', w.website, { dir: 'ltr' })}
         </div>
       </section>
+
+      {(supplier || f.category_id || f.iban || f.swift || f.payment_terms_days !== '') && (
+        <section>
+          <h3 className="text-xs font-semibold text-text-secondary mb-0.5">{w.supplierDetails}</h3>
+          <p className="text-[11px] text-text-tertiary mb-1.5">{w.supplierHelp}</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label={w.category} help={<Link to="/contacts/categories" onClick={onCancel} className="underline">{w.categoriesLink}</Link>}>
+              <select value={f.category_id || ''} onChange={e => set('category_id', e.target.value)} className={field}>
+                <option value="">{w.noCategory}</option>
+                {categories.filter(c => c.is_active || c.id === initial?.category_id).map(c => <option key={c.id} value={c.id}>{categoryName(c, lang)}</option>)}
+              </select>
+            </Field>
+            {text('payment_terms_days', w.terms, { dir: 'ltr', inputMode: 'numeric', help: w.termsHelp })}
+            {text('iban', w.iban, { dir: 'ltr', help: w.ibanHelp })}
+            {text('swift', w.swift, { dir: 'ltr', help: w.swiftHelp })}
+          </div>
+        </section>
+      )}
 
       <Field label={w.notesLabel}>
         <textarea value={f.notes || ''} onChange={e => set('notes', e.target.value)} rows={3} className={field} dir="auto" />
@@ -211,7 +236,7 @@ export function PersonForm({ initial = null, orgs = [], lockOrg = false, onSubmi
   const [error, setError] = useState('')
   const set = (k, v) => setP(x => ({ ...x, [k]: v }))
   const errors = validatePerson(p)
-  const err = k => (tried && errors[k] ? w.errors[errors[k]] : '')
+  const err = k => (tried && errors[k] ? errorWord(w, errors[k]) : '')
 
   async function submit(e) {
     e.preventDefault()
@@ -314,7 +339,7 @@ export function ImportDialog({ ws, orgs = [], onClose, onDone }) {
 
   const problem = r => {
     const s = status(r)
-    if (s === 'bad') return Object.entries(r.errors).map(([k, code]) => `${w.fieldNames[k] || k}: ${w.errors[code] || code}`).join(' · ')
+    if (s === 'bad') return Object.entries(r.errors).map(([k, code]) => `${w.fieldNames[k] || k}: ${errorWord(w, code)}`).join(' · ')
     if (s === 'dup') return `${w.dupReasons[r.duplicates[0].reasons[0]]}: ${displayName(r.duplicates[0].org, lang) || w.dupLine(r.duplicates[0].org.line)}`
     if (s === 'similar') return `${w.willWarn}: ${displayName(r.duplicates[0].org, lang) || w.dupLine(r.duplicates[0].org.line)}`
     return w.ready
