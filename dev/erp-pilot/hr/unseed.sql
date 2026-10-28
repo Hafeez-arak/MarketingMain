@@ -13,6 +13,15 @@ do $$ begin
     raise exception 'hr_employees holds rows that are not test data: not removing anything';
   end if;
 end $$;
+-- Devices, punches and lateness records refuse deletion (their rules);
+-- for test data the rules are switched off for this transaction.
+set local session_replication_role = replica;
+delete from public.hr_attendance_flags;
+delete from public.hr_punches;
+delete from public.hr_device_syncs;
+delete from public.hr_device_users;
+delete from public.hr_devices;
+set local session_replication_role = origin;
 delete from public.hr_attendance_changes;
 delete from public.hr_attendance;
 delete from public.hr_leave_requests;
@@ -22,6 +31,8 @@ delete from public.hr_documents;
 delete from public.hr_contracts;
 update public.hr_departments set head_id = null;
 update public.hr_employees set manager_id = null;
+set local hr.device_link = 'on';
+update public.hr_employees set device_user_no = null where device_user_no is not null;
 delete from public.hr_employees;
 delete from public.hr_departments;
 delete from public.hr_settings;

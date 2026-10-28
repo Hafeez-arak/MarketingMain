@@ -284,60 +284,188 @@ select pg_temp.eq('balances: Manage sets one',
   pg_temp.q('staff.admin@arak-sa.com', format($s$update public.hr_leave_balances set days = 25, updated_by = %L where employee_id = %L and leave_type_id = %L and year = 2026 returning days$s$,
     pg_temp.uid('staff.admin@arak-sa.com'), pg_temp.emp('T-003'), pg_temp.typ('Annual leave'))), '25.0');
 
--- ══ Attendance ══
+-- ══ Attendance: sessions (20261128_attendance_1) ══
+-- A clean day for the manual checks: last Friday (no seed attendance), and
+-- a Riyadh moment on it.
+create function pg_temp.fri() returns date as $$ select hr_today() - (((extract(dow from hr_today())::int - 5 + 7) % 7) + case when extract(dow from hr_today()) = 5 then 7 else 0 end) $$ language sql;
+create function pg_temp.at(p_day date, p_time text) returns text as $$ select ((p_day + p_time::time) at time zone 'Asia/Riyadh')::text $$ language sql;
+create function pg_temp.ins(p_no text, p_in text, p_out text) returns text as $$
+  select format($s$insert into public.hr_attendance (workspace_id, employee_id, check_in, check_out, created_by) values ('00000000-0000-0000-0000-000000000001', %L, %L, %L, auth.uid()) returning id$s$,
+                pg_temp.emp(p_no), p_in, p_out)
+$$ language sql;
+
 select pg_temp.refused('attendance: View cannot record', 'staff.marketing@arak-sa.com',
-  format($s$insert into public.hr_attendance (workspace_id, employee_id, day, status, check_in, created_by) values (%L, %L, hr_today(), 'present', '08:00', %L) returning id$s$, :arak, pg_temp.emp('T-005'), pg_temp.uid('staff.marketing@arak-sa.com')),
-  'row-level security');
+  pg_temp.ins('T-005', pg_temp.at(pg_temp.fri(), '08:00'), pg_temp.at(pg_temp.fri(), '12:00')), 'row-level security');
 select pg_temp.refused('attendance: not in the future', 'staff.dev@arak-sa.com',
-  format($s$insert into public.hr_attendance (workspace_id, employee_id, day, status, check_in, created_by) values (%L, %L, hr_today() + 1, 'present', '08:00', %L) returning id$s$, :arak, pg_temp.emp('T-005'), pg_temp.uid('staff.dev@arak-sa.com')),
-  'HR_ATTENDANCE_FUTURE');
-select pg_temp.refused('attendance: not before the hire date', 'staff.dev@arak-sa.com',
-  format($s$insert into public.hr_attendance (workspace_id, employee_id, day, status, check_in, created_by) values (%L, %L, '2023-01-01', 'present', '08:00', %L) returning id$s$, :arak, pg_temp.emp('T-005'), pg_temp.uid('staff.dev@arak-sa.com')),
-  'HR_ATTENDANCE_NOT_EMPLOYED');
-select pg_temp.refused('attendance: not after the end date', 'staff.dev@arak-sa.com',
-  format($s$insert into public.hr_attendance (workspace_id, employee_id, day, status, check_in, created_by) values (%L, %L, '2026-07-01', 'present', '08:00', %L) returning id$s$, :arak, pg_temp.emp('T-009'), pg_temp.uid('staff.dev@arak-sa.com')),
-  'HR_ATTENDANCE_NOT_EMPLOYED');
-select pg_temp.refused('attendance: not present on approved leave', 'staff.dev@arak-sa.com',
-  format($s$insert into public.hr_attendance (workspace_id, employee_id, day, status, check_in, created_by) values (%L, %L, hr_today(), 'present', '08:00', %L) returning id$s$, :arak, pg_temp.emp('T-008'), pg_temp.uid('staff.dev@arak-sa.com')),
-  'HR_ATTENDANCE_ON_LEAVE');
-select pg_temp.refused('attendance: present needs an arrival time', 'staff.dev@arak-sa.com',
-  format($s$insert into public.hr_attendance (workspace_id, employee_id, day, status, created_by) values (%L, %L, hr_today(), 'present', %L) returning id$s$, :arak, pg_temp.emp('T-005'), pg_temp.uid('staff.dev@arak-sa.com')),
-  'hr_attendance_times');
-select pg_temp.refused('attendance: absent has no times', 'staff.dev@arak-sa.com',
-  format($s$insert into public.hr_attendance (workspace_id, employee_id, day, status, check_in, created_by) values (%L, %L, hr_today(), 'absent', '08:00', %L) returning id$s$, :arak, pg_temp.emp('T-005'), pg_temp.uid('staff.dev@arak-sa.com')),
-  'hr_attendance_times');
+  pg_temp.ins('T-005', pg_temp.at(hr_today() + 1, '08:00'), null), 'HR_ATTENDANCE_FUTURE');
+select pg_temp.refused('attendance: only for someone employed', 'staff.dev@arak-sa.com',
+  pg_temp.ins('T-009', pg_temp.at('2026-06-01', '08:00'), pg_temp.at('2026-06-01', '12:00')), 'HR_ATTENDANCE_NOT_EMPLOYED');
+select pg_temp.refused('attendance: not on approved leave', 'staff.dev@arak-sa.com',
+  pg_temp.ins('T-005', pg_temp.at('2026-10-12', '08:00'), pg_temp.at('2026-10-12', '12:00')), 'HR_ATTENDANCE_ON_LEAVE');
 select pg_temp.refused('attendance: leaving is after arriving', 'staff.dev@arak-sa.com',
-  format($s$insert into public.hr_attendance (workspace_id, employee_id, day, status, check_in, check_out, created_by) values (%L, %L, hr_today(), 'present', '08:00', '07:00', %L) returning id$s$, :arak, pg_temp.emp('T-005'), pg_temp.uid('staff.dev@arak-sa.com')),
-  'hr_attendance_times');
-select pg_temp.eq('attendance: Work records an arrival',
-  pg_temp.q('staff.dev@arak-sa.com', format($s$insert into public.hr_attendance (workspace_id, employee_id, day, status, check_in, created_by) values (%L, %L, hr_today(), 'present', '08:03', %L) returning status$s$, :arak, pg_temp.emp('T-005'), pg_temp.uid('staff.dev@arak-sa.com'))),
-  'present');
-select pg_temp.refused('attendance: one record a day', 'staff.dev@arak-sa.com',
-  format($s$insert into public.hr_attendance (workspace_id, employee_id, day, status, check_in, created_by) values (%L, %L, hr_today(), 'present', '09:00', %L) returning id$s$, :arak, pg_temp.emp('T-005'), pg_temp.uid('staff.dev@arak-sa.com')),
-  'hr_attendance_one_a_day');
-create function pg_temp.att(p_no text) returns uuid as $$ select id from public.hr_attendance where employee_id = pg_temp.emp(p_no) and day = hr_today() $$ language sql;
+  pg_temp.ins('T-005', pg_temp.at(pg_temp.fri(), '08:00'), pg_temp.at(pg_temp.fri(), '07:00')), 'hr_attendance_span');
+select pg_temp.refused('attendance: at most 24 hours', 'staff.dev@arak-sa.com',
+  pg_temp.ins('T-005', pg_temp.at(pg_temp.fri() - 7, '08:00'), pg_temp.at(pg_temp.fri() - 6, '09:00')), 'hr_attendance_span');
+select pg_temp.eq('attendance: Work records a session',
+  (pg_temp.q('staff.dev@arak-sa.com', pg_temp.ins('T-005', pg_temp.at(pg_temp.fri(), '08:00'), pg_temp.at(pg_temp.fri(), '12:30'))) is not null), true);
+select pg_temp.eq('attendance: ...its day is Riyadh''s date of the check-in, its hours worked out',
+  (select day::text || ':' || worked_hours::text from public.hr_attendance where employee_id = pg_temp.emp('T-005') and check_in = pg_temp.at(pg_temp.fri(), '08:00')::timestamptz),
+  pg_temp.fri()::text || ':4.50');
+select pg_temp.eq('attendance: several sessions a day',
+  (pg_temp.q('staff.dev@arak-sa.com', pg_temp.ins('T-005', pg_temp.at(pg_temp.fri(), '13:30'), pg_temp.at(pg_temp.fri(), '16:00'))) is not null), true);
+select pg_temp.refused('attendance: no overlap with another session', 'staff.dev@arak-sa.com',
+  pg_temp.ins('T-005', pg_temp.at(pg_temp.fri(), '12:00'), pg_temp.at(pg_temp.fri(), '14:00')), 'HR_ATTENDANCE_OVERLAP');
+select pg_temp.refused('attendance: nobody records a device record by hand', 'staff.admin@arak-sa.com',
+  format($s$insert into public.hr_attendance (workspace_id, employee_id, check_in, check_out, source, device_day, created_by) values (%L, %L, %L, %L, 'device', %L, auth.uid())$s$,
+    :arak, pg_temp.emp('T-005'), pg_temp.at(pg_temp.fri() - 7, '08:00'), pg_temp.at(pg_temp.fri() - 7, '09:00'), pg_temp.fri() - 7), 'row-level security');
+create function pg_temp.att(p_no text, p_day date) returns uuid as $$ select id from public.hr_attendance where employee_id = pg_temp.emp(p_no) and day = p_day order by check_in limit 1 $$ language sql;
 select pg_temp.eq('attendance: a direct update changes nothing (corrections go through hr_attendance_update)',
-  pg_temp.q('staff.dev@arak-sa.com', format($s$with u as (update public.hr_attendance set check_in = '07:00' where id = %L returning 1) select count(*) from u$s$, pg_temp.att('T-005'))), '0');
-select pg_temp.eq('attendance: filling in the departure needs no reason',
-  pg_temp.q('staff.dev@arak-sa.com', format($s$select check_out::text from public.hr_attendance_update(%L, %L, 'present', '08:03', '17:10', '')$s$, :arak, pg_temp.att('T-005'))), '17:10:00');
-select pg_temp.eq('attendance: ...and is kept as a departure, not a correction',
-  (select kind || ':' || coalesce((select corrected_by::text from public.hr_attendance where id = pg_temp.att('T-005')), 'none') from public.hr_attendance_changes where attendance_id = pg_temp.att('T-005')), 'departure:none');
+  pg_temp.q('staff.dev@arak-sa.com', format($s$with u as (update public.hr_attendance set notes = 'x' where id = %L returning 1) select count(*) from u$s$, pg_temp.att('T-005', pg_temp.fri()))), '0');
 select pg_temp.refused('attendance: a correction needs a reason', 'staff.dev@arak-sa.com',
-  format($s$select id from public.hr_attendance_update(%L, %L, 'late', '08:40', '17:10', '', '')$s$, :arak, pg_temp.att('T-005')), 'HR_ATTENDANCE_REASON');
+  format($s$select id from public.hr_attendance_update(%L, %L, %L, %L, '  ')$s$, :arak, pg_temp.att('T-005', pg_temp.fri()), pg_temp.at(pg_temp.fri(), '08:10'), pg_temp.at(pg_temp.fri(), '12:30')), 'HR_ATTENDANCE_REASON');
 select pg_temp.refused('attendance: View cannot correct', 'staff.marketing@arak-sa.com',
-  format($s$select id from public.hr_attendance_update(%L, %L, 'late', '08:40', '17:10', '', 'x')$s$, :arak, pg_temp.att('T-005')), 'HR_NO_ACCESS');
+  format($s$select id from public.hr_attendance_update(%L, %L, %L, %L, 'x')$s$, :arak, pg_temp.att('T-005', pg_temp.fri()), pg_temp.at(pg_temp.fri(), '08:10'), pg_temp.at(pg_temp.fri(), '12:30')), 'HR_NO_ACCESS');
 select pg_temp.refused('attendance: a correction names the right company', 'staff.dev@arak-sa.com',
-  format($s$select id from public.hr_attendance_update(%L, %L, 'late', '08:40', '17:10', '', 'x')$s$, current_setting('hr.ghusn'), pg_temp.att('T-005')), 'HR_NO_ACCESS');
+  format($s$select id from public.hr_attendance_update(%L, %L, %L, %L, 'x')$s$, current_setting('hr.ghusn'), pg_temp.att('T-005', pg_temp.fri()), pg_temp.at(pg_temp.fri(), '08:10'), pg_temp.at(pg_temp.fri(), '12:30')), 'HR_NO_ACCESS');
 select pg_temp.eq('attendance: Work corrects with a reason',
-  pg_temp.q('staff.dev@arak-sa.com', format($s$select status || '@' || check_in::text from public.hr_attendance_update(%L, %L, 'late', '08:40', '17:10', '', 'Gate log shows 08:40')$s$, :arak, pg_temp.att('T-005'))), 'late@08:40:00');
-select pg_temp.eq('attendance: who corrected, and why, are on the record',
-  (select (corrected_by = pg_temp.uid('staff.dev@arak-sa.com'))::text || ':' || correction_reason from public.hr_attendance where id = pg_temp.att('T-005')), 'true:Gate log shows 08:40');
-select pg_temp.eq('attendance: the history keeps before and after',
-  (select before->>'check_in' || '>' || (after->>'check_in') from public.hr_attendance_changes where attendance_id = pg_temp.att('T-005') and kind = 'correction'), '08:03:00>08:40:00');
-select pg_temp.eq('attendance: Work cannot delete a record',
-  pg_temp.q('staff.dev@arak-sa.com', format($s$with d as (delete from public.hr_attendance where id = %L returning 1) select count(*) from d$s$, pg_temp.att('T-005'))), '0');
-select pg_temp.eq('attendance: Manage deletes one made by mistake',
-  pg_temp.q('staff.admin@arak-sa.com', format($s$with d as (delete from public.hr_attendance where id = %L returning 1) select count(*) from d$s$, pg_temp.att('T-005'))), '1');
+  pg_temp.q('staff.dev@arak-sa.com', format($s$select worked_hours::text || ':' || notes from public.hr_attendance_update(%L, %L, %L, %L, 'Gate log shows 08:10')$s$,
+    :arak, pg_temp.att('T-005', pg_temp.fri()), pg_temp.at(pg_temp.fri(), '08:10'), pg_temp.at(pg_temp.fri(), '12:30'))), '4.33:Gate log shows 08:10');
+select pg_temp.eq('attendance: who corrected is on the record, before and after in the history',
+  (select (a.corrected_by = pg_temp.uid('staff.dev@arak-sa.com'))::text || ':' || (c.before->>'check_in' < c.after->>'check_in')::text
+     from public.hr_attendance a join public.hr_attendance_changes c on c.attendance_id = a.id where a.id = pg_temp.att('T-005', pg_temp.fri())), 'true:true');
+select pg_temp.eq('attendance: nobody deletes a record (it is corrected)',
+  pg_temp.q('staff.admin@arak-sa.com', format($s$with d as (delete from public.hr_attendance where id = %L returning 1) select count(*) from d$s$, pg_temp.att('T-005', pg_temp.fri()))), '0');
+select pg_temp.eq('attendance: the board button checks in now',
+  pg_temp.q('staff.dev@arak-sa.com', format('select public.hr_attendance_toggle(%L, %L)', :arak, pg_temp.emp('T-006'))), 'in');
+select pg_temp.refused('attendance: one open record at a time', 'staff.dev@arak-sa.com',
+  pg_temp.ins('T-006', (now() - interval '1 minute')::text, null), 'HR_ATTENDANCE_OVERLAP');
+select pg_temp.eq('attendance: ...and the second press checks out',
+  pg_temp.q('staff.dev@arak-sa.com', format('select public.hr_attendance_toggle(%L, %L)', :arak, pg_temp.emp('T-006'))), 'out');
+select pg_temp.refused('attendance: View cannot press it', 'staff.marketing@arak-sa.com',
+  format('select public.hr_attendance_toggle(%L, %L)', :arak, pg_temp.emp('T-006')), 'HR_NO_ACCESS');
+
+-- ══ Attendance devices (20261128_attendance_2) ══
+-- Settings for the pairing and lateness: 08:00–17:00, 15 minutes' grace, from 1 September.
+update public.hr_settings set daily_hours = 9, schedule_from = '2026-09-01', repeat_punch_minutes = 3 where workspace_id = :arak;
+-- Clean days for the device: the last Wednesday and Thursday before today, without seed sessions for T-007.
+create function pg_temp.dow(p int) returns date as $$ select hr_today() - (((extract(dow from hr_today())::int - p + 7) % 7) + case when extract(dow from hr_today())::int = p then 7 else 0 end) $$ language sql;
+delete from public.hr_attendance where employee_id in (pg_temp.emp('T-007'), pg_temp.emp('T-004')) and day in (pg_temp.dow(3), pg_temp.dow(4));
+
+select pg_temp.refused('devices: Work cannot register one', 'staff.dev@arak-sa.com',
+  format($s$select public.hr_device_add(%L, 'Door (test)', 'Asia/Riyadh')$s$, :arak), 'HR_NO_ACCESS');
+select pg_temp.refused('devices: an unknown time zone is refused', 'staff.admin@arak-sa.com',
+  format($s$select public.hr_device_add(%L, 'Door (test)', 'Mars/Olympus')$s$, :arak), 'HR_DEVICE_TIMEZONE');
+select set_config('hr.key', pg_temp.q('staff.admin@arak-sa.com', format($s$select public.hr_device_add(%L, 'Door (test)', 'Asia/Riyadh') ->> 'key'$s$, :arak)), true);
+select set_config('hr.device', split_part(substr(current_setting('hr.key'), 6), '-', 1) || '-' || split_part(substr(current_setting('hr.key'), 6), '-', 2) || '-' ||
+  split_part(substr(current_setting('hr.key'), 6), '-', 3) || '-' || split_part(substr(current_setting('hr.key'), 6), '-', 4) || '-' || split_part(substr(current_setting('hr.key'), 6), '-', 5), true);
+select pg_temp.eq('devices: the key is shown once and only its hash is kept',
+  (select key_hash = encode(sha256(convert_to(right(current_setting('hr.key'), 40), 'UTF8')), 'hex') and key_hint = right(current_setting('hr.key'), 4)
+     from public.hr_devices where id = current_setting('hr.device')::uuid), true);
+select pg_temp.refused('devices: nobody reads the key''s hash', 'staff.admin@arak-sa.com',
+  'select key_hash from public.hr_devices limit 1', 'permission denied');
+select pg_temp.eq('devices: View sees the device list',
+  pg_temp.q('staff.marketing@arak-sa.com', 'select count(*) from public.hr_devices'), '1');
+select pg_temp.refused('devices: a wrong key is refused', null,
+  $s$select public.hr_device_sync('ARK1-00000000-0000-0000-0000-000000000000-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '{"punches": []}')$s$, 'HR_DEVICE_KEY');
+select pg_temp.refused('devices: an unreadable punch refuses the batch', null,
+  format($s$select public.hr_device_sync(%L, '{"punches": [{"user_no": "7", "time": "yesterday"}]}')$s$, current_setting('hr.key')), 'HR_DEVICE_PUNCH_UNREADABLE');
+select pg_temp.eq('devices: the bridge sends a batch with the key, no login',
+  pg_temp.q(null, format($s$select r ->> 'inserted' || '/' || (r ->> 'duplicates') || '/' || (r ->> 'rejected') from public.hr_device_sync(%L, %L::jsonb) r$s$, current_setting('hr.key'),
+    json_build_object(
+      'device', json_build_object('serial', 'TEST123', 'model', 'K40', 'firmware', 'Ver 6.60', 'time', to_char(now() at time zone 'Asia/Riyadh', 'YYYY-MM-DD HH24:MI:SS')),
+      'users', json_build_array(json_build_object('no', '7', 'name', 'HUDA', 'enabled', true), json_build_object('no', '4', 'name', 'KHALID', 'enabled', true),
+                                json_build_object('no', '99', 'name', 'VISITOR', 'enabled', true)),
+      'punches', json_build_array(
+        -- T-007 (number 7), Wednesday: 08:20 in (late 20), 16:30 out (early 30).
+        json_build_object('user_no', '7', 'time', to_char(pg_temp.dow(3), 'YYYY-MM-DD') || ' 8:20:0', 'verify', 1, 'inout', 0),
+        json_build_object('user_no', '7', 'time', to_char(pg_temp.dow(3), 'YYYY-MM-DD') || ' 16:30:00', 'verify', 1, 'inout', 1),
+        -- T-007, Thursday: 07:58 and again a minute later (one punch pressed twice) only.
+        json_build_object('user_no', '7', 'time', to_char(pg_temp.dow(4), 'YYYY-MM-DD') || ' 07:58:00'),
+        json_build_object('user_no', '7', 'time', to_char(pg_temp.dow(4), 'YYYY-MM-DD') || ' 07:59:00'),
+        -- T-004 (number 4), Thursday: a normal day.
+        json_build_object('user_no', '4', 'time', to_char(pg_temp.dow(4), 'YYYY-MM-DD') || ' 07:50:00'),
+        json_build_object('user_no', '4', 'time', to_char(pg_temp.dow(4), 'YYYY-MM-DD') || ' 17:05:00'),
+        -- An unlinked number, and a punch in the future (the device clock ahead).
+        json_build_object('user_no', '99', 'time', to_char(pg_temp.dow(4), 'YYYY-MM-DD') || ' 09:00:00'),
+        json_build_object('user_no', '7', 'time', to_char(now() at time zone 'Asia/Riyadh' + interval '1 day', 'YYYY-MM-DD HH24:MI:SS'))
+      ))::text)), '7/0/1');
+select pg_temp.eq('devices: the same batch again adds nothing',
+  pg_temp.q(null, format($s$select r ->> 'inserted' || '/' || (r ->> 'duplicates') from public.hr_device_sync(%L, %L::jsonb) r$s$, current_setting('hr.key'),
+    json_build_object('punches', json_build_array(json_build_object('user_no', '4', 'time', to_char(pg_temp.dow(4), 'YYYY-MM-DD') || ' 07:50:00')))::text)), '0/1');
+select pg_temp.eq('devices: the sync kept what the device reported',
+  (select device_serial || '/' || device_model || '/' || users_reported from public.hr_device_syncs where device_id = current_setting('hr.device')::uuid order by created_at limit 1), 'TEST123/K40/3');
+select pg_temp.refused('devices: a punch is never changed', 'staff.admin@arak-sa.com',
+  'update public.hr_punches set device_user_no = ''8''', 'permission denied');
+do $$ begin
+  update public.hr_punches set device_user_no = '8' where device_user_no = '99';
+  insert into t (name, ok, detail) values ('devices: punches are final even below the app', false, 'update went through');
+exception when others then
+  insert into t (name, ok, detail) values ('devices: punches are final even below the app', sqlerrm like 'HR_PUNCH_FINAL%', sqlerrm);
+end $$;
+select pg_temp.eq('pairing: nothing is paired before the numbers are linked',
+  pg_temp.q('staff.marketing@arak-sa.com', format($s$select string_agg(device_user_no || '=' || state, ',' order by device_user_no, work_day) from public.hr_punch_days where workspace_id = %L$s$, :arak)),
+  '4=unlinked,7=unlinked,7=unlinked,99=unlinked');
+select pg_temp.refused('pairing: Work cannot link numbers', 'staff.dev@arak-sa.com',
+  format($s$select public.hr_device_link(%L, %L)$s$, :arak, json_build_object('7', pg_temp.emp('T-007'))::text), 'HR_NO_ACCESS');
+select pg_temp.refused('pairing: one employee, one number', 'staff.admin@arak-sa.com',
+  format($s$select public.hr_device_link(%L, %L)$s$, :arak, json_build_object('7', pg_temp.emp('T-007'), '4', pg_temp.emp('T-007'))::text), 'HR_DEVICE_LINK_TWICE');
+select pg_temp.refused('pairing: the number is not set on the employee form', 'staff.admin@arak-sa.com',
+  format($s$update public.hr_employees set device_user_no = '7' where id = %L$s$, pg_temp.emp('T-007')), 'HR_DEVICE_LINK_ONLY');
+select pg_temp.eq('pairing: linking pairs the days already received',
+  pg_temp.q('staff.admin@arak-sa.com', format($s$select r ->> 'changed' || '/' || (r ->> 'paired') from public.hr_device_link(%L, %L) r$s$, :arak,
+    json_build_object('7', pg_temp.emp('T-007'), '4', pg_temp.emp('T-004'))::text)), '2/2');
+select pg_temp.eq('pairing: first punch in, last punch out, a device record',
+  (select to_char(check_in at time zone 'Asia/Riyadh', 'HH24:MI') || '-' || to_char(check_out at time zone 'Asia/Riyadh', 'HH24:MI') || ':' || source
+     from public.hr_attendance where employee_id = pg_temp.emp('T-004') and device_day = pg_temp.dow(4)), '07:50-17:05:device');
+select pg_temp.eq('pairing: the review shows each day''s state',
+  pg_temp.q('staff.marketing@arak-sa.com', format($s$select string_agg(device_user_no || '=' || state, ',' order by device_user_no, work_day) from public.hr_punch_days where workspace_id = %L$s$, :arak)),
+  '4=applied,7=applied,7=single,99=unlinked');
+do $$ begin
+  update public.hr_attendance set check_in = check_in - interval '1 hour' where id = pg_temp.att('T-004', pg_temp.dow(4));
+  insert into t (name, ok, detail) values ('pairing: a device record''s times are not changed directly', false, 'update went through');
+exception when others then
+  insert into t (name, ok, detail) values ('pairing: a device record''s times are not changed directly', sqlerrm like 'HR_ATTENDANCE_DEVICE_ONLY%', sqlerrm);
+end $$;
+select pg_temp.eq('pairing: corrected by a person, it is marked corrected',
+  pg_temp.q('staff.dev@arak-sa.com', format($s$select source from public.hr_attendance_update(%L, %L, %L, %L, 'Forgot to punch out; left 17:30')$s$,
+    :arak, pg_temp.att('T-004', pg_temp.dow(4)), pg_temp.at(pg_temp.dow(4), '07:50'), pg_temp.at(pg_temp.dow(4), '17:30'))), 'corrected');
+select pg_temp.eq('pairing: ...and the pairing never touches it again',
+  pg_temp.q('staff.admin@arak-sa.com', format('select public.hr_attendance_retry(%L, %L)', :arak, pg_temp.emp('T-004'))) || ':' ||
+  (select to_char(check_out at time zone 'Asia/Riyadh', 'HH24:MI') from public.hr_attendance where id = pg_temp.att('T-004', pg_temp.dow(4))), '0:17:30');
+select pg_temp.eq('pairing: the device number is locked once it made records',
+  (select pg_temp.err('staff.admin@arak-sa.com', format($s$select public.hr_device_link(%L, %L)$s$, :arak, json_build_object('4', null)::text)) like '%HR_DEVICE_USER_LOCKED%'), true);
+select pg_temp.eq('pairing: a stopped device sends nothing',
+  pg_temp.q('staff.admin@arak-sa.com', format('update public.hr_devices set active = false where id = %L returning active', current_setting('hr.device'))) || ':' ||
+  (select pg_temp.err(null, format($s$select public.hr_device_sync(%L, '{"punches": []}')$s$, current_setting('hr.key'))) like '%HR_DEVICE_INACTIVE%'), 'false:true');
+update public.hr_devices set active = true where id = current_setting('hr.device')::uuid;
+select pg_temp.eq('pairing: with a device running, the board button refuses a linked person',
+  (select pg_temp.err('staff.dev@arak-sa.com', format('select public.hr_attendance_toggle(%L, %L)', :arak, pg_temp.emp('T-007'))) like '%HR_ATTENDANCE_DEVICE_MODE%'), true);
+select pg_temp.eq('pairing: a new key stops the old one',
+  (select pg_temp.q('staff.admin@arak-sa.com', format('select public.hr_device_rotate_key(%L, %L)', :arak, current_setting('hr.device'))) <> current_setting('hr.key')) and
+  (select pg_temp.err(null, format($s$select public.hr_device_sync(%L, '{"punches": []}')$s$, current_setting('hr.key'))) like '%HR_DEVICE_KEY%'), true);
+select pg_temp.refused('devices: a device is never deleted', 'staff.admin@arak-sa.com',
+  format('delete from public.hr_devices where id = %L', current_setting('hr.device')), 'permission denied');
+select pg_temp.eq('devices: other companies see none of it',
+  pg_temp.q('outside.two@example.com', 'select (select count(*) from public.hr_devices) + (select count(*) from public.hr_punches) + (select count(*) from public.hr_punch_days)'), '0');
+
+-- ══ Late arrivals and early leaves (20261128_attendance_3) ══
+select pg_temp.eq('flags: late counted from the start, early leave from the end; a past day is never emailed',
+  pg_temp.q('staff.marketing@arak-sa.com', format($s$select string_agg(kind || ':' || minutes || ':' || email_status, ',' order by kind desc) from public.hr_attendance_flags where employee_id = %L and work_day = %L$s$,
+    pg_temp.emp('T-007'), pg_temp.dow(3))), 'late:20:past,early:30:past');
+select pg_temp.eq('flags: on time and a full day are not flagged',
+  (select count(*) from public.hr_attendance_flags where employee_id = pg_temp.emp('T-004')), 0::bigint);
+select pg_temp.eq('flags: one punch is never an early leave',
+  (select count(*) from public.hr_attendance_flags where employee_id = pg_temp.emp('T-007') and work_day = pg_temp.dow(4)), 0::bigint);
+select pg_temp.refused('flags: Work cannot excuse', 'staff.dev@arak-sa.com',
+  format($s$select id from public.hr_attendance_excuse(%L, (select id from public.hr_attendance_flags where employee_id = %L and kind = 'late' limit 1), 'Traffic')$s$, :arak, pg_temp.emp('T-007')), 'HR_NO_ACCESS');
+select pg_temp.refused('flags: an excuse needs its reason', 'staff.admin@arak-sa.com',
+  format($s$select id from public.hr_attendance_excuse(%L, (select id from public.hr_attendance_flags where employee_id = %L and kind = 'late' limit 1), ' ')$s$, :arak, pg_temp.emp('T-007')), 'HR_FLAG_EXCUSE_REASON');
+select pg_temp.eq('flags: Manage excuses with a reason',
+  pg_temp.q('staff.admin@arak-sa.com', format($s$select excuse_reason from public.hr_attendance_excuse(%L, (select id from public.hr_attendance_flags where employee_id = %L and kind = 'late' limit 1), 'Hospital appointment')$s$, :arak, pg_temp.emp('T-007'))), 'Hospital appointment');
+select pg_temp.eq('flags: an excuse stays as recorded',
+  (select pg_temp.err('staff.admin@arak-sa.com', format($s$select id from public.hr_attendance_excuse(%L, (select id from public.hr_attendance_flags where employee_id = %L and kind = 'late' limit 1), 'Other')$s$, :arak, pg_temp.emp('T-007'))) like '%HR_FLAG_FINAL%'), true);
+select pg_temp.eq('flags: the email switch cannot be turned on without the HR mailbox',
+  (select pg_temp.err('staff.admin@arak-sa.com', format('update public.hr_settings set employee_emails = true where workspace_id = %L returning 1', :arak)) like '%HR_MAILBOX_NOT_CONNECTED%'), true);
 
 -- ══ Settings ══
 select pg_temp.eq('settings: Work cannot change the work week',
@@ -355,7 +483,8 @@ begin
   update public.hr_departments set head_id = e where workspace_id = ws;
   insert into public.hr_leave_types (workspace_id, name_en) values (ws, 'L (test)') returning id into ty;
   insert into public.hr_leave_requests (workspace_id, employee_id, leave_type_id, date_from, date_to, days) values (ws, e, ty, '2026-12-01', '2026-12-01', 1);
-  insert into public.hr_attendance (workspace_id, employee_id, day, status) values (ws, e, '2026-10-01', 'absent');
+  insert into public.hr_attendance (workspace_id, employee_id, check_in, check_out, day) values (ws, e, '2026-10-01 05:00+00', '2026-10-01 13:00+00', '2026-10-01');
+  insert into public.hr_devices (workspace_id, name, timezone, key_hash, key_hint) values (ws, 'D (test)', 'Asia/Riyadh', repeat('a', 64), 'aaaa');
   delete from public.workspaces where id = ws;
   insert into t (name, ok, detail) values ('company delete: cascades through every HR table', not exists (select 1 from public.hr_employees where workspace_id = ws), '');
 exception when others then
@@ -365,8 +494,10 @@ end $$;
 -- ══ Every hr_ table has RLS on ══
 select pg_temp.eq('rls: on for every hr_ table',
   (select count(*) from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r' and relname like 'hr\_%' and not relrowsecurity), 0::bigint);
-select pg_temp.eq('rls: ten hr_ tables',
-  (select count(*) from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r' and relname like 'hr\_%'), 10::bigint);
+select pg_temp.eq('rls: fifteen hr_ tables, plus the two kept from the first attendance',
+  (select count(*) from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r' and relname like 'hr\_%'), 17::bigint);
+select pg_temp.eq('rls: the kept first-attendance tables are closed to the app',
+  pg_temp.err('staff.admin@arak-sa.com', 'select count(*) from public.hr_attendance_day_records') like '%permission denied%', true);
 
 -- ── Report ──
 \o

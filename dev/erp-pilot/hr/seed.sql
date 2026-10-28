@@ -118,33 +118,29 @@ begin
     values (arak, e_pm, t_unpaid, '2026-10-05', '2026-10-05', 1, 'Changed plans (test)') returning id into r;
     update public.hr_leave_requests set status = 'cancelled', cancelled_by = approver, cancelled_at = now() where id = r;
 
-    -- Attendance, 1 September to yesterday, Sunday to Thursday. A fixed
-    -- pattern per person and day (no randomness), so re-seeding is the same.
-    for emp in select id, hire_date, end_date, employee_no from public.hr_employees where workspace_id = arak loop
+    -- Attendance, 1 September to yesterday, Sunday to Thursday: one session
+    -- a day (check-in and check-out, Riyadh time; 20261128_attendance_1). A
+    -- fixed pattern per person and day (no randomness), so re-seeding is the
+    -- same. About 4 in 100 days have no record (absent).
+    for emp in select id, hire_date, end_date, employee_no from public.hr_employees where workspace_id = arak and status = 'active' loop
       for d in select g::date from generate_series(date '2026-09-01', public.hr_today() - 1, interval '1 day') g loop
         continue when extract(dow from d) not in (0, 1, 2, 3, 4);
         continue when d < emp.hire_date or (emp.end_date is not null and d > emp.end_date);
         continue when exists (select 1 from public.hr_leave_requests q where q.employee_id = emp.id and q.status = 'approved' and d between q.date_from and q.date_to);
         h := abs(hashtext(emp.employee_no || d::text)) % 100;
-        if h < 4 then
-          insert into public.hr_attendance (workspace_id, employee_id, day, status, notes) values (arak, emp.id, d, 'absent', '');
-        elsif h < 14 then
-          insert into public.hr_attendance (workspace_id, employee_id, day, status, check_in, check_out)
-          values (arak, emp.id, d, 'late', time '08:16' + make_interval(mins => h), time '17:05' + make_interval(mins => h % 7));
-        elsif h < 17 then
-          -- Forgot to record the departure.
-          insert into public.hr_attendance (workspace_id, employee_id, day, status, check_in) values (arak, emp.id, d, 'present', time '07:52' + make_interval(mins => h % 9));
-        else
-          insert into public.hr_attendance (workspace_id, employee_id, day, status, check_in, check_out)
-          values (arak, emp.id, d, 'present', time '07:48' + make_interval(mins => h % 12), time '17:00' + make_interval(mins => h % 20));
-        end if;
+        continue when h < 4;
+        insert into public.hr_attendance (workspace_id, employee_id, check_in, check_out, day, notes)
+        values (arak, emp.id,
+                (d + case when h < 14 then time '08:16' + make_interval(mins => h) else time '07:48' + make_interval(mins => h % 12) end) at time zone 'Asia/Riyadh',
+                (d + time '17:00' + make_interval(mins => h % 20)) at time zone 'Asia/Riyadh', d, '');
       end loop;
     end loop;
-    -- Today: four have arrived so far; the rest have no record yet.
-    insert into public.hr_attendance (workspace_id, employee_id, day, status, check_in)
-    select arak, id, public.hr_today(), 'present', time '07:55' from public.hr_employees where id in (e_ceo, e_sales, e_pm);
-    insert into public.hr_attendance (workspace_id, employee_id, day, status, check_in)
-    values (arak, e_rep, public.hr_today(), 'late', time '08:41');
+    -- Today: four have checked in so far (none in the future); the rest have no record yet.
+    insert into public.hr_attendance (workspace_id, employee_id, check_in, day)
+    select arak, id, least(now(), (public.hr_today() + time '07:55') at time zone 'Asia/Riyadh'), public.hr_today()
+      from public.hr_employees where id in (e_ceo, e_sales, e_pm);
+    insert into public.hr_attendance (workspace_id, employee_id, check_in, day)
+    values (arak, e_rep, least(now(), (public.hr_today() + time '08:41') at time zone 'Asia/Riyadh'), public.hr_today());
     raise notice 'Arak Lighting: HR test data added';
   end if;
 
