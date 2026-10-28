@@ -108,6 +108,25 @@ revoke all on function public.crm_clients(uuid) from public, anon;
 grant execute on function public.crm_clients(uuid) to authenticated;
 
 /**
+ * Is this organisation one the company still deals with? Contacts'
+ * contacts_org_is_active() runs as the caller, so for someone with the CRM
+ * but not Contacts it would always say no; this one reads past Contacts'
+ * RLS and says only active or not (the composite key keeps it to the
+ * opportunity's own company).
+ */
+create or replace function public.crm_org_active(org uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (select 1 from public.contacts_orgs o where o.id = org and o.status = 'active');
+$$;
+revoke all on function public.crm_org_active(uuid) from public, anon;
+grant execute on function public.crm_org_active(uuid) to authenticated;
+
+/**
  * An organisation linked to an opportunity is a client: Contacts keeps one
  * record with several roles, so linking a consultant firm adds the role
  * instead of making a second record. Only for someone who works the CRM
@@ -289,7 +308,7 @@ begin
 
   -- The client: an active organisation of this company, which becomes a client.
   if new.client_org_id is not null and (tg_op = 'INSERT' or new.client_org_id is distinct from old.client_org_id) then
-    if not public.contacts_org_is_active(new.client_org_id) then
+    if not public.crm_org_active(new.client_org_id) then
       raise exception 'CRM_CLIENT_ARCHIVED' using errcode = 'P0001';
     end if;
     perform public.crm_mark_client(new.client_org_id);
