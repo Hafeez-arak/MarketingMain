@@ -156,7 +156,8 @@ export default function LeadAgent() {
       )}
 
       {view === 'leads' ? (
-        <LeadsBoard workspaceId={activeWorkspaceId} onReview={review} refreshKey={refreshKey} mailboxes={status?.mailboxes || []} canApprove canTest team={team} me={user?.id || ''} />
+        // ?q= comes from the Ctrl/⌘+K search: a lead still in the inbox has no page of its own.
+        <LeadsBoard key={params.get('q') || ''} initialSearch={params.get('q') || ''} workspaceId={activeWorkspaceId} onReview={review} refreshKey={refreshKey} mailboxes={status?.mailboxes || []} canApprove canTest team={team} me={user?.id || ''} />
       ) : view === 'pipeline' ? (
         <Pipeline workspaceId={activeWorkspaceId} onReview={review} refreshKey={refreshKey} mailboxes={status?.mailboxes || []} canApprove team={team} me={user?.id || ''} focus={params.get('lead') || ''} />
       ) : (

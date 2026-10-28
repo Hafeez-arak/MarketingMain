@@ -3,6 +3,8 @@ import { useLocation } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { Rail } from './Rail'
 import { useNavBadges, NavBadgesContext } from './useNavBadges'
+import { usePinsState, PinsContext } from './usePins'
+import { SearchPalette } from './SearchPalette'
 import { useAuth } from '../../store/auth'
 import { menuPages, isTranslated } from '../../lib/modules'
 import { useLang, dirOf } from '../../lib/i18n'
@@ -21,6 +23,19 @@ export function AppLayout({ children }) {
   // The counts on navigation items, read once and shared with the rail, the
   // section sidebar and Home's tiles.
   const badges = useNavBadges()
+  // The sections this person pinned to the rail, shared with Home's tiles.
+  const pins = usePinsState()
+  // The Ctrl/⌘+K search (docs/SHELL.md). Works from anywhere, inputs too.
+  const [searchOpen, setSearchOpen] = useState(false)
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!(e.key === 'k' || e.key === 'K') || !(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return
+      e.preventDefault()
+      setSearchOpen(o => !o)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
   const { who } = useAuth()
   // Arabic turns the shell right-to-left (<html dir>, lib/i18n.js); a page
   // not yet translated keeps its English left-to-right inside it.
@@ -72,6 +87,7 @@ export function AppLayout({ children }) {
     // chain from here down is marked for the @media print block in index.css
     // to unwind. Nothing changes on screen.
     <NavBadgesContext.Provider value={badges}>
+    <PinsContext.Provider value={pins}>
     <div className="flex h-screen overflow-hidden" data-print-shell dir={dirOf(lang)} lang={lang}>
       {/* v2 (2026-10-19): the rail of sections, then the open section's own
           pages (none on Home and the global pages). Below md both are one
@@ -92,7 +108,7 @@ export function AppLayout({ children }) {
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-surface-muted md:py-2 md:pe-2" data-print-shell>
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-white md:rounded-xl md:border md:border-border" data-print-shell>
         <Topbar navOpen={navOpen} onMenu={() => (navOpen ? closeNav() : setNavOpenAt(location.pathname))}
-          menuHidden={hasMenu ? menuHidden : null} onToggleMenu={toggleMenu} />
+          menuHidden={hasMenu ? menuHidden : null} onToggleMenu={toggleMenu} onSearch={() => setSearchOpen(true)} />
         <main className="flex-1 overflow-y-auto scrollbar-thin bg-white" data-print-shell>
           {/* One page gutter, everywhere. Pages set their own max-width and
               internal rhythm, but none of them should change this number —
@@ -110,7 +126,9 @@ export function AppLayout({ children }) {
           cannot be hung on one. Its children are all `fixed`, so the wrapper
           is a zero-width flex item and changes nothing on screen. */}
       <div data-print-hide><AssistantDrawer /></div>
+      <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
     </div>
+    </PinsContext.Provider>
     </NavBadgesContext.Provider>
   )
 }

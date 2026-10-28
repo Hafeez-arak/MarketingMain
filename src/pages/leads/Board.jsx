@@ -453,12 +453,12 @@ function ApproveDialog({ lead, team, busy, error, onCancel, onConfirm, canTest =
   )
 }
 
-export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mailboxes = [], canApprove = false, team = [], me = '', canTest = false }) {
+export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mailboxes = [], canApprove = false, team = [], me = '', canTest = false, initialSearch = '' }) {
   const { t, lang, dir } = useT(LW)
   const L = leadLabels(lang)
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   // The search box waits for a pause in typing before it asks the database.
-  const [searchText, setSearchText] = useState('')
+  const [searchText, setSearchText] = useState(initialSearch)
   const [page, setPage] = useState(0)
   const [open, setOpen] = useState(null)
   const [list, setList] = useState({ key: null, rows: [], total: 0, error: '' })

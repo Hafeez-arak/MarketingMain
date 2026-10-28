@@ -15,7 +15,7 @@ const BACK_TARGETS = {
   '/marketing/campaigns/plan': '/marketing/campaigns',
 }
 
-export function Topbar({ navOpen = false, onMenu, menuHidden = null, onToggleMenu }) {
+export function Topbar({ navOpen = false, onMenu, menuHidden = null, onToggleMenu, onSearch }) {
   const location = useLocation()
   const navigate  = useNavigate()
   const { state, dispatch } = useApp()
@@ -28,6 +28,7 @@ export function Topbar({ navOpen = false, onMenu, menuHidden = null, onToggleMen
   const lang = useLang()
   const c = COMMON[lang]
 
+  const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '')
   const title      = pageTitle(location.pathname, lang) || 'Arak'
   const backTarget = BACK_TARGETS[location.pathname]
   const unread = state.notifications.filter(n => !n.read).length + inbox.unread
@@ -82,6 +83,16 @@ export function Topbar({ navOpen = false, onMenu, menuHidden = null, onToggleMen
         <div className="hidden lg:flex items-center gap-1.5 pe-1 text-xs text-text-tertiary tabular-nums">
           {fmtDay(new Date(), lang, { weekday: 'short', month: 'short', day: 'numeric' })}
         </div>
+
+        {/* The universal search; Ctrl/⌘+K opens it from anywhere (docs/SHELL.md). */}
+        {onSearch && (
+          <button type="button" onClick={onSearch} aria-label={c.search} aria-keyshortcuts={mac ? 'Meta+K' : 'Control+K'}
+            className="h-8 flex items-center gap-2 px-2 md:ps-2.5 md:pe-1.5 md:w-56 rounded-md border border-border text-text-tertiary hover:bg-surface-subtle hover:text-text hover:border-stone-400 transition-colors">
+            <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <span className="hidden md:inline flex-1 text-start text-xs">{c.search}</span>
+            <kbd className="hidden md:inline text-[10px] border border-border rounded px-1 py-px" dir="ltr">{mac ? '⌘K' : 'Ctrl K'}</kbd>
+          </button>
+        )}
 
         {/* Arabic / English for the whole app (lib/i18n.js). */}
         <button type="button" onClick={() => setLang(lang === 'ar' ? 'en' : 'ar')} title={c.languageLabel} aria-label={c.languageLabel}
