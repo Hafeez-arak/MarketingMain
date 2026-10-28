@@ -25,8 +25,8 @@ export const ADDRESS_REQUIRED = ['nat_building_no', 'nat_street', 'nat_district'
 
 export const ORG_FIELDS = [
   'kind', 'name', 'name_ar', 'roles', 'vat_number', 'cr_number', 'country',
-  'nat_building_no', 'nat_street', 'nat_district', 'city', 'nat_postal_code', 'nat_additional_no',
-  'phone', 'email', 'website', 'notes',
+  'nat_building_no', 'nat_street', 'nat_district', 'city', 'nat_postal_code', 'nat_additional_no', 'address',
+  'phone', 'email', 'website', 'category_id', 'iban', 'swift', 'payment_terms_days', 'notes',
 ]
 export const PERSON_FIELDS = ['org_id', 'name', 'name_ar', 'job_title', 'phone', 'email', 'is_primary', 'notes']
 
@@ -38,12 +38,20 @@ const clean = v => (blank(v) ? '' : String(v).trim())
 
 /** A VAT number as stored: digits only once spaces are out. */
 export const tidyVat = v => clean(v).replace(/\s+/g, '')
+/** An IBAN or SWIFT as stored: no spaces, capitals. */
+export const tidyCode = v => clean(v).replace(/\s+/g, '').toUpperCase()
+
+/** Outside the Kingdom (his isForeign): a country other than SA. */
+export const isForeign = o => Boolean(o?.country) && String(o.country).toUpperCase() !== 'SA'
+
+/** A supplier's details (category, banking, terms) apply: we buy from it or pay it. */
+export const paysUs = f => (f.roles || []).some(r => r === 'supplier' || r === 'subcontractor')
 
 export function emptyOrg() {
   return {
     kind: 'company', name: '', name_ar: '', roles: [], vat_number: '', cr_number: '', country: 'SA',
-    nat_building_no: '', nat_street: '', nat_district: '', city: '', nat_postal_code: '', nat_additional_no: '',
-    phone: '', email: '', website: '', notes: '',
+    nat_building_no: '', nat_street: '', nat_district: '', city: '', nat_postal_code: '', nat_additional_no: '', address: '',
+    phone: '', email: '', website: '', category_id: '', iban: '', swift: '', payment_terms_days: '', notes: '',
   }
 }
 
@@ -57,7 +65,7 @@ export const needsAddress = f => f.kind === 'company' && !blank(tidyVat(f.vat_nu
 /**
  * What is wrong with an organisation's fields: { field: code }, empty when
  * it can be saved. Codes: required, vat_format, digits, email, role,
- * address_required, country.
+ * address_required, country, iban, iban_sa, swift, terms.
  */
 export function validateOrg(f) {
   const e = {}
@@ -68,6 +76,12 @@ export function validateOrg(f) {
   if (!blank(f.email) && !EMAIL.test(clean(f.email))) e.email = 'email'
   if (!blank(f.country) && !/^[A-Za-z]{2}$/.test(clean(f.country))) e.country = 'country'
   if ((f.roles || []).some(r => !ROLES.includes(r))) e.roles = 'role'
+  // His IBAN rule: any country's shape, the Saudi shape when the country is SA.
+  const iban = tidyCode(f.iban)
+  if (iban && !/^[A-Z]{2}[0-9]{2}[0-9A-Z]{11,30}$/.test(iban)) e.iban = 'iban'
+  else if (iban && !isForeign({ country: clean(f.country) || 'SA' }) && !/^SA[0-9]{2}[0-9A-Z]{20}$/.test(iban)) e.iban = 'iban_sa'
+  if (!blank(f.swift) && !/^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$/.test(tidyCode(f.swift))) e.swift = 'swift'
+  if (!blank(f.payment_terms_days) && !(/^[0-9]+$/.test(clean(f.payment_terms_days)) && Number(f.payment_terms_days) <= 3650)) e.payment_terms_days = 'terms'
   if (needsAddress(f)) for (const k of ADDRESS_REQUIRED) if (blank(f[k]) && !e[k]) e[k] = 'address_required'
   return e
 }
@@ -89,6 +103,8 @@ export function orgRow(f) {
     else if (k === 'vat_number') row.vat_number = tidyVat(f.vat_number) || null
     else if (k === 'country') row.country = clean(f.country).toUpperCase() || 'SA'
     else if (k === 'email') row.email = clean(f.email).toLowerCase() || null
+    else if (k === 'iban' || k === 'swift') row[k] = tidyCode(f[k]) || null
+    else if (k === 'payment_terms_days') row[k] = blank(f[k]) ? null : Number(f[k])
     else row[k] = clean(f[k]) || null
   }
   return row
@@ -191,17 +207,45 @@ const hasAny = (org, roles) => !roles.length || roles.some(r => (org.roles || []
 
 /**
  * The organisations to list. `quick`: a QUICK key; `role`: one role;
- * `status`: 'active' | 'archived' | 'all'; `q`: words found in the names,
- * numbers, city, phone or email (each word must appear somewhere).
+ * `status`: 'active' | 'archived' | 'all'; `kind`: 'company' | 'individual';
+ * `vat`: 'yes' registered for VAT, 'no' not; `foreign`: outside the
+ * Kingdom only; `category`: a category id; `q`: words found in the names,
+ * the number, VAT, CR, city, phone or email (each word must appear somewhere).
+ * His client and supplier lists' filters, on one list.
  */
-export function filterOrgs(orgs = [], { q = '', quick = 'all', role = '', status = 'active' } = {}) {
+export function filterOrgs(orgs = [], { q = '', quick = 'all', role = '', status = 'active', kind = '', vat = '', foreign = false, category = '' } = {}) {
   const quickRoles = QUICK.find(x => x.key === quick)?.roles || []
   const words = normalizeSearch(q).split(' ').filter(Boolean)
   return orgs.filter(o =>
     (status === 'all' || o.status === status)
     && hasAny(o, quickRoles)
     && (!role || (o.roles || []).includes(role))
+    && (!kind || o.kind === kind)
+    && (!vat || (vat === 'yes') === Boolean(o.vat_number))
+    && (!foreign || isForeign(o))
+    && (!category || o.category_id === category)
     && (!words.length || matches(searchText(o), words)))
+}
+
+export const GROUPS = ['kind', 'city', 'category']
+
+/**
+ * Rows in groups, as his lists' "group by": [{ key, rows }], groups in
+ * order of their title, the empty key ("no city") last. `title(key)` names
+ * a group for sorting.
+ */
+export function groupOrgs(rows = [], by = '', title = k => k) {
+  if (!GROUPS.includes(by)) return [{ key: '', rows }]
+  const keyOf = o => (by === 'kind' ? o.kind : by === 'city' ? clean(o.city) : o.category_id || '')
+  const groups = new Map()
+  for (const o of rows) {
+    const k = keyOf(o)
+    if (!groups.has(k)) groups.set(k, [])
+    groups.get(k).push(o)
+  }
+  return [...groups.entries()]
+    .map(([key, list]) => ({ key, rows: list }))
+    .sort((a, b) => (a.key === '') - (b.key === '') || String(title(a.key)).localeCompare(String(title(b.key))))
 }
 
 /** People to list: `q` over names, title, phone, email and organisation; `scope` 'all' | 'with' | 'alone'. */
@@ -224,7 +268,7 @@ const normalizeSearch = s => String(s || '').toLowerCase()
 
 function searchText(o) {
   return normalizeSearch([
-    o.name, o.name_ar, o.vat_number, o.cr_number, o.city, o.phone, o.email, o.job_title,
+    o.contact_no, o.name, o.name_ar, o.vat_number, o.cr_number, o.city, o.phone, o.email, o.job_title,
     o.org?.name, o.org?.name_ar,
   ].filter(Boolean).join(' ') + ' ' + String(o.phone || '').replace(/\D/g, ''))
 }
@@ -275,6 +319,10 @@ const HEADERS = {
   city: ['city', 'المدينة'],
   nat_postal_code: ['nat_postal_code', 'postal code', 'postcode', 'zip', 'الرمز البريدي'],
   nat_additional_no: ['nat_additional_no', 'additional no', 'additional number', 'الرقم الإضافي'],
+  address: ['address', 'العنوان'],
+  iban: ['iban', 'الآيبان', 'الآيبان (iban)'],
+  swift: ['swift', 'swift code', 'رمز السويفت'],
+  payment_terms_days: ['payment_terms_days', 'payment terms', 'payment terms (days)', 'مدة السداد', 'مدة السداد (أيام)'],
   phone: ['phone', 'telephone', 'mobile', 'الهاتف', 'الجوال'],
   email: ['email', 'e-mail', 'البريد', 'البريد الإلكتروني'],
   website: ['website', 'web', 'site', 'الموقع'],
@@ -283,7 +331,7 @@ const HEADERS = {
 const HEADER_OF = Object.fromEntries(Object.entries(HEADERS).flatMap(([f, names]) => names.map(n => [n, f])))
 
 /** A template's first line, the field names in order. */
-export const CSV_TEMPLATE = 'name,name_ar,kind,roles,vat_number,cr_number,city,nat_building_no,nat_street,nat_district,nat_postal_code,nat_additional_no,phone,email,website,notes'
+export const CSV_TEMPLATE = 'name,name_ar,kind,roles,vat_number,cr_number,country,city,nat_building_no,nat_street,nat_district,nat_postal_code,nat_additional_no,address,phone,email,website,iban,swift,payment_terms_days,notes'
 
 /**
  * Role words in a cell ("client; supplier", "عميل، مورد", "main_contractor")
@@ -340,4 +388,23 @@ export function csvToOrgs(text, orgs = [], roleNames = {}) {
     out.push({ line: i + 2, fields: f, errors, duplicates: findDuplicates(f, [...orgs, ...earlier]) })
   })
   return { columns: header, ignored, rows: out }
+}
+
+// ── The activity log ──
+
+// Fields the log shows by their own value; the rest are shown as written.
+const IGNORED = new Set(['id', 'workspace_id', 'org_id', 'contact_no'])
+
+/**
+ * One activity row (contacts_activity) as the history shows it:
+ * { who: 'person' | 'org', action, label, changes: [[field, old, new]] }.
+ * `show(field, value)` writes a value for the reader (a role list, a
+ * category's name); fields it does not know are written as they are.
+ */
+export function describeActivity(row, show = (_f, v) => v) {
+  const fmt = (f, v) => (v === null || v === undefined || v === '' || (Array.isArray(v) && !v.length) ? '—' : String(show(f, v)))
+  const changes = Object.entries(row.changes || {})
+    .filter(([f]) => !IGNORED.has(f))
+    .map(([f, [from, to]]) => [f, fmt(f, from), fmt(f, to)])
+  return { who: row.person_id ? 'person' : 'org', action: row.action, label: row.label || '', changes }
 }

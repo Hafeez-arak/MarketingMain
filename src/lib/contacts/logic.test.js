@@ -3,6 +3,7 @@ import {
   ROLES, validateOrg, validatePerson, needsAddress, orgRow, personRow, emptyOrg,
   normalizeName, similarNames, findDuplicates, filterOrgs, filterPeople, quickCounts,
   parseCsv, parseRoles, csvToOrgs, displayName, otherName, CSV_TEMPLATE,
+  isForeign, paysUs, groupOrgs, describeActivity,
 } from './logic'
 
 const org = (over = {}) => ({ ...emptyOrg(), id: over.id || 'x', status: 'active', ...over })
@@ -178,5 +179,64 @@ describe('CSV import', () => {
     expect(csvToOrgs(`${CSV_TEMPLATE}\n`).ignored).toEqual([])
     expect(CSV_TEMPLATE.split(',')).toContain('roles')
     expect(ROLES).toHaveLength(6)
+  })
+})
+
+describe('the rest of his suppliers and clients', () => {
+  it('IBAN: Saudi shape in the Kingdom, any country\'s outside; SWIFT and terms have a shape', () => {
+    expect(validateOrg(org({ name: 'a', iban: 'SA03 8000 0000 6080 1016 7519' }))).toEqual({})
+    expect(validateOrg(org({ name: 'a', iban: 'IT60X0542811101000000123456' })).iban).toBe('iban_sa')
+    expect(validateOrg(org({ name: 'a', country: 'IT', iban: 'IT60X0542811101000000123456' }))).toEqual({})
+    expect(validateOrg(org({ name: 'a', country: 'IT', iban: 'not an iban' })).iban).toBe('iban')
+    expect(validateOrg(org({ name: 'a', swift: 'BC1' })).swift).toBe('swift')
+    expect(validateOrg(org({ name: 'a', swift: 'bcititmm' }))).toEqual({})
+    expect(validateOrg(org({ name: 'a', payment_terms_days: '4000' })).payment_terms_days).toBe('terms')
+    expect(validateOrg(org({ name: 'a', payment_terms_days: '-1' })).payment_terms_days).toBe('terms')
+    expect(orgRow(org({ name: 'a', iban: ' sa03 8000 ', swift: 'bcit itmm', payment_terms_days: '30', category_id: '' })))
+      .toMatchObject({ iban: 'SA038000', swift: 'BCITITMM', payment_terms_days: 30, category_id: null })
+  })
+
+  it('foreign and "pays us" as his screens decide them', () => {
+    expect([isForeign({ country: 'IT' }), isForeign({ country: 'SA' }), isForeign({})]).toEqual([true, false, false])
+    expect([paysUs({ roles: ['supplier'] }), paysUs({ roles: ['subcontractor'] }), paysUs({ roles: ['client'] })]).toEqual([true, true, false])
+  })
+
+  const orgs = [
+    org({ id: '1', name: 'A', kind: 'company', city: 'Riyadh', vat_number: '300000000000003', category_id: 'c1', contact_no: 'C-2026-000001' }),
+    org({ id: '2', name: 'B', kind: 'individual', city: 'Jeddah' }),
+    org({ id: '3', name: 'C', kind: 'company', city: '', country: 'IT', category_id: 'c1' }),
+    org({ id: '4', name: 'D', kind: 'company', city: 'Riyadh', category_id: 'c2' }),
+  ]
+  const ids = rows => rows.map(r => r.id)
+
+  it('his list filters: company or individual, VAT-registered, foreign, category, and the number in search', () => {
+    expect(ids(filterOrgs(orgs, { kind: 'individual' }))).toEqual(['2'])
+    expect(ids(filterOrgs(orgs, { vat: 'yes' }))).toEqual(['1'])
+    expect(ids(filterOrgs(orgs, { vat: 'no' }))).toEqual(['2', '3', '4'])
+    expect(ids(filterOrgs(orgs, { foreign: true }))).toEqual(['3'])
+    expect(ids(filterOrgs(orgs, { category: 'c1' }))).toEqual(['1', '3'])
+    expect(ids(filterOrgs(orgs, { q: 'c-2026-000001' }))).toEqual(['1'])
+  })
+
+  it('group by kind, city or category, the empty group last', () => {
+    expect(groupOrgs(orgs, 'city').map(g => [g.key, ids(g.rows)])).toEqual([['Jeddah', ['2']], ['Riyadh', ['1', '4']], ['', ['3']]])
+    expect(groupOrgs(orgs, 'kind').map(g => g.key)).toEqual(['company', 'individual'])
+    const names = { c1: 'Lighting', c2: 'Controls' }
+    expect(groupOrgs(orgs, 'category', k => names[k] || '').map(g => g.key)).toEqual(['c2', 'c1', ''])
+    expect(groupOrgs(orgs, '')).toEqual([{ key: '', rows: orgs }])
+  })
+
+  it('a history row reads field by field, old → new, with dashes for empty', () => {
+    const row = { action: 'update', label: 'Najd', person_id: null, changes: { city: [null, 'Riyadh'], roles: [['client'], ['client', 'supplier']], workspace_id: ['x', 'y'] } }
+    const show = (f, v) => (f === 'roles' ? v.join(' + ') : v)
+    expect(describeActivity(row, show)).toEqual({ who: 'org', action: 'update', label: 'Najd', changes: [['city', '—', 'Riyadh'], ['roles', 'client', 'client + supplier']] })
+    expect(describeActivity({ action: 'insert', person_id: 'p', label: 'Omar' })).toEqual({ who: 'person', action: 'insert', label: 'Omar', changes: [] })
+  })
+
+  it('the CSV reads the supplier columns too', () => {
+    const out = csvToOrgs('name,country,iban,swift,payment terms,address\nLuce,IT,IT60X0542811101000000123456,BCITITMM,60,Milano\nBad,SA,IT60X0542811101000000123456,,x,\n')
+    expect(out.ignored).toEqual([])
+    expect(out.rows[0]).toMatchObject({ errors: {}, fields: { country: 'IT', payment_terms_days: '60', address: 'Milano' } })
+    expect(out.rows[1].errors).toEqual({ iban: 'iban_sa', payment_terms_days: 'terms' })
   })
 })
