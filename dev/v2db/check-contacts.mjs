@@ -74,6 +74,13 @@ try {
   const made = await asUser(member, 'contacts_orgs', { method: 'POST', prefer: 'return=representation', body: { workspace_id: ARAK, name, roles: ['supplier', 'client'] } })
   const id = made.rows?.[0]?.id
   check(made.ok && JSON.stringify(made.rows[0].roles) === '["client","supplier"]', 'Work adds an organisation (roles kept in order)')
+  check(/^C-\d{4}-\d{6}$/.test(made.rows?.[0]?.contact_no || ''), `and the database numbers it (${made.rows?.[0]?.contact_no})`)
+  const sa = await asUser(member, `contacts_orgs?id=eq.${id}`, { method: 'PATCH', body: { iban: 'IT60X0542811101000000123456' } })
+  check(!sa.ok, 'a foreign IBAN is refused while the country is SA')
+  check((await asUser(member, `contacts_orgs?id=eq.${id}`, { method: 'PATCH', body: { country: 'IT', iban: 'IT60X0542811101000000123456', payment_terms_days: 30 } })).ok, 'and accepted once the country is set')
+  const cat = await asUser(member, 'contacts_categories', { method: 'POST', body: { workspace_id: ARAK, name: `Check category (test) ${Date.now()}` } })
+  check(!cat.ok, 'Work cannot name supplier categories')
+  check((await asUser(member, `contacts_activity?org_id=eq.${id}&select=id`)).rows.length === 0, 'Work does not read the activity log')
   const dup = await asUser(member, 'contacts_orgs', { method: 'POST', body: { workspace_id: ARAK, name: 'Copy (test)', vat_number: '399999999900013' } })
   check(!dup.ok && dup.rows?.message === 'CONTACTS_DUPLICATE_VAT', `the same VAT number is refused, naming the holder ("${dup.rows?.details}")`)
   const arch = await asUser(member, `contacts_orgs?id=eq.${id}`, { method: 'PATCH', body: { status: 'archived' } })
@@ -87,6 +94,9 @@ try {
   check((await grant('manage')).ok, 'the admin grants Manage')
   const a = await asUser(member, `contacts_orgs?id=eq.${id}`, { method: 'PATCH', prefer: 'return=representation', body: { status: 'archived' } })
   check(a.ok && a.rows[0].archived_by === uid(member), 'Manage archives, and the database records who')
+  const log = (await asUser(member, `contacts_activity?org_id=eq.${id}&select=action,changes,actor&order=id`)).rows
+  check(log.map(r => r.action).join(',') === 'insert,update,update' && log.every(r => r.actor === uid(member)) && log[2].changes.status?.[1] === 'archived',
+    `Manage reads the activity log: ${log.map(r => r.action).join(', ')}, all by the member, the last one archiving it`)
   const locked = await asUser(member, `contacts_orgs?id=eq.${id}`, { method: 'PATCH', body: { notes: 'x' } })
   check(!locked.ok && locked.rows?.message === 'CONTACTS_ARCHIVED', 'an archived organisation is locked')
   const late = await asUser(member, 'contacts_people', { method: 'POST', body: { workspace_id: ARAK, org_id: id, name: 'Late (test)' } })
@@ -96,10 +106,13 @@ try {
   check(imp2.ok && Array.isArray(imp2.rows), 'Manage may import')
   const gone = await asUser(member, `contacts_orgs?id=eq.${id}`, { method: 'DELETE', prefer: 'return=representation' })
   check(gone.ok && gone.rows.length === 1, 'Manage deletes an organisation nobody uses (cleanup)')
+  const after = (await asUser(admin, `contacts_activity?org_id=eq.${id}&select=action&order=id`)).rows
+  check(after.at(-1)?.action === 'delete', 'and the log keeps its history, ending with the delete')
 } finally {
   const back = await asUser(admin, `section_access?workspace_id=eq.${ARAK}&user_id=eq.${uid(member)}&section=eq.contacts`, { method: 'DELETE', prefer: 'return=representation' })
   check(back.ok && back.rows.length === 1, 'cleanup: the check\'s grant is taken away again')
   const left = await asUser(admin, `contacts_orgs?name=like.${encodeURIComponent('Check org (test)*')}&select=id`)
+  // (The deleted organisation's history stays in contacts_activity, as Musa's audit log keeps it.)
   check(left.rows.length === 0, 'cleanup: nothing of the check is left')
 }
 console.log(failed ? `\n${failed} failed.` : '\nAll as intended.')

@@ -70,6 +70,24 @@ values
    null, null, null, 'Ghusn only.')
 on conflict (id) do nothing;
 
+-- Supplier categories (Musa's screen: the company names them, Arabic and English).
+insert into public.contacts_categories (id, workspace_id, name, name_en, is_active)
+values
+  ('e0000000-0000-4000-8000-000000000001', '00000000-0000-0000-0000-000000000001', 'وحدات إنارة (تجربة)', 'Lighting units (test)', true),
+  ('e0000000-0000-4000-8000-000000000002', '00000000-0000-0000-0000-000000000001', 'أنظمة تحكم (تجربة)', 'Control systems (test)', true),
+  ('e0000000-0000-4000-8000-000000000003', '00000000-0000-0000-0000-000000000001', 'تخليص جمركي (تجربة)', 'Customs clearance (test)', false)
+on conflict (id) do nothing;
+
+-- Suppliers' categories, banking and terms (only where not set yet, so a re-run changes nothing).
+update public.contacts_orgs set category_id = 'e0000000-0000-4000-8000-000000000001', payment_terms_days = 30,
+       iban = 'SA4420000001234567891234', swift = 'RIBLSARI'
+ where id = 'c0000000-0000-4000-8000-000000000002' and category_id is null;
+update public.contacts_orgs set category_id = 'e0000000-0000-4000-8000-000000000002', payment_terms_days = 45
+ where id = 'c0000000-0000-4000-8000-000000000006' and category_id is null;
+update public.contacts_orgs set category_id = 'e0000000-0000-4000-8000-000000000001', payment_terms_days = 60,
+       country = 'IT', iban = 'IT60X0542811101000000123456', swift = 'BCITITMM', address = 'Via della Luce 10, 20121 Milano'
+ where id = 'c0000000-0000-4000-8000-000000000009' and category_id is null;
+
 -- Archived after insert, as the screen does it (archived_at is stamped).
 update public.contacts_orgs set status = 'archived'
  where id = 'c0000000-0000-4000-8000-000000000010' and status = 'active';
