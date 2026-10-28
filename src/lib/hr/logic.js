@@ -12,6 +12,11 @@
 export const DOC_WARN_DAYS = 60 // papers expiring within this many days are "soon" (his number)
 export const DOC_TYPES = ['national_id', 'iqama', 'passport', 'work_permit', 'health_cert', 'driving_license', 'other']
 export const LEAVE_STATUSES = ['pending', 'approved', 'rejected', 'cancelled']
+export const CONTRACT_STATUSES = ['draft', 'running', 'expired', 'cancelled']
+export const EMPLOYMENT_TYPES = ['full_time', 'part_time', 'contractor']
+export const ID_TYPES = ['national_id', 'iqama', 'passport']
+export const PAPER_MAX_BYTES = 10 * 1024 * 1024
+export const PAPER_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
 
 const DAY_MS = 86_400_000
 const toUtc = day => Date.parse(`${day}T00:00:00Z`)
@@ -69,14 +74,36 @@ export function matchLogin(email, logins = []) {
 
 // ── The directory ──
 
-/** Employees matching a search (names, number, job, email, phone), a department and a status. */
-export function filterEmployees(employees, { q = '', department = '', status = 'active' } = {}) {
+/**
+ * Employees matching a search (names, number, trade, job, email, phone), a
+ * department, a status and a kind: 'direct' | 'indirect' | 'docs' (papers
+ * expiring: needs `expiringIds`) | 'noContract' (needs `runningIds`).
+ */
+export function filterEmployees(employees, { q = '', department = '', status = 'active', kind = '', expiringIds = null, runningIds = null } = {}) {
   const needle = q.trim().toLowerCase()
   return employees.filter(e =>
     (!status || e.status === status)
     && (!department || (department === 'none' ? !e.department_id : e.department_id === department))
-    && (!needle || [e.name_en, e.name_ar, e.employee_no, e.job_title, e.work_email, e.work_phone]
+    && (!kind
+      || (kind === 'direct' && e.is_direct_labor)
+      || (kind === 'indirect' && !e.is_direct_labor)
+      || (kind === 'docs' && Boolean(expiringIds?.has(e.id)))
+      || (kind === 'noContract' && e.status === 'active' && runningIds != null && !runningIds.has(e.id)))
+    && (!needle || [e.name_en, e.name_ar, e.employee_no, e.trade, e.job_title, e.work_email, e.work_phone]
       .some(v => String(v || '').toLowerCase().includes(needle))))
+}
+
+/** Rows grouped by 'department' | 'job' | 'manager' (or one group when `by` is empty): [{ key, rows }] in the order found. */
+export function groupEmployees(rows, by = '') {
+  if (!by) return [{ key: '', rows }]
+  const keyOf = e => (by === 'department' ? e.department_id : by === 'job' ? e.job_id : by === 'manager' ? e.manager_id : '') || ''
+  const groups = new Map()
+  for (const e of rows) {
+    const k = keyOf(e)
+    if (!groups.has(k)) groups.set(k, [])
+    groups.get(k).push(e)
+  }
+  return [...groups].map(([key, list]) => ({ key, rows: list }))
 }
 
 // ── Papers and contracts ──
@@ -96,12 +123,26 @@ export function expiringDocs(docs, employees, today) {
     .sort((a, b) => a.expiry_date.localeCompare(b.expiry_date))
 }
 
-/** 'upcoming' | 'current' | 'ended'. */
-export function contractState(c, today) {
-  if (c.start_date > today) return 'upcoming'
-  if (c.end_date && c.end_date < today) return 'ended'
-  return 'current'
+/** Running, with an end date within DOC_WARN_DAYS (his "ending soon"; past-due ones count). */
+export const contractEndingSoon = (c, today) => c.status === 'running' && Boolean(c.end_date) && c.end_date <= addDays(today, DOC_WARN_DAYS)
+
+/**
+ * What a contract's page may offer: edit (a draft only), start (a draft),
+ * close (a running one, with its end date), cancel (draft or running). The
+ * database checks the same, and that only one contract runs at a time.
+ */
+export function contractActions(c, level = null) {
+  const manage = level === 'manage'
+  return {
+    edit: manage && c.status === 'draft',
+    start: manage && c.status === 'draft',
+    close: manage && c.status === 'running',
+    cancel: manage && (c.status === 'draft' || c.status === 'running'),
+  }
 }
+
+/** The least end date a closing may have: the contract's start. */
+export const closeProblem = (c, endDate) => (!endDate || endDate < c.start_date ? 'dates' : null)
 
 // ── Leave ──
 
@@ -125,34 +166,38 @@ export function overlapping(requests, employeeId, from, to, ignoreId = '') {
 }
 
 /**
- * A balance in a year, counted as the database counts it: granted − the
- * approved days of requests starting that year; pending shown beside it.
- * `granted` is null when nothing was granted (or the type keeps no balance).
+ * A balance on a day, counted as the database counts it (his ledger): the
+ * allocations valid that day, less the approved days of requests that start
+ * inside one of those windows (each request once). `pending` is every
+ * waiting request of the type; `until` the latest end of the windows valid
+ * that day; `granted` is null when no allocation is valid that day.
  */
-export function balanceOf({ balances = [], requests = [], employeeId, typeId, year }) {
-  const b = balances.find(x => x.employee_id === employeeId && x.leave_type_id === typeId && Number(x.year) === Number(year))
-  const mine = requests.filter(r => r.employee_id === employeeId && r.leave_type_id === typeId && Number(r.date_from.slice(0, 4)) === Number(year))
-  const sum = st => mine.filter(r => r.status === st).reduce((n, r) => n + Number(r.days), 0)
-  const granted = b ? Number(b.days) : null
-  const used = sum('approved')
-  return { granted, used, pending: sum('pending'), remaining: (granted ?? 0) - used }
+export function ledgerBalance({ allocations = [], requests = [], employeeId, typeId, on }) {
+  const mine = allocations.filter(a => a.employee_id === employeeId && a.leave_type_id === typeId)
+  const valid = mine.filter(a => a.valid_from <= on && on <= a.valid_to)
+  const granted = valid.length ? valid.reduce((n, a) => n + Number(a.days), 0) : null
+  const reqs = requests.filter(r => r.employee_id === employeeId && r.leave_type_id === typeId)
+  const used = reqs.filter(r => r.status === 'approved' && valid.some(a => r.date_from >= a.valid_from && r.date_from <= a.valid_to))
+    .reduce((n, r) => n + Number(r.days), 0)
+  const pending = reqs.filter(r => r.status === 'pending').reduce((n, r) => n + Number(r.days), 0)
+  return { granted, used, pending, remaining: (granted ?? 0) - used, until: valid.length ? valid.map(a => a.valid_to).sort().at(-1) : null }
 }
 
 /**
  * What this person may do with a request: { approve, reject, cancel }.
  * `level` is their HR level; `myEmployeeId` the employee their login is
- * linked to; `managerOf(employeeId)` whether they are that person's direct
- * manager. The same rules as hr_leave_decide().
+ * linked to. His app: only the leave approver (Manage here) decides, never
+ * their own; a pending request is cancelled by the employee or the approver,
+ * an approved one by the approver. The same rules as hr_leave_decide().
  */
-export function leaveActions(request, { level = null, myEmployeeId = '', managerOf = () => false } = {}) {
-  const rank = { view: 1, work: 2, manage: 3 }[level] || 0
+export function leaveActions(request, { level = null, myEmployeeId = '' } = {}) {
+  const manage = level === 'manage'
   const own = Boolean(myEmployeeId) && request.employee_id === myEmployeeId
-  const approver = !own && (rank >= 3 || (rank >= 1 && managerOf(request.employee_id)))
   const pending = request.status === 'pending'
   return {
-    approve: pending && approver,
-    reject: pending && approver,
-    cancel: (pending && (own || rank >= 2)) || (request.status === 'approved' && rank >= 3),
+    approve: pending && manage && !own,
+    reject: pending && manage && !own,
+    cancel: (pending && (own || manage)) || (request.status === 'approved' && manage),
   }
 }
 
@@ -179,7 +224,45 @@ export function errorKey(message = '') {
     ['hr_attendance_span', 'SPAN'], ['hr_attendance_one_open', 'ONE_OPEN'], ['hr_settings_schedule', 'SCHEDULE'],
     ['hr_employees_device_user_no', 'DUP_DEVICE_NO'], ['hr_devices_name', 'NAME_NEEDED'],
     ['hr_employees_email', 'EMAIL'], ['_named', 'NAME_NEEDED'],
+    ['hr_job_positions_name', 'DUP_NAME'], ['hr_employees_employment_type', 'EMPLOYMENT_TYPE'],
+    ['hr_employee_private_identity_uq', 'DUP_IDENTITY'], ['hr_employee_private_id_typed', 'ID_NEEDS_TYPE'],
+    ['hr_contracts_one_running', 'ONE_RUNNING'], ['hr_contracts_weekly_hours', 'WEEKLY_HOURS'], ['hr_contracts_no_uq', 'DUP_NUMBER'],
+    ['hr_leave_allocations_reason', 'ALLOC_REASON'], ['hr_leave_allocations_days', 'ALLOC_DAYS'], ['hr_leave_allocations_dates', 'DATES'],
+    ['hr_documents_file_place', 'FILE_PLACE'], ['hr_documents_file_size', 'FILE_SIZE'],
     ['row-level security', 'NO_RIGHT'], ['permission denied', 'NO_RIGHT'],
   ]) if (m.includes(needle)) return key
   return ''
+}
+
+// ── Paper files ──
+
+/** What is wrong with a file before it is sent, or '' (keys of the words file's `errors`). */
+export function paperFileProblem(file) {
+  if (!file) return ''
+  if (!PAPER_TYPES.includes(file.type)) return 'FILE_TYPE'
+  if (file.size > PAPER_MAX_BYTES) return 'FILE_SIZE'
+  if (file.size <= 0) return 'FILE_SIZE'
+  return ''
+}
+
+/** <workspace>/<employee>/<id>.<ext>: the folder rule of the bucket, a name with nothing from the user in it. */
+export function paperPath(ws, employeeId, file, id = crypto.randomUUID()) {
+  const ext = ({ 'application/pdf': 'pdf', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' })[file.type] || 'bin'
+  return `${ws}/${employeeId}/${id}.${ext}`
+}
+
+export const formatBytes = n => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`)
+
+// ── History ──
+
+const QUIET = new Set(['id', 'workspace_id', 'created_at', 'created_by', 'updated_at', 'updated_by', 'employee_id', 'file_size'])
+
+/** The fields that changed in one history row: [{ field, from, to }]. An insert lists what was set; a delete what was held. */
+export function describeChange(row) {
+  const oldD = row.old_data || {}
+  const newD = row.new_data || {}
+  const keys = [...new Set([...Object.keys(newD), ...Object.keys(oldD)])].filter(k => !QUIET.has(k))
+  if (row.action === 'update') return keys.filter(k => JSON.stringify(oldD[k]) !== JSON.stringify(newD[k])).map(k => ({ field: k, from: oldD[k] ?? null, to: newD[k] ?? null }))
+  const src = row.action === 'insert' ? newD : oldD
+  return keys.filter(k => src[k] !== null && src[k] !== '' && src[k] !== undefined).map(k => ({ field: k, from: null, to: src[k] }))
 }
