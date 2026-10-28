@@ -1,30 +1,30 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Button, PageHeader, Skeleton, Spinner } from '../../components/ui/index'
+import { Link } from 'react-router-dom'
+import { Button, PageHeader, Spinner } from '../../components/ui/index'
 import { useT } from '../../lib/i18n'
-import { nameOf, hhmm } from '../../lib/hr/logic'
-import { fetchSettings, saveSettings, fetchLeaveTypes, saveLeaveType } from '../../lib/hr/client'
+import { nameOf } from '../../lib/hr/logic'
+import { fetchLeaveTypes, saveLeaveType } from '../../lib/hr/client'
 import { HW } from './words'
 import { useHrBase, field } from './useHrBase'
 import { Dialog, ErrorText, Field, Pill } from './parts'
 
 // ─── HR → Settings (v2) ────────────────────────────────────────────────────
 // 2026-10-28, dev/erp-pilot/HR.md. Manage only (lib/modules.js and the
-// database): the work week the attendance sheets count against, and the
-// company's leave types. Nothing is assumed: an empty work week means
-// "unknown", never "every day".
+// database): the company's leave types. The working days and hours moved
+// to Attendance → Records with the rest of attendance's settings, where
+// Musa keeps them (dev/erp-pilot/ATTENDANCE.md).
 
 export function HrSettings() {
   const { t, lang, dir } = useT(HW)
-  const { ws, me } = useHrBase()
-  const [settings, setSettings] = useState(undefined)
+  const { ws } = useHrBase()
   const [types, setTypes] = useState(null)
   const [error, setError] = useState('')
   const [editing, setEditing] = useState(null)
 
   const load = useCallback(async () => {
     if (!ws) return
-    const [s, ty] = await Promise.all([fetchSettings(ws), fetchLeaveTypes(ws)])
-    setSettings(s.row); setTypes(ty.rows); setError(s.error || ty.error || '')
+    const ty = await fetchLeaveTypes(ws)
+    setTypes(ty.rows); setError(ty.error || '')
   }, [ws])
   useEffect(() => { queueMicrotask(load) }, [load])
 
@@ -32,7 +32,7 @@ export function HrSettings() {
     <div className="max-w-3xl space-y-5" dir={dir} lang={lang}>
       <PageHeader title={t.settingsTitle} subtitle={t.settingsSubtitle} />
       <ErrorText error={error} />
-      {settings === undefined ? <Skeleton className="h-40" /> : <WorkWeek key={settings?.updated_at || 'new'} initial={settings} onSave={f => saveSettings(ws, me, f).then(out => { if (!out.error) load(); return out })} />}
+      <p className="text-xs text-text-secondary bg-white border border-border px-4 py-3">{t.workWeekMoved} <Link to="/hr/attendance/records" className="underline">{t.attendanceTitle}</Link></p>
 
       <section className="bg-white border border-border p-4 space-y-3">
         <div className="flex items-center justify-between gap-2">
@@ -63,43 +63,6 @@ export function HrSettings() {
         </Dialog>
       )}
     </div>
-  )
-}
-
-function WorkWeek({ initial, onSave }) {
-  const { t } = useT(HW)
-  const [days, setDays] = useState(initial?.work_days || [])
-  const [start, setStart] = useState(hhmm(initial?.work_start))
-  const [end, setEnd] = useState(hhmm(initial?.work_end))
-  const [grace, setGrace] = useState(initial?.grace_minutes ?? '')
-  const [state, setState] = useState('') // '' | 'busy' | 'saved' | error
-  const toggle = d => setDays(x => (x.includes(d) ? x.filter(y => y !== d) : [...x, d].sort()))
-  return (
-    <form className="bg-white border border-border p-4 space-y-3" onSubmit={async e => {
-      e.preventDefault(); setState('busy')
-      const out = await onSave({ work_days: days, work_start: start || null, work_end: end || null, grace_minutes: grace === '' ? null : Number(grace) })
-      setState(out.error || 'saved')
-    }}>
-      <h2 className="text-sm font-semibold text-text">{t.workWeek}</h2>
-      <p className="text-[11px] text-text-tertiary">{t.workWeekHelp}</p>
-      <fieldset>
-        <legend className="text-[11px] text-text-secondary mb-1">{t.workDays}</legend>
-        <div className="flex flex-wrap gap-1.5">{t.weekdays.map((name, d) => (
-          <button key={d} type="button" aria-pressed={days.includes(d)} onClick={() => toggle(d)}
-            className={`rounded-md border px-2.5 py-1 text-xs ${days.includes(d) ? 'bg-stone-900 border-stone-900 text-white' : 'bg-white border-border text-text-secondary hover:bg-stone-50'}`}>{name}</button>
-        ))}</div>
-      </fieldset>
-      <div className="grid grid-cols-3 gap-2 max-w-md">
-        <Field label={t.workStart}><input type="time" value={start} onChange={e => setStart(e.target.value)} className={field} /></Field>
-        <Field label={t.workEnd}><input type="time" value={end} min={start} onChange={e => setEnd(e.target.value)} className={field} /></Field>
-        <Field label={t.grace}><input type="number" min="0" max="240" value={grace} onChange={e => setGrace(e.target.value)} className={field} /></Field>
-      </div>
-      {state && !['busy', 'saved'].includes(state) && <ErrorText error={state} />}
-      <div className="flex items-center gap-2">
-        <Button type="submit" size="sm" disabled={state === 'busy'}>{state === 'busy' && <Spinner size="sm" />}{t.save}</Button>
-        {state === 'saved' && <span className="text-[11px] text-green-700" aria-live="polite">{t.saved}</span>}
-      </div>
-    </form>
   )
 }
 

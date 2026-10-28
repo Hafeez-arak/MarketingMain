@@ -1,0 +1,203 @@
+// The attendance screens' words, English and Arabic (lib/i18n.js useT).
+// Musa's Arabic wording is kept where he has it; every English key has its
+// Arabic (lib/i18n.test.js checks it). Refusals from the database are in
+// the HR words (../words.js errors), shown by ErrorText.
+
+export const AW = {
+  en: {
+    title: 'Attendance',
+    tabs: { today: 'Today', records: 'Records', log: 'Punch log', flags: 'Late and early' },
+    subtitles: {
+      today: 'Who is in today: planned hours, arrival, departure and hours for each person.',
+      records: 'Every check-in and check-out, by hand or from the device. Corrections keep who made them and why.',
+      log: 'Every punch the devices sent, exactly as they sent it, and what each counts as.',
+      flags: 'Late arrivals and early leaves found in the device punches, with their email and any excuse.',
+      daily: 'Every employee on one day: planned time, first and last punch, lateness, early leave, hours, status and source.',
+      monthly: 'One employee\'s month, day by day, with the totals: a reference for the payroll and for a written notice.',
+      review: 'Device days and what became of them. Those waiting for someone come first.',
+      devices: 'The fingerprint devices, their keys, and which device number is which employee.',
+      everyone: 'Everyone on the device, linked or not: one row per person and day from the punches.',
+    },
+    backToRecords: 'Attendance records',
+
+    // Shared
+    employee: 'Employee', person: 'Person', number: 'Number', day: 'Date', time: 'Time', hours: 'Hours', status: 'Status', source: 'Source',
+    notes: 'Notes', punches: 'Punches', device: 'Device', from: 'From', to: 'To', month: 'Month', show: 'Show', search: 'Search', all: 'All',
+    save: 'Save', cancel: 'Cancel', close: 'Close', print: 'Print', excel: 'Excel', nothing: 'Nothing here.', loading: 'Loading…',
+    dash: '—', minutes: n => `${n} min`, groupBy: 'Group by', noGroup: 'No grouping', countRows: n => `${n} rows`,
+    schedule: 'Working hours', arrival: 'Arrival', departure: 'Departure', duration: 'Hours worked', soFar: 'Hours so far',
+    statuses: {
+      leave: 'On leave', present: 'In', left: 'Left', single: 'One punch — to review', absent: 'Absent, no leave',
+      not_yet: 'Not in yet', off: 'Not a working day', unknown: 'Nothing recorded', not_employed: 'Outside the employment',
+    },
+    sources: { device: 'Fingerprint device', manual: 'By hand', corrected: 'Corrected by hand' },
+    punchStates: {
+      applied: 'Recorded from the device', corrected: 'Corrected by hand', manual: 'Recorded by hand', open: 'In (one punch so far)',
+      single: 'One punch, no departure', unlinked: 'Number not linked to an employee', inactive: 'Employee not active that day',
+      before_hire: 'Before the hire date', on_leave: 'On approved leave', conflict: 'Clashes with another record',
+    },
+    roles: { in: 'In', out: 'Out', mid: 'In between', dup: 'Repeat', single: 'Alone — to review' },
+    kinds: { late: 'Late arrival', early: 'Early leave' },
+    emailStatuses: { pending: 'Waiting to send', sent: 'Emailed', failed: 'Could not send', no_email: 'No email for the employee', past: 'Past day: not emailed', off: 'Emails switched off' },
+    lateMin: n => `${n} min late`, earlyMin: n => `left ${n} min early`, excused: 'Excused',
+
+    // Today
+    statPresent: 'In now', statPunched: 'Punched today', statLeave: 'On leave today', statNone: 'Not in today', statNotPunched: 'No punch today', statLate: 'Late today',
+    deviceHint: 'Attendance comes from the fingerprint device (refreshed every few minutes): the first punch of the day is the arrival and the last the departure. Corrections are made in Records.',
+    noEmployees: 'No active employees. Add them in Employees.', notLinked: 'Not on the device', notLinkedYet: 'Not linked yet', link: 'Link',
+    checkIn: 'Check in', checkOut: 'Check out', checkedIn: who => `${who} checked in.`, checkedOut: who => `${who} checked out.`,
+    punchesToday: n => `Punches today: ${n}`, sourceIs: s => `Source: ${s}`,
+
+    // Records
+    employeeRecords: 'Employee records', everyoneOnDevice: 'Everyone on the device',
+    dailyReport: 'Daily attendance', monthlySheet: 'Monthly attendance sheet', needAttention: n => `Device days needing attention: ${n}`, devicesLink: 'Devices and linking',
+    manualTitle: 'Record by hand or correct', manualHelp: 'For a forgotten punch, work outside the office, and the like.',
+    notesReason: 'Reason (forgot to punch, outside work…)', record: 'Record', recorded: 'Attendance recorded.',
+    weekTitle: 'Working days and hours', weekNotSet: 'not set', workDays: 'Working days', dailyHours: 'Daily working hours',
+    workStart: 'Start', workEnd: 'End', grace: 'Grace minutes for lateness', scheduleFrom: 'Hours apply from',
+    scheduleHelp: 'Optional, entered together: late = the first punch after the start plus the grace, counted from the start; early leave = the last punch before the end, judged once the day is over. Without them nothing is flagged.',
+    emailsSwitch: 'Email employees about late arrivals and early leaves', emailsChanged: t => `Last changed: ${t}`,
+    emailsHelp: 'Off until the HR mailbox is connected. Nothing recorded while it is off is emailed later, and nobody who has left is emailed.',
+    repeatMinutes: 'Repeat-punch minutes', repeatHelp: 'Entered by the company as in its own rules; never assumed. Device punches within these minutes of the first punch of the day count as one punch (pressed twice).',
+    settingsSaved: 'Working days and hours saved.', mailbox: 'HR mailbox', mailboxOn: 'Connected', mailboxOff: 'Not connected yet',
+    mailboxOffHelp: 'The late and early-leave emails go from the HR mailbox only. It is not connected in this version, so the emails stay off.',
+    summaryTitle: 'The month for each employee', daysPresent: 'Days present', totalHours: 'Total hours', leaveDays: 'Approved leave days',
+    missingDays: 'Working days with no record', summaryHelp: d => `A reference for deductions written in the payroll; nothing is deducted automatically. "Working days with no record" counts up to ${d}, and shows «—» until the working days are set.`,
+    filters: { open: 'Not checked out yet', today: 'Today', this_month: 'This month', last_month: 'Last month', device: 'From the fingerprint device', corrected: 'Corrected by hand', manual: 'Recorded by hand', yesterday: 'Yesterday', week: 'This week', unlinked: 'Not linked to an employee', linked: 'Linked to an employee', action: 'Needs action', late: 'Late arrival', early: 'Early leave', not_excused: 'No excuse', excused: 'Excused', email_failed: 'Could not send', no_email: 'No email for the employee', all: 'Everything' },
+    groups: { employee: 'Employee', day: 'Date', person: 'Person', month: 'Month' },
+    searchName: 'Search by employee name…', searchPerson: 'Name or device number…',
+    in: 'In', correct: 'Correct', correctTitle: (who, d) => `${who}, ${d}`, correctionReason: 'Reason for the correction', corrected: 'Record corrected.',
+    history: 'History', auditHint: 'Every record and correction is kept with the name of who made it.', someone: 'someone',
+    noRecords: 'No records', noRecordsHelp: 'Change the search or remove the filters.',
+
+    // Daily / monthly
+    deptAll: 'All departments', lateOnly: 'Late or early only', firstPunch: 'First punch (arrival)', lastPunch: 'Last punch (departure)',
+    lateCol: 'Late (min)', earlyCol: 'Left early (min)', punchCount: 'Punches', employeeNo: 'No.', pickEmployee: 'Choose an employee',
+    present: 'Days present', absent: 'Absent', leave: 'Leave', late: 'Late', early: 'Left early', totals: 'Totals',
+    lateTotals: (n, m) => `${n} (${m} min)`, weekday: 'Day', noEmployee: 'No employee to show.',
+    weekdays: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+    dailyFile: 'Daily attendance', jobDept: (job, dept) => [job, dept].filter(Boolean).join(' · '),
+
+    // Review
+    retry: 'Try again', retried: (who, n) => `${who}'s punches processed again: ${n} days recorded.`,
+
+    // Devices
+    devicesTitle: 'Fingerprint devices', newDevice: 'Register a device', deviceName: 'Device name', timezone: 'Time zone of the device clock',
+    deviceNotes: 'Notes', register: 'Register', keyOnce: 'Copy the key now; it is not shown again.', copy: 'Copy', copied: 'Copied',
+    keyFor: n => `Key for ${n}`, newKey: 'New key', newKeyConfirm: 'Issue a new key? The old one stops working at once.', keyIssued: 'A new key was issued and the old one stopped. Put it in the office bridge.',
+    stop: 'Stop', start: 'Start again', stopped: 'Stopped', running: 'Running', stoppedMsg: 'Device stopped: no punches are accepted from it until it is started again.', startedMsg: 'Device started again.',
+    lastPunchAt: 'Last punch', lastSync: 'Last sync', never: 'Never', users: 'Users on the device', keyHint: h => `Key ending ${h}`,
+    syncLine: (r, i) => `${r} received, ${i} new`, deviceInfo: 'Device',
+    upload: 'Upload a file of punches', uploadHelp: 'The CSV the office bridge writes when it cannot reach the server.', uploaded: (r, i, d, x, p) => `File uploaded: ${r} punches, ${i} new, ${d} repeats, ${x} refused (in the future), ${p} attendance days.`,
+    uploadEmpty: 'No punches found in that file.',
+    people: 'Numbers and employees', peopleHelp: 'Every number the devices know, with the employee linked to it. One number per employee.',
+    nameOnDevice: 'Name on the device', enabled: 'Enabled', locked: 'Locked: the device already made records under this number',
+    noLink: '— not linked —', saveLinks: 'Save links', linked: (n, d) => `Links saved: ${n} employees, and ${d} attendance days from earlier punches.`,
+    noDevices: 'No device yet.', noNumbers: 'No numbers yet: they come with the first sync.',
+
+    // Punch log
+    period: 'Period', allTime: 'All', unlinkedNumbers: 'Numbers not linked to an employee',
+    summaryPunches: 'Punches', summaryEmployees: 'Employees', summaryUnlinked: 'Unlinked numbers', summaryRepeats: 'Repeat punches', summarySingles: 'Lone punches',
+    repeatUnset: 'The repeat-punch minutes are not set, so no punch is called a repeat.', role: 'Counts as', codes: 'Device codes',
+    verifyInout: (v, i) => `verify ${v ?? '—'} · button ${i ?? '—'}`,
+
+    // Flags
+    flagsMonth: 'The month per employee', lateCount: 'Late', lateMinutes: 'Minutes late', earlyCount: 'Left early', earlyMinutes: 'Minutes early', excusedCount: 'Excused',
+    kind: 'Kind', minutesCol: 'Minutes', scheduled: 'Scheduled', actual: 'Punch', graceCol: 'Grace', email: 'Email', excuse: 'Excuse', addExcuse: 'Record an excuse',
+    excuseReason: 'Reason for the excuse', excuseSaved: 'Excuse recorded.', excuseBy: (who, when) => `${who}, ${when}`,
+  },
+  ar: {
+    title: 'الحضور',
+    tabs: { today: 'اليوم', records: 'سجلات الحضور', log: 'سجل البصمات', flags: 'التأخر والانصراف المبكر' },
+    subtitles: {
+      today: 'من حضر اليوم: ساعات العمل ووقت الحضور والانصراف ومدة الدوام لكل موظف.',
+      records: 'كل تسجيل حضور وانصراف، يدويًا أو من الجهاز. التصحيح يُحفظ مع من قام به وسببه.',
+      log: 'كل بصمة أرسلتها الأجهزة كما أرسلتها، وما تُحسب عليه.',
+      flags: 'حالات التأخر والانصراف المبكر من بصمات الجهاز، مع البريد وأي عذر.',
+      daily: 'كل موظف في يوم: الموعد، أول بصمة وآخرها، التأخر والانصراف المبكر، الساعات والحالة والمصدر.',
+      monthly: 'موظف وشهر يومًا بيوم مع الإجماليات، مرجع للمسيّر وللإشعار الكتابي.',
+      review: 'أيام بصمات الجهاز وما صارت إليه. ما يحتاج إجراءً أولًا.',
+      devices: 'أجهزة البصمة ومفاتيحها، وأي رقم في الجهاز لأي موظف.',
+      everyone: 'كل من على الجهاز، مربوطًا أو لا: سطر لكل شخص ويوم من البصمات.',
+    },
+    backToRecords: 'سجلات الحضور',
+
+    employee: 'الموظف', person: 'الشخص', number: 'الرقم', day: 'التاريخ', time: 'الوقت', hours: 'الساعات', status: 'الحالة', source: 'المصدر',
+    notes: 'ملاحظات', punches: 'البصمات', device: 'الجهاز', from: 'من', to: 'إلى', month: 'الشهر', show: 'عرض', search: 'بحث', all: 'الكل',
+    save: 'حفظ', cancel: 'إلغاء', close: 'إغلاق', print: 'طباعة', excel: 'إكسل', nothing: 'لا شيء هنا.', loading: 'جارٍ التحميل…',
+    dash: '—', minutes: n => `${n} د`, groupBy: 'تجميع حسب', noGroup: 'بلا تجميع', countRows: n => `${n} سطر`,
+    schedule: 'ساعات العمل', arrival: 'وقت الحضور', departure: 'وقت الانصراف', duration: 'مدة الدوام', soFar: 'المدة حتى الآن',
+    statuses: {
+      leave: 'في إجازة', present: 'حاضر', left: 'انصرف', single: 'بصمة واحدة — للمراجعة', absent: 'غائب بلا إجازة',
+      not_yet: 'لم يسجّل حضورًا', off: 'ليس يوم عمل', unknown: 'بلا تسجيل', not_employed: 'خارج مدة الخدمة',
+    },
+    sources: { device: 'جهاز البصمة', manual: 'يدوي', corrected: 'مصحَّح يدويًا' },
+    punchStates: {
+      applied: 'سُجّل من الجهاز', corrected: 'مصحَّح يدويًا', manual: 'مسجَّل يدويًا', open: 'حاضر (بصمة واحدة حتى الآن)',
+      single: 'بصمة واحدة بلا انصراف', unlinked: 'رقم غير مربوط بموظف', inactive: 'الموظف غير نشط في هذا اليوم',
+      before_hire: 'قبل تاريخ التعيين', on_leave: 'في إجازة معتمدة', conflict: 'يتعارض مع سجل آخر',
+    },
+    roles: { in: 'حضور', out: 'انصراف', mid: 'بينهما', dup: 'مكررة', single: 'وحيدة — للمراجعة' },
+    kinds: { late: 'تأخر في الحضور', early: 'انصراف مبكر' },
+    emailStatuses: { pending: 'بانتظار الإرسال', sent: 'أُرسل البريد', failed: 'تعذّر الإرسال', no_email: 'لا بريد للموظف', past: 'يوم سابق: لا بريد', off: 'البريد متوقف' },
+    lateMin: n => `متأخر ${n} د`, earlyMin: n => `انصرف قبل الموعد بـ ${n} د`, excused: 'بعذر',
+
+    statPresent: 'حاضرون الآن', statPunched: 'بصموا اليوم', statLeave: 'في إجازة اليوم', statNone: 'لم يسجّلوا حضورًا اليوم', statNotPunched: 'لم يبصموا اليوم', statLate: 'متأخرون اليوم',
+    deviceHint: 'الحضور من جهاز البصمة (يُحدَّث كل بضع دقائق): أول بصمة في اليوم حضور وآخرها انصراف. التصحيح من «سجلات الحضور».',
+    noEmployees: 'لا يوجد موظفون نشطون. أضفهم من الموظفين.', notLinked: 'غير مربوط بالجهاز', notLinkedYet: 'لم يُربط بعد', link: 'اربط',
+    checkIn: 'حضور', checkOut: 'انصراف', checkedIn: who => `سُجّل حضور ${who}.`, checkedOut: who => `سُجّل انصراف ${who}.`,
+    punchesToday: n => `عدد البصمات اليوم: ${n}`, sourceIs: s => `المصدر: ${s}`,
+
+    employeeRecords: 'سجلات الموظفين', everyoneOnDevice: 'كل من على الجهاز',
+    dailyReport: 'الحضور اليومي', monthlySheet: 'كشف الحضور الشهري', needAttention: n => `أيام بصمات تحتاج انتباه: ${n}`, devicesLink: 'أجهزة البصمة وربط الموظفين',
+    manualTitle: 'تسجيل يدوي أو تصحيح', manualHelp: 'لبصمة منسية أو مهمة خارجية وما شابه.',
+    notesReason: 'السبب (نسي البصمة، مهمة خارجية…)', record: 'تسجيل', recorded: 'تم تسجيل الحضور.',
+    weekTitle: 'أيام الدوام وساعاته', weekNotSet: 'غير محددة', workDays: 'أيام العمل', dailyHours: 'ساعات العمل اليومية',
+    workStart: 'بداية الدوام', workEnd: 'نهاية الدوام', grace: 'دقائق السماح للتأخر', scheduleFrom: 'يسري الدوام من',
+    scheduleHelp: 'مواعيد الدوام (اختيارية، تُدخل معًا): التأخر = أول بصمة بعد البداية + السماح، ويُحسب من البداية؛ والانصراف المبكر = آخر بصمة قبل النهاية، ويُحكم عليه بعد انتهاء اليوم. بدونها لا يُسجَّل شيء.',
+    emailsSwitch: 'إرسال بريد التأخر والانصراف المبكر للموظفين', emailsChanged: t => `آخر تغيير: ${t}`,
+    emailsHelp: 'متوقف حتى يُربط بريد الموارد البشرية. ما يُسجَّل وهو متوقف لا يُرسل عنه بريد لاحقًا، ولا يُرسل لموظف انتهت خدمته.',
+    repeatMinutes: 'دقائق البصمة المكررة', repeatHelp: 'تُدخلها الشركة كما في نظامها الداخلي؛ لا تُفترض. بصمات الجهاز خلال هذه الدقائق من أول بصمة في اليوم بصمة واحدة (ضُغطت مرتين).',
+    settingsSaved: 'حُفظت أيام الدوام وساعاته.', mailbox: 'بريد الموارد البشرية', mailboxOn: 'البريد مربوط', mailboxOff: 'البريد غير مربوط بعد',
+    mailboxOffHelp: 'يُرسل بريد التأخر والانصراف المبكر من بريد الموارد البشرية فقط. لم يُربط في هذه النسخة، فيبقى البريد متوقفًا.',
+    summaryTitle: 'ملخص الشهر لكل موظف', daysPresent: 'أيام الحضور', totalHours: 'مجموع الساعات', leaveDays: 'أيام الإجازة المعتمدة',
+    missingDays: 'أيام عمل بلا تسجيل', summaryHelp: d => `مرجع للخصومات التي تُكتب في المسيّر بسببها؛ لا يُخصم شيء تلقائيًا. «أيام عمل بلا تسجيل» حتى ${d}، وتبقى «—» حتى تُحدَّد أيام الدوام.`,
+    filters: { open: 'لم ينصرف بعد', today: 'اليوم', this_month: 'هذا الشهر', last_month: 'الشهر الماضي', device: 'من جهاز البصمة', corrected: 'مصحَّح يدويًا', manual: 'مسجَّل يدويًا', yesterday: 'أمس', week: 'هذا الأسبوع', unlinked: 'غير مربوط بموظف', linked: 'مربوط بموظف', action: 'تحتاج إجراء', late: 'تأخر في الحضور', early: 'انصراف مبكر', not_excused: 'بلا عذر', excused: 'بعذر مسجَّل', email_failed: 'تعذّر الإرسال', no_email: 'لا بريد للموظف', all: 'الكل' },
+    groups: { employee: 'الموظف', day: 'التاريخ', person: 'الشخص', month: 'الشهر' },
+    searchName: 'بحث باسم الموظف…', searchPerson: 'الاسم أو الرقم في الجهاز…',
+    in: 'حاضر', correct: 'تصحيح', correctTitle: (who, d) => `${who}، ${d}`, correctionReason: 'سبب التصحيح', corrected: 'تم تصحيح سجل الحضور.',
+    history: 'السجل', auditHint: 'كل تسجيل وتصحيح محفوظ مع اسم من قام به.', someone: 'شخص ما',
+    noRecords: 'لا توجد سجلات', noRecordsHelp: 'غيّر البحث أو أزل الفلاتر.',
+
+    deptAll: 'كل الأقسام', lateOnly: 'المتأخرون أو المنصرفون مبكرًا فقط', firstPunch: 'أول بصمة (حضور)', lastPunch: 'آخر بصمة (انصراف)',
+    lateCol: 'التأخر (دقيقة)', earlyCol: 'انصراف مبكر (دقيقة)', punchCount: 'عدد البصمات', employeeNo: 'الرقم', pickEmployee: 'اختر موظفًا',
+    present: 'أيام الحضور', absent: 'غياب', leave: 'إجازة', late: 'تأخر', early: 'انصراف مبكر', totals: 'الإجماليات',
+    lateTotals: (n, m) => `${n} (${m} د)`, weekday: 'اليوم', noEmployee: 'لا يوجد موظف للعرض.',
+    weekdays: ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'],
+    dailyFile: 'الحضور اليومي', jobDept: (job, dept) => [job, dept].filter(Boolean).join(' · '),
+
+    retry: 'أعد المعالجة', retried: (who, n) => `أُعيدت معالجة بصمات ${who}: ${n} يوم مسجَّل.`,
+
+    devicesTitle: 'أجهزة البصمة', newDevice: 'تسجيل جهاز', deviceName: 'اسم الجهاز', timezone: 'المنطقة الزمنية لساعة الجهاز',
+    deviceNotes: 'ملاحظات', register: 'تسجيل', keyOnce: 'انسخ المفتاح الآن؛ لا يُعرض مرة أخرى.', copy: 'نسخ', copied: 'نُسخ',
+    keyFor: n => `مفتاح ${n}`, newKey: 'مفتاح جديد', newKeyConfirm: 'إصدار مفتاح جديد؟ يتوقف القديم فورًا.', keyIssued: 'صدر مفتاح جديد وأُوقف القديم. ضعه في برنامج الربط في المكتب.',
+    stop: 'إيقاف', start: 'إعادة التشغيل', stopped: 'متوقف', running: 'يعمل', stoppedMsg: 'أُوقف الجهاز: لا تُقبل منه بصمات حتى يُعاد تشغيله.', startedMsg: 'أُعيد تشغيل الجهاز.',
+    lastPunchAt: 'آخر بصمة', lastSync: 'آخر مزامنة', never: 'لم تحدث', users: 'المستخدمون في الجهاز', keyHint: h => `مفتاح ينتهي بـ ${h}`,
+    syncLine: (r, i) => `${r} مستلمة، ${i} جديدة`, deviceInfo: 'الجهاز',
+    upload: 'رفع ملف بصمات', uploadHelp: 'ملف CSV الذي يكتبه برنامج الربط حين لا يصل إلى الخادم.', uploaded: (r, i, d, x, p) => `رُفع الملف: ${r} بصمة، جديدة ${i}، مكررة ${d}، مرفوضة لوقت في المستقبل ${x}، وأيام حضور ${p}.`,
+    uploadEmpty: 'لم توجد بصمات في هذا الملف.',
+    people: 'الأرقام والموظفون', peopleHelp: 'كل رقم تعرفه الأجهزة مع الموظف المربوط به. رقم واحد لكل موظف.',
+    nameOnDevice: 'الاسم في الجهاز', enabled: 'مفعّل', locked: 'مقفل: سجّل الجهاز حضورًا بهذا الرقم',
+    noLink: '— غير مربوط —', saveLinks: 'حفظ الربط', linked: (n, d) => `حُفظ الربط: ${n} موظف، و${d} يوم حضور من البصمات السابقة.`,
+    noDevices: 'لا يوجد جهاز بعد.', noNumbers: 'لا أرقام بعد: تأتي مع أول مزامنة.',
+
+    period: 'الفترة', allTime: 'الكل', unlinkedNumbers: 'أرقام غير مربوطة بموظف',
+    summaryPunches: 'البصمات', summaryEmployees: 'الموظفون', summaryUnlinked: 'أرقام غير مربوطة', summaryRepeats: 'بصمات مكررة', summarySingles: 'بصمات وحيدة',
+    repeatUnset: 'دقائق البصمة المكررة غير محددة، فلا تُعدّ أي بصمة مكررة.', role: 'تُحسب', codes: 'رموز الجهاز',
+    verifyInout: (v, i) => `التحقق ${v ?? '—'} · الزر ${i ?? '—'}`,
+
+    flagsMonth: 'الشهر لكل موظف', lateCount: 'تأخر', lateMinutes: 'دقائق التأخر', earlyCount: 'انصراف مبكر', earlyMinutes: 'دقائق الانصراف المبكر', excusedCount: 'بعذر',
+    kind: 'النوع', minutesCol: 'الدقائق', scheduled: 'الموعد', actual: 'البصمة', graceCol: 'السماح', email: 'البريد', excuse: 'العذر', addExcuse: 'تسجيل عذر',
+    excuseReason: 'سبب العذر', excuseSaved: 'سُجّل العذر.', excuseBy: (who, when) => `${who}، ${when}`,
+  },
+}

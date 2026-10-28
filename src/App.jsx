@@ -67,7 +67,12 @@ import { HrEmployees } from './pages/hr/Employees'
 import { HrEmployee } from './pages/hr/Employee'
 import { HrDepartments } from './pages/hr/Departments'
 import { HrLeave } from './pages/hr/Leave'
-import { HrAttendance } from './pages/hr/Attendance'
+import { AttendanceToday } from './pages/hr/attendance/Today'
+import { AttendanceRecords } from './pages/hr/attendance/Records'
+import { AttendancePunchLog } from './pages/hr/attendance/PunchLog'
+import { AttendanceFlags } from './pages/hr/attendance/Flags'
+import { AttendanceDaily, AttendanceMonthly } from './pages/hr/attendance/Reports'
+import { AttendanceReview, AttendanceDevices, AttendanceEveryone } from './pages/hr/attendance/Devices'
 import { HrDocuments } from './pages/hr/Documents'
 import { HrSettings } from './pages/hr/Settings'
 import { fromLegacy, canVisit, PARKED } from './lib/modules'
@@ -243,7 +248,15 @@ function ProtectedApp() {
             <Route path="/hr/employee"           element={<HrEmployee />} />
             <Route path="/hr/departments"        element={<HrDepartments />} />
             <Route path="/hr/leave"              element={<HrLeave />} />
-            <Route path="/hr/attendance"         element={<HrAttendance />} />
+            <Route path="/hr/attendance"         element={<AttendanceToday />} />
+            <Route path="/hr/attendance/records" element={<AttendanceRecords />} />
+            <Route path="/hr/attendance/log"     element={<AttendancePunchLog />} />
+            <Route path="/hr/attendance/flags"   element={<AttendanceFlags />} />
+            <Route path="/hr/attendance/daily"   element={<AttendanceDaily />} />
+            <Route path="/hr/attendance/monthly" element={<AttendanceMonthly />} />
+            <Route path="/hr/attendance/review"  element={<AttendanceReview />} />
+            <Route path="/hr/attendance/devices" element={<AttendanceDevices />} />
+            <Route path="/hr/attendance/everyone" element={<AttendanceEveryone />} />
             <Route path="/hr/documents"          element={<HrDocuments />} />
             <Route path="/hr/settings"           element={<HrSettings />} />
             {/* ── CRM ── Musa's CRM, in our stack (dev/erp-pilot/CRM.md). */}

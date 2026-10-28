@@ -3,11 +3,14 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { Button, PageHeader, Skeleton, Spinner } from '../../components/ui/index'
 import { useT } from '../../lib/i18n'
 import {
-  nameOf, docState, contractState, balanceOf, monthSheet, monthDays, riyadhToday, matchLogin, DOC_TYPES,
+  nameOf, docState, contractState, balanceOf, riyadhToday, matchLogin, DOC_TYPES,
 } from '../../lib/hr/logic'
+import { buildDays, sheetTotals, hm } from '../../lib/hr/attendance'
+import { fetchRecordsBetween, fetchPunchDays, fetchFlags, fetchAttendanceSettings } from '../../lib/hr/attendanceClient'
+import { AW } from './attendance/words'
 import {
   saveEmployee, fetchDocuments, saveDocument, deleteDocument, fetchContracts, saveContract, deleteContract,
-  fetchLeaveTypes, fetchBalances, fetchLeaveRequests, fetchAttendance, fetchSettings, fetchLogins,
+  fetchLeaveTypes, fetchBalances, fetchLeaveRequests, fetchLogins,
 } from '../../lib/hr/client'
 import { HW } from './words'
 import { useHrBase, field, fmtDate, empName, STATE_TONE } from './useHrBase'
@@ -22,6 +25,7 @@ import { EmployeeForm } from './EmployeeForm'
 
 export function HrEmployee() {
   const { t, lang, dir } = useT(HW)
+  const { t: at } = useT(AW)
   const base = useHrBase()
   const { ws, me, can, employees, departments, error, reload } = base
   const [params] = useSearchParams()
@@ -38,7 +42,7 @@ export function HrEmployee() {
   const [types, setTypes] = useState([])
   const [balances, setBalances] = useState([])
   const [requests, setRequests] = useState([])
-  const [attendance, setAttendance] = useState([])
+  const [attendance, setAttendance] = useState(null)
   const [settings, setSettings] = useState(null)
   const [logins, setLogins] = useState([])
   const [dialog, setDialog] = useState(null) // 'edit' | 'end' | 'rehire' | 'login' | {doc} | {contract}
@@ -47,18 +51,22 @@ export function HrEmployee() {
   const manage = can('manage')
   const load = useCallback(async () => {
     if (!ws || !id) return
-    const [d, c, ty, b, r, a, s, l] = await Promise.all([
+    const [d, c, ty, b, r, a, p, f, s, l] = await Promise.all([
       fetchDocuments(ws, id), fetchContracts(ws, id), fetchLeaveTypes(ws), fetchBalances(ws, year),
-      fetchLeaveRequests(ws, { employeeId: id }), fetchAttendance(ws, `${month}-01`, monthDays(month).at(-1), id), fetchSettings(ws),
-      manage ? fetchLogins(ws) : Promise.resolve({ rows: [] }),
+      fetchLeaveRequests(ws, { employeeId: id }), fetchRecordsBetween(ws, `${month}-01`, today, [id]),
+      fetchPunchDays(ws, { from: `${month}-01`, to: today, employeeIds: [id], all: true }), fetchFlags(ws, { from: `${month}-01`, to: today, employeeIds: [id], all: true }),
+      fetchAttendanceSettings(ws), manage ? fetchLogins(ws) : Promise.resolve({ rows: [] }),
     ])
     setDocs(d.rows); setContracts(c.rows); setTypes(ty.rows); setBalances(b.rows); setRequests(r.rows)
-    setAttendance(a.rows); setSettings(s.row); setLogins(l.rows)
-    setLoadError(d.error || c.error || ty.error || b.error || r.error || a.error || '')
-  }, [ws, id, year, month, manage])
+    setAttendance({ records: a.rows, punchDays: p.rows, flags: f.rows }); setSettings(s.row); setLogins(l.rows)
+    setLoadError(d.error || c.error || ty.error || b.error || r.error || a.error || p.error || f.error || '')
+  }, [ws, id, year, month, today, manage])
   useEffect(() => { queueMicrotask(load) }, [load])
 
-  const sheet = useMemo(() => (e ? monthSheet({ employee: e, records: attendance, requests, month, settings, today }) : null), [e, attendance, requests, month, settings, today])
+  // This month so far, as the monthly sheet counts it (lib/hr/attendance.js).
+  const sheet = useMemo(() => (e && attendance ? sheetTotals(Object.values(buildDays({
+    employees: [e], from: `${month}-01`, to: today, settings, ...attendance, leaves: requests.filter(r => r.status === 'approved'), leaveTypes: types, lang,
+  })[e.id])) : null), [e, attendance, requests, types, month, settings, today, lang])
 
   if (!base.level) return <NoAccess />
   if (employees === null) return <Skeleton className="h-64 max-w-5xl" />
@@ -148,14 +156,13 @@ export function HrEmployee() {
           <h2 className="text-sm font-semibold text-text">{t.attendanceThisMonth}</h2>
           {sheet && (
             <div className="grid grid-cols-3 gap-2 text-center">
-              {['present', 'late', 'absent', 'leave'].map(k => (
-                <div key={k} className="border border-border py-2"><p className="text-lg font-semibold tabular-nums">{sheet.totals[k]}</p><p className="text-[11px] text-text-tertiary">{t.attStatus[k]}</p></div>
+              {[[at.present, sheet.present], [at.absent, sheet.absent], [at.leave, sheet.leave],
+                [at.late, at.lateTotals(sheet.late, sheet.lateMinutes)], [at.early, at.lateTotals(sheet.early, sheet.earlyMinutes)], [at.hours, hm(sheet.hours)]].map(([label, v]) => (
+                <div key={label} className="border border-border py-2"><p className="text-lg font-semibold tabular-nums">{v}</p><p className="text-[11px] text-text-tertiary">{label}</p></div>
               ))}
-              <div className="border border-border py-2"><p className="text-lg font-semibold tabular-nums">{sheet.totals.hours}</p><p className="text-[11px] text-text-tertiary">{t.hours}</p></div>
-              <div className="border border-border py-2"><p className="text-lg font-semibold tabular-nums">{sheet.totals.missing ?? '—'}</p><p className="text-[11px] text-text-tertiary">{t.missing}</p></div>
             </div>
           )}
-          <Link to={`/hr/attendance?tab=month&emp=${e.id}&m=${month}`} className="inline-block text-[11px] underline text-text-secondary">{t.openSheet}</Link>
+          <Link to={`/hr/attendance/monthly?employee=${e.id}&m=${month}`} className="inline-block text-[11px] underline text-text-secondary">{t.openSheet}</Link>
         </section>
       </div>
 

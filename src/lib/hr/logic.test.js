@@ -1,8 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   riyadhToday, addDays, spanDays, monthDays, workingDays, weekday, nameOf, matchLogin, filterEmployees,
-  docState, expiringDocs, contractState, leaveProblem, balanceOf, leaveActions, offOn,
-  hoursWorked, minutesLate, suggestStatus, dayBoard, dayCounts, monthSheet, errorKey, hhmm,
+  docState, expiringDocs, contractState, leaveProblem, balanceOf, leaveActions, offOn, errorKey,
 } from './logic'
 
 const emp = (id, extra = {}) => ({ id, name_en: `E${id} (test)`, name_ar: '', status: 'active', hire_date: '2020-01-01', end_date: null, department_id: null, ...extra })
@@ -133,56 +132,11 @@ describe('leave requests', () => {
   })
 })
 
-describe('attendance math', () => {
-  const settings = { work_days: [0, 1, 2, 3, 4], work_start: '08:00:00', grace_minutes: 15 }
-  it('hours between arrival and departure', () => {
-    expect(hoursWorked('08:00:00', '17:00:00')).toBe(9)
-    expect(hoursWorked('07:52', '16:30')).toBe(8.63)
-    expect(hoursWorked('08:00', null)).toBeNull()
-    expect(hoursWorked('17:00', '08:00')).toBeNull()
-    expect(hhmm('08:41:00')).toBe('08:41')
-  })
-  it('late counts from the start, after the grace', () => {
-    expect(minutesLate('08:15', settings)).toBe(0)
-    expect(minutesLate('08:16', settings)).toBe(16)
-    expect(minutesLate('08:20:00', settings)).toBe(20)
-    expect(minutesLate('08:20', { work_start: null })).toBeNull()
-    expect(suggestStatus('08:41', settings)).toBe('late')
-    expect(suggestStatus('07:59', settings)).toBe('present')
-    expect(suggestStatus('09:30', {})).toBe('present')
-  })
-  it('the day view: record first, then leave, then nothing; only people employed that day', () => {
-    const employees = [emp('a'), emp('b'), emp('c'), emp('d', { hire_date: '2026-11-01' }), emp('e', { status: 'ended', end_date: '2026-06-30' })]
-    const records = [{ employee_id: 'a', day: '2026-10-28', status: 'late' }, { employee_id: 'b', day: '2026-10-27', status: 'present' }]
-    const requests = [req('1', 'c', '2026-10-27', '2026-10-31', 4, 'approved')]
-    const board = dayBoard({ employees, records, requests, day: '2026-10-28' })
-    expect(board.map(r => [r.employee.id, r.state])).toEqual([['a', 'late'], ['b', 'none'], ['c', 'leave']])
-    expect(dayCounts(board)).toEqual({ present: 0, late: 1, absent: 0, leave: 1, none: 1 })
-  })
-  it('the monthly sheet adds up, and counts missing work days only when the week is known', () => {
-    const e = emp('a', { hire_date: '2026-10-05' })
-    const records = [
-      { employee_id: 'a', day: '2026-10-05', status: 'present', check_in: '08:00:00', check_out: '17:00:00' },
-      { employee_id: 'a', day: '2026-10-06', status: 'late', check_in: '08:30:00', check_out: '17:00:00' },
-      { employee_id: 'a', day: '2026-10-07', status: 'absent', check_in: null, check_out: null },
-      { employee_id: 'a', day: '2026-10-08', status: 'present', check_in: '08:00:00', check_out: null },
-      { employee_id: 'b', day: '2026-10-05', status: 'present', check_in: '08:00:00', check_out: '17:00:00' },
-    ]
-    const requests = [req('1', 'a', '2026-10-11', '2026-10-12', 2, 'approved')]
-    const { days, totals } = monthSheet({ employee: e, records, requests, month: '2026-10', settings, today: '2026-10-15' })
-    expect(days).toHaveLength(31)
-    expect(days.find(d => d.day === '2026-10-11').state).toBe('leave')
-    // Work days 5–14 Oct (Sun–Thu): 5,6,7,8,11,12,13,14 → 4 recorded, 2 on leave, 13 and 14 missing; 1–4 Oct before hiring.
-    expect(totals).toEqual({ present: 2, late: 1, absent: 1, leave: 2, hours: 17.5, missing: 2 })
-    expect(monthSheet({ employee: e, records, requests, month: '2026-10', settings: null, today: '2026-10-15' }).totals.missing).toBeNull()
-  })
-})
-
 describe('refusals in words', () => {
   it('maps our codes and constraint names', () => {
     expect(errorKey('HR_LEAVE_BALANCE: 3 days left, 5 asked')).toBe('HR_LEAVE_BALANCE')
     expect(errorKey('duplicate key value violates unique constraint "hr_employees_no_uq"')).toBe('DUP_NUMBER')
-    expect(errorKey('new row for relation "hr_attendance" violates check constraint "hr_attendance_times"')).toBe('TIMES')
+    expect(errorKey('new row for relation "hr_attendance" violates check constraint "hr_attendance_span"')).toBe('SPAN')
     expect(errorKey('new row violates row-level security policy for table "hr_employees"')).toBe('NO_RIGHT')
     expect(errorKey('something else')).toBe('')
   })

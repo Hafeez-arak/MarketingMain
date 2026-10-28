@@ -4,10 +4,10 @@ import { supabase } from '../supabaseClient'
 // 2026-10-28. Straight to the database with the person's own login: its
 // rules (supabase/migrations/20261112_hr_*.sql) decide who sees and changes
 // what. Every query names its company: RLS is membership, not isolation.
-// Leave decisions and attendance corrections are SQL functions, so their
-// rules (no self-approval, the balance, a reason, the history) cannot be
-// stepped around. Errors come back as the database's message; the screens
-// turn them into words with errorKey() (logic.js).
+// Leave decisions are SQL functions, so their rules (no self-approval, the
+// balance) cannot be stepped around. Attendance is in attendanceClient.js.
+// Errors come back as the database's message; the screens turn them into
+// words with errorKey() (logic.js).
 
 const EMP_COLS = 'id,workspace_id,employee_no,name_en,name_ar,job_title,department_id,manager_id,hire_date,status,end_date,end_reason,work_email,work_phone,user_id,notes,created_at,updated_at'
 const out = ({ data, error }, key = 'rows') => (error ? { [key]: key === 'rows' ? [] : null, error: error.message } : { [key]: data ?? (key === 'rows' ? [] : null) })
@@ -34,9 +34,6 @@ export const fetchContracts = (ws, employeeId) =>
   supabase.from('hr_contracts').select('id,employee_id,contract_type,start_date,end_date,notes').eq('workspace_id', ws).eq('employee_id', employeeId)
     .order('start_date', { ascending: false }).then(r => out(r))
 
-export const fetchSettings = ws =>
-  supabase.from('hr_settings').select('workspace_id,work_days,work_start,work_end,grace_minutes,updated_at').eq('workspace_id', ws).maybeSingle().then(r => out(r, 'row'))
-
 export const fetchLeaveTypes = ws =>
   supabase.from('hr_leave_types').select('id,name_en,name_ar,paid,needs_balance,active').eq('workspace_id', ws).order('name_en').then(r => out(r))
 
@@ -53,19 +50,6 @@ export function fetchLeaveRequests(ws, { from = '', to = '', employeeId = '' } =
   if (employeeId) q = q.eq('employee_id', employeeId)
   return q.order('date_from', { ascending: false }).limit(3000).then(r => out(r))
 }
-
-/** Attendance between two days (both counted); one person's when given. */
-export function fetchAttendance(ws, from, to, employeeId = '') {
-  let q = supabase.from('hr_attendance')
-    .select('id,employee_id,day,status,check_in,check_out,notes,source,created_by,corrected_by,corrected_at,correction_reason')
-    .eq('workspace_id', ws).gte('day', from).lte('day', to)
-  if (employeeId) q = q.eq('employee_id', employeeId)
-  return q.order('day').limit(10000).then(r => out(r))
-}
-
-export const fetchAttendanceChanges = (ws, attendanceId) =>
-  supabase.from('hr_attendance_changes').select('id,kind,reason,before,after,changed_by,changed_at')
-    .eq('workspace_id', ws).eq('attendance_id', attendanceId).order('changed_at', { ascending: false }).then(r => out(r))
 
 /** The company's logins with emails (Manage only; empty for anyone else). */
 export const fetchLogins = ws => supabase.rpc('hr_logins', { ws }).then(r => out(r))
@@ -110,10 +94,6 @@ export const saveContract = (ws, me, employeeId, id, fields) => (id
 export const deleteContract = (ws, id) =>
   supabase.from('hr_contracts').delete().eq('workspace_id', ws).eq('id', id).then(r => out(r, 'row'))
 
-export const saveSettings = (ws, me, fields) =>
-  supabase.from('hr_settings').upsert({ workspace_id: ws, updated_by: me, ...clean(fields, ['work_days', 'work_start', 'work_end', 'grace_minutes']) }, { onConflict: 'workspace_id' })
-    .select('workspace_id').single().then(r => out(r, 'row'))
-
 const TYPE_KEYS = ['name_en', 'name_ar', 'paid', 'needs_balance', 'active']
 export const saveLeaveType = (ws, id, fields) => (id
   ? supabase.from('hr_leave_types').update(clean(fields, TYPE_KEYS)).eq('workspace_id', ws).eq('id', id).select('id').maybeSingle()
@@ -136,16 +116,3 @@ export const askLeave = (ws, me, { employeeId, typeId, from, to, days, reason = 
 export const decideLeave = (ws, id, action, note = '') =>
   supabase.rpc('hr_leave_decide', { ws, request_id: id, action, note }).then(r => out(r, 'row'))
 
-export const recordAttendance = (ws, me, { employeeId, day, status, checkIn = null, checkOut = null, notes = '' }) =>
-  supabase.from('hr_attendance').insert({
-    workspace_id: ws, employee_id: employeeId, day, status, check_in: checkIn || null, check_out: checkOut || null, notes, created_by: me,
-  }).select('id').single().then(r => out(r, 'row'))
-
-/** Change a saved record: a departure needs no reason, anything else does. */
-export const updateAttendance = (ws, id, { status, checkIn = null, checkOut = null, notes = '', reason = '' }) =>
-  supabase.rpc('hr_attendance_update', {
-    ws, attendance_id: id, new_status: status, new_in: checkIn || null, new_out: checkOut || null, new_notes: notes, reason,
-  }).then(r => out(r, 'row'))
-
-export const deleteAttendance = (ws, id) =>
-  supabase.from('hr_attendance').delete().eq('workspace_id', ws).eq('id', id).then(r => out(r, 'row'))

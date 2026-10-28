@@ -119,6 +119,10 @@ export const SECTIONS = [
       { to: '/hr/departments', label: 'Departments', ar: 'الأقسام', icon: 'building', translated: true },
       { to: '/hr/leave', label: 'Leave', ar: 'الإجازات', icon: 'calendar', translated: true },
       { to: '/hr/attendance', label: 'Attendance', ar: 'الحضور', icon: 'check-square', translated: true },
+      // Musa's attendance in full (2026-10-28, dev/erp-pilot/ATTENDANCE.md):
+      // its tabs and reports live under /hr/attendance; the devices, their
+      // keys and the linking are for Manage.
+      { to: '/hr/attendance/devices', label: 'Attendance devices', ar: 'أجهزة البصمة', icon: 'check-square', hidden: true, min: 'manage', translated: true },
       { to: '/hr/documents', label: 'Expiring papers', ar: 'الوثائق المنتهية', icon: 'file-check', min: 'work', translated: true },
       { to: '/hr/settings', label: 'HR settings', ar: 'إعدادات الموارد البشرية', icon: 'gear', min: 'manage', translated: true },
     ],
