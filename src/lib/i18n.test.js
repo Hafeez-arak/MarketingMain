@@ -9,6 +9,8 @@ import { AW as AUTH } from '../pages/auth/words'
 import { SW as SALES_TARGETS } from '../pages/sales/words'
 import { TEAM } from '../pages/settings/accessWords'
 import { HW as HR } from '../pages/hr/words'
+import { CW as CONTACTS } from '../pages/contacts/words'
+import { ERROR_WORDS as CONTACTS_ERRORS } from './contacts/client'
 import { leadLabels } from './leads/view'
 import { AR_LABELS as TASK_AR, STATUS_LABEL, PRIORITY_LABEL, BUCKET_LABEL } from './tasks/logic'
 import { AR_LABELS as REQUEST_AR, STATUS_LABEL as REQ_STATUS, KIND_LABEL } from './requests'
@@ -20,7 +22,7 @@ const keysOf = (o, prefix = '') => Object.entries(o).flatMap(([k, v]) =>
   (v && typeof v === 'object' && !Array.isArray(v) && !v.$$typeof ? keysOf(v, `${prefix}${k}.`) : [`${prefix}${k}`]))
 
 describe('every dictionary has Arabic for every English key', () => {
-  const dicts = { COMMON, TECHNICAL, FINANCE, TASKS, LEADS, AUTH, SALES_TARGETS, TEAM, HR }
+  const dicts = { COMMON, TECHNICAL, FINANCE, TASKS, LEADS, AUTH, SALES_TARGETS, TEAM, HR, CONTACTS, CONTACTS_ERRORS }
   for (const [name, d] of Object.entries(dicts)) {
     it(name, () => {
       const en = keysOf(d.en).sort()

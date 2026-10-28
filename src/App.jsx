@@ -46,6 +46,10 @@ import { BrandBrain } from './pages/settings/BrandBrain'
 import { CreativeStudio } from './pages/studio/index'
 import { HomePage } from './pages/home/index'
 import { TasksPage } from './pages/tasks/index'
+import { ContactsPage } from './pages/contacts/index'
+import { ContactsOrgPage } from './pages/contacts/Org'
+import { ContactsPeoplePage } from './pages/contacts/People'
+import { ContactsCategoriesPage } from './pages/contacts/Categories'
 import { SalesTasksRedirect } from './pages/leads/SalesTasks'
 import { TechnicalProjects } from './pages/technical/index'
 import { TechnicalProject } from './pages/technical/Project'
@@ -236,9 +240,14 @@ function ProtectedApp() {
             <Route path="/hr/attendance"         element={<HrAttendance />} />
             <Route path="/hr/documents"          element={<HrDocuments />} />
             <Route path="/hr/settings"           element={<HrSettings />} />
+            {/* ── Contacts ── Musa's ERP item 3, in our stack. */}
+            <Route path="/contacts"              element={<ContactsPage />} />
+            <Route path="/contacts/people"       element={<ContactsPeoplePage />} />
+            <Route path="/contacts/org"          element={<ContactsOrgPage />} />
+            <Route path="/contacts/categories"   element={<ContactsCategoriesPage />} />
 
             {/* ── Admin ── */}
-            <Route path="/admin"                 element={<Navigate to="/admin/team" replace />} />
+            <Route path="/admin"               element={<Navigate to="/admin/team" replace />} />
             <Route path="/admin/team"            element={<Access />} />
             <Route path="/admin/sections"        element={<SectionAccess />} />
 
