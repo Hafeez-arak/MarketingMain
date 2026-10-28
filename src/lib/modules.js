@@ -85,6 +85,21 @@ export const SECTIONS = [
     ],
   },
   {
+    // Musa's ERP, item 3 (جهات الاتصال), rewritten in our stack (2026-10-28,
+    // dev/erp-pilot/CONTACTS.md): one record per organisation or person with
+    // several roles. Granted per person like the others; adminOnly keeps it
+    // off for members until someone is given it.
+    key: 'contacts', label: 'Contacts', ar: 'جهات الاتصال', icon: 'contacts', base: '/contacts', adminOnly: true,
+    blurb: 'Clients, suppliers, contractors and consultants, once each, with their VAT, CR and national address.',
+    blurbAr: 'العملاء والموردون والمقاولون والاستشاريون، كلٌّ مرة واحدة، مع الرقم الضريبي والسجل التجاري والعنوان الوطني.',
+    pages: [
+      { to: '/contacts', label: 'Organisations', ar: 'الجهات', icon: 'contacts', exact: true, translated: true },
+      { to: '/contacts/people', label: 'People', ar: 'الأشخاص', icon: 'users', translated: true },
+      // One organisation's page, reached from the lists.
+      { to: '/contacts/org', label: 'Organisation', ar: 'الجهة', icon: 'contacts', hidden: true, translated: true },
+    ],
+  },
+  {
     key: 'admin', label: 'Admin', ar: 'الإدارة', icon: 'users', base: '/admin', adminOnly: true,
     blurb: 'Who can sign in, and which sections each person gets.',
     blurbAr: 'من يمكنه الدخول، وأي الأقسام يحصل عليها كل شخص.',
