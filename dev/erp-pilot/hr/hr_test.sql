@@ -232,11 +232,14 @@ select pg_temp.q('junaid@arak-sa.com', format($s$insert into public.hr_leave_req
   :arak, pg_temp.emp('T-003'), pg_temp.typ('Annual leave'), pg_temp.uid('junaid@arak-sa.com')));
 select pg_temp.q('hafeez@arak-sa.com', format($s$insert into public.hr_leave_requests (workspace_id, employee_id, leave_type_id, date_from, date_to, days, reason, created_by) values (%L, %L, %L, '2026-11-24', '2026-11-24', 1, 'gm-own', %L) returning id$s$,
   :arak, pg_temp.emp('T-001'), pg_temp.typ('Annual leave'), pg_temp.uid('hafeez@arak-sa.com')));
+-- A pending request of the site technician (T-006), whose manager is not linked to anyone here.
+select pg_temp.q('hafeez@arak-sa.com', format($s$insert into public.hr_leave_requests (workspace_id, employee_id, leave_type_id, date_from, date_to, days, reason, created_by) values (%L, %L, %L, '2026-12-13', '2026-12-13', 1, 'not-mine', %L) returning id$s$,
+  :arak, pg_temp.emp('T-006'), pg_temp.typ('Sick leave'), pg_temp.uid('hafeez@arak-sa.com')));
 create function pg_temp.req(p_reason text) returns uuid as $$ select id from public.hr_leave_requests where reason = p_reason $$ language sql;
 
 -- ══ Leave: deciding ══
 select pg_temp.refused('decide: Work who is not the manager cannot approve', 'junaid@arak-sa.com',
-  format('select status from public.hr_leave_decide(%L, %L, ''approve'')', :arak, pg_temp.req('Visiting family (test)')), 'HR_LEAVE_NOT_APPROVER');
+  format('select status from public.hr_leave_decide(%L, %L, ''approve'')', :arak, pg_temp.req('not-mine')), 'HR_LEAVE_NOT_APPROVER');
 select pg_temp.refused('decide: nobody decides their own (even the access admin)', 'mkader@arak-sa.com',
   format('select status from public.hr_leave_decide(%L, %L, ''approve'')', :arak, pg_temp.req('gm-own')), 'HR_LEAVE_SELF_DECISION');
 select pg_temp.refused('decide: nobody decides their own (Work)', 'junaid@arak-sa.com',
@@ -248,7 +251,7 @@ select pg_temp.refused('decide: the balance must cover it', 'shadia@arak-sa.com'
 select pg_temp.refused('decide: the request must be in the company named', 'hafeez@arak-sa.com',
   format('select status from public.hr_leave_decide(%L, %L, ''approve'')', current_setting('hr.ghusn'), pg_temp.req('decide-me')), 'HR_NOT_FOUND');
 select pg_temp.refused('decide: a View person who is not the manager cannot', 'shadia@arak-sa.com',
-  format('select status from public.hr_leave_decide(%L, %L, ''approve'')', :arak, pg_temp.req('Visiting family (test)')), 'HR_LEAVE_NOT_APPROVER');
+  format('select status from public.hr_leave_decide(%L, %L, ''approve'')', :arak, pg_temp.req('not-mine')), 'HR_LEAVE_NOT_APPROVER');
 select pg_temp.eq('decide: the direct manager (View, linked) approves',
   pg_temp.q('shadia@arak-sa.com', format('select status from public.hr_leave_decide(%L, %L, ''approve'', ''Enjoy'')', :arak, pg_temp.req('decide-me'))), 'approved');
 select pg_temp.eq('decide: the approver is recorded',
@@ -272,7 +275,7 @@ select pg_temp.refused('cancel: a View person cannot cancel someone else''s', 's
 select pg_temp.eq('decide: Manage rejects with a reason',
   pg_temp.q('hafeez@arak-sa.com', format('select status || '':'' || decision_note from public.hr_leave_decide(%L, %L, ''reject'', ''Busy week'')', :arak, pg_temp.req('Personal errand (test)'))), 'rejected:Busy week');
 select pg_temp.refused('decide: signed out cannot call it', null,
-  format('select status from public.hr_leave_decide(%L, %L, ''approve'')', :arak, pg_temp.req('Visiting family (test)')), 'permission denied');
+  format('select status from public.hr_leave_decide(%L, %L, ''approve'')', :arak, pg_temp.req('not-mine')), 'permission denied');
 select pg_temp.eq('balances: Work cannot change a balance',
   pg_temp.q('junaid@arak-sa.com', format($s$with u as (update public.hr_leave_balances set days = 99, updated_by = %L where employee_id = %L returning 1) select count(*) from u$s$, pg_temp.uid('junaid@arak-sa.com'), pg_temp.emp('T-003'))), '0');
 select pg_temp.eq('balances: ...and the balance is unchanged',
