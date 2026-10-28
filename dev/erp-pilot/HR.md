@@ -120,19 +120,19 @@ list sections (`modules.test.js`, `sectionAccess.test.js`, `i18n.test.js`).
 
 | Feature | Musa (Laravel) | Ours (v2) |
 |---|---|---|
-| Departments | name, English name, parent, manager, active | names EN/AR, head, archived. **No parent** department |
-| Job positions | a table of positions per department | **free-text job title** on the employee |
-| Employee file | ~25 fields incl. national ID, nationality, birth date, gender, IBAN, emergency contact, address, direct/indirect labour, employment type | names EN/AR, number, job, department, manager, hire date, status, work email/phone, notes, login. Personal IDs live in papers; IBAN etc. **left out** (payroll is out of scope) |
-| Employee number | automatic `E-…`, never changes | optional, unique per company, editable |
+| Departments | name, English name, parent, manager, active | **Matched (parity pass):** names EN/AR, parent (no loops), head, archived |
+| Job positions | a table of positions per department | **Matched:** positions (names EN/AR, department, description, archived); the employee picks one |
+| Employee file | ~25 fields incl. national ID, nationality, birth date, gender, IBAN, emergency contact, address, direct/indirect labour, employment type | **Matched except IBAN:** trade, employment type, direct/indirect, and the personal file (Manage only). IBAN left out (payroll) |
+| Employee number | automatic `E-…`, never changes | **Matched:** `E-YYYY-NNNNNN` by the system, never changes (old numbers kept) |
 | Reporting line | no loops (trigger) | same |
 | End of service | date + reason required; re-hire clears them | same |
 | Link to a login | one user per employee | same, matched by work email, Manage only |
-| Papers | 7 types, number, issue/expiry, "Other" needs a note, 60-day warning, delete | same rules and 60 days; **no file upload** yet |
-| Contracts | number, type, dates, **salary and allowances**, weekly hours, DRAFT→RUNNING→EXPIRED/CANCELLED, terms locked once running, one running | type and dates only, **no pay**, state shown from the dates (upcoming/current/ended), two never overlap. **No draft/running workflow, no lock** |
+| Papers | 7 types, number, issue/expiry, "Other" needs a note, 60-day warning, delete. **No file in his app** | same rules; Manage only; **our addition: an optional scan per paper** (private bucket) |
+| Contracts | number, type, dates, **salary and allowances**, weekly hours, DRAFT→RUNNING→EXPIRED/CANCELLED, terms locked once running, one running | **Matched except pay:** `HC-` number, type, dates, weekly hours, the same workflow and lock, one running, no delete, list page, "ending soon". Salary and allowances: out of scope |
 | Leave types | name, English name, paid, needs allocation, active | same (names EN/AR) |
-| Balances | a ledger of allocations with validity windows; immutable, corrections as negative entries with a reason; "all employees" bulk grant | **one number per employee, type and year**, changed in place by Manage with who/when/note. **No ledger, no bulk grant** |
+| Balances | a ledger of allocations with validity windows; immutable, corrections as negative entries with a reason; "all employees" bulk grant | **Matched:** the same ledger, immutable, negative corrections with a reason, bulk grant, balance counted by windows |
 | Requests | SUBMITTED→APPROVED/REFUSED/CANCELLED, APPROVED→CANCELLED; decided ones locked; refusal reason; days ≤ span; no overlaps; balance checked on approval; approvals serialised per employee | **same rules** |
-| Who decides | anyone with `hr.leave_approve`, never their own | Manage, **or the direct manager** (linked login), never their own |
+| Who decides | anyone with `hr.leave_approve`, never their own | **Matched:** Manage only, never their own; the manager path is removed |
 | Who asks | the employee (linked) or approvers / HR | same: Work for anyone, a linked View person for themselves |
 | Balance beside each request | yes | yes ("N left after this") |
 | Who is off | approved leave on the attendance board | a month grid + "off today" |
@@ -240,3 +240,102 @@ About 55 minutes of agent time.
 Self-service for employees (a linked login sees only their own leave,
 balance and attendance, without the whole directory), then the device
 ingest above, then file upload for papers and the print views.
+
+
+---
+
+# Parity pass (2026-10-29, branch `v2-hr-parity`)
+
+Goal: HR (employees, departments, papers, contracts, leave) the same as Musa's,
+money excepted. Attendance was already done and is untouched (nothing in it
+was forced to change). Read from his controllers (`Employee`, `Department`,
+`Contract`, `Leave`, `RecordDelete`), models, `arak_schema.sql` (HR block),
+changes 0018/0036/0043, his tests (`HrTest`, `HrTimeTest`,
+`ScreenReviewHrAccountingTest`) and his guide pages. His code was read, never
+copied; nothing was written there.
+
+## The mapping of his permissions onto our levels
+
+| His permission | Ours | What it gives |
+|---|---|---|
+| `hr.view` | **View** | directory (work data), departments, positions, own leave, "who is off" |
+| `hr.attendance` | **Work** | attendance entry and corrections (already built) |
+| `hr.manage` | **Manage** | employee files incl. the personal file, papers (+files), departments, positions, end of service, delete an unused person, link a login |
+| `hr.contracts` | **Manage** | contracts, their list and history |
+| `hr.leave_approve` | **Manage** | decide and cancel leave, leave types, grants, balances |
+
+Three levels cannot split his five, so his three Manage-like ones are one. Work
+is now only attendance: it no longer adds people, papers, contracts or leave
+for others (the first port let it). That also closes the manager/self-approval
+risk (item 5): only Manage changes a manager, and a manager decides nothing.
+
+## Gap list: found and closed
+
+| # | Gap | Closed by |
+|---|---|---|
+| 1 | Contracts had only type and dates, state from dates | `20261129_hr_parity_3_contracts.sql`: number, weekly hours, draft/running/expired/cancelled, terms locked, one running, no delete; Contracts list + contract page; old rows mapped by their dates |
+| 2 | Balances were one number per year | `_4_leave_ledger.sql`: immutable allocations with windows, negative corrections, bulk "all active", balance by windows; old balances became allocations (the old table is kept, closed) |
+| 3 | Manager could decide leave | removed; only Manage decides (his `hr.leave_approve`), never their own; Work cannot cancel others' pending requests |
+| 4 | No file on papers | **his papers have none** (only his finance documents take an image); added as an optional scan: private bucket `hr-papers`, `<workspace>/<employee>/<id>.ext`, 10 MB, PDF/JPG/PNG/WebP, Manage writes, the person reads their own; `companyFolders()` includes it |
+| 5 | Work could change managers | see mapping: Manage only |
+| 6a | Employee number editable | system number `E-YYYY-NNNNNN`, never changes |
+| 6b | Free-text job | job positions table (+ Departments page section); `job_title` kept in step by a trigger so attendance screens are unchanged |
+| 6c | Department parent | `parent_id` (loops refused) |
+| 6d | Employee fields | trade, employment type, direct/indirect labour; personal file table, Manage only (notes moved there) |
+| 6e | Delete a never-used employee | `hr_employee_delete()` (the foreign keys decide) |
+| 6f | History on employee and contract | `hr_audit` + History panel (Manage) |
+| 6g | Directory | direct/indirect, papers-expiring and no-running-contract filters, grouping, cards/list, renewal alert box, "no running contract" badge |
+| 6h | Leave list | filters (waiting, approved, rejected, current, mine), grouping with approved days, search; leave types lock paid/needs-balance after creation |
+| 6i | Departments page | parent, positions, people counts |
+
+Parity-table rows above marked "first port" describe the state before this pass;
+every row of gaps 1 to 6 is now matched, except what is listed below.
+
+## Built
+
+Migrations (apply with `dev/v2db/apply-migrations.sh`):
+`20261129_hr_parity_1_people.sql`, `_2_papers.sql`, `_3_contracts.sql`,
+`_4_leave_ledger.sql`. New tables: `hr_counters`, `hr_job_positions`,
+`hr_employee_private`, `hr_audit`, `hr_leave_allocations` (composite
+`(workspace_id, id)` keys, RLS on all). New functions: `hr_next_number`,
+`hr_employee_delete`, `hr_leave_allocate`, `hr_leave_balance_on`,
+`hr_running_contracts`, `hr_papers_folder_ok`; `hr_leave_decide` rewritten.
+Screens: Employees, Employee, Departments (+positions), Contracts, Contract,
+Leave (ledger), Settings, Expiring papers (Manage). Words in `wordsParity.js`
+(EN + AR). Tests: 213 SQL checks, logic tests, full suite, lint 0 errors, build OK.
+
+Checked in the running app (:5186): Manage in English and Arabic (RTL), a View
+person (no write buttons, no papers/contracts, own leave only, contracts page
+refused), phone width (no sideways scroll), saving the personal file and
+seeing it in the History, and the bucket rules with real logins (Manage
+uploads and reads; Work, a bad folder and a .zip are refused).
+
+## Waiting on other modules (listed, not faked)
+
+- Salary, allowances, monthly gross, "In the payroll" on a contract, GOSI
+  category, payroll-gap badges, IBAN: payroll is out of scope.
+- Assets in an employee's custody (and the end-of-service block while they
+  hold assets): needs the fixed-assets module.
+- Project on an attendance record: projects (unchanged from attendance).
+
+## Not matched, on purpose
+
+- View still reads everyone's leave requests: attendance needs approved leave
+  (RLS and the `hr_punch_days` view) and attendance is not to be touched. His
+  non-approvers see only their own list; ours shows a non-Manage person only
+  their own requests and balance on screen, but the API still returns more.
+  Narrowing needs an on-leave view for attendance: the owner's call.
+- Department loops are refused (his forbids only a department under itself).
+- A leave type's two flags are locked in the database; he locks them only by
+  not offering the field. Renaming is allowed.
+- A person still reads their own papers and contracts (not in his).
+
+## Decisions for the owner (all safe and reversible)
+
+1. Collapsing his three Manage-like permissions into our Manage; Work =
+   attendance. A clerk with files but not leave would need a fourth level.
+2. Paper scans are our addition (his has no upload); dropping the bucket and
+   the `file_*` columns removes it.
+3. First-port contracts: past -> expired, current -> running, future -> draft.
+4. IBAN left out with the other pay data.
+5. `seed.sql` now writes the ledger and positions; not re-run on existing data.
