@@ -21,7 +21,7 @@ import { Stars, TagChips, StatusBadge, BidChip, DueDate, FilterChips, Pager, Fig
 // to. Three menu entries open this page: Pipeline, My opportunities (the
 // "Mine" filter on) and All opportunities (the list).
 
-const SEG = { late: 'bg-red-500', today: 'bg-amber-400', planned: 'bg-emerald-500', none: 'bg-stone-300' }
+const SEG = { late: 'bg-red-500', today: 'bg-yellow-400', planned: 'bg-emerald-500', none: 'bg-stone-300' }
 
 export function CrmLeads({ defaultView = 'kanban', defaultFilters = [] }) {
   const { canSection, user } = useAuth()
@@ -209,8 +209,8 @@ export function CrmLeads({ defaultView = 'kanban', defaultFilters = [] }) {
                         <p className="flex justify-between gap-2 text-[11px] text-text-secondary">
                           <bdi className="truncate">{owner(l) || w.noOwner}</bdi>
                           {l.status !== 'open' ? <StatusBadge status={l.status} />
-                            : nextDate ? <span className={state === 'late' ? 'text-red-700' : state === 'today' ? 'text-amber-700' : ''}>⏱ <bdi dir="ltr">{nextDate}</bdi></span>
-                              : <span className="text-amber-700" title={w.bar.none}>⚠ {w.noActivity}</span>}
+                            : nextDate ? <span className={state === 'late' ? 'text-red-700' : state === 'today' ? 'text-yellow-700' : ''}>⏱ <bdi dir="ltr">{nextDate}</bdi></span>
+                              : <span className="text-yellow-700" title={w.bar.none}>⚠ {w.noActivity}</span>}
                         </p>
                         <BidChip lead={l} today={today} />
                       </Link>

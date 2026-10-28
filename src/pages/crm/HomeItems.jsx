@@ -13,7 +13,7 @@ import { RW } from './words'
 // today, and (for whoever works the CRM) your open opportunities with
 // nothing planned. Silent for anyone without the CRM.
 
-const TONE = { late: 'border-red-200 bg-red-50 text-red-800', today: 'border-amber-200 bg-amber-50 text-amber-900', idle: 'border-border bg-white text-text' }
+const TONE = { late: 'border-red-200 bg-red-50 text-red-800', today: 'border-yellow-200 bg-yellow-50 text-yellow-900', idle: 'border-border bg-white text-text' }
 const LINK = { late: '/crm/activities?f=overdue', today: '/crm/activities?f=today', idle: '/crm/list?f=mine,no_activity' }
 
 export function CrmHomeItems() {

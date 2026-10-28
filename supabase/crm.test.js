@@ -141,7 +141,7 @@ beforeAll(async () => {
   ids.gs = await add('ghusn', 'crm_stages', GHUSN, 'Ghusn stage', '10')
   ids.gt = await add('ghusn', 'crm_tags', GHUSN, 'Ghusn tag')
   // Contacts: an Arak client, an Arak consultant (not a client yet), an archived one, and a Ghusn one.
-  const org = async (who, ws, name, roles, status = 'active') => (await one(who,
+  const org = async (who, ws, name, roles) => (await one(who,
     `insert into public.contacts_orgs (workspace_id, name, roles) values ($1, $2, $3) returning id`, [ws, name, roles])).id
   ids.client = await org('manager', ARAK, 'Nour Towers (test)', ['client'])
   ids.consultant = await org('manager', ARAK, 'Design Office (test)', ['consultant'])

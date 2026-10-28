@@ -27,7 +27,7 @@ export function Field({ label, error, hint, className = '', children }) {
 export function Stars({ n }) {
   const { t: w } = useT(RW)
   if (!n) return null
-  return <span className="text-amber-500 tracking-tight" title={w.priority} aria-label={`${w.priority}: ${n}`}>{'★'.repeat(n)}</span>
+  return <span className="text-yellow-500 tracking-tight" title={w.priority} aria-label={`${w.priority}: ${n}`}>{'★'.repeat(n)}</span>
 }
 
 /** An item's tags as coloured chips. */
@@ -56,7 +56,7 @@ export function StatusBadge({ status }) {
   return <span className={`inline-flex items-center whitespace-nowrap rounded border px-1.5 py-0.5 text-[11px] leading-none ${STATUS_TONE[status] || ''}`}>{w.statuses[status] || status}</span>
 }
 
-const CHIP_TONE = { past: 'bg-red-50 text-red-700 border-red-200', soon: 'bg-amber-50 text-amber-800 border-amber-200', ok: 'bg-stone-50 text-text-secondary border-border' }
+const CHIP_TONE = { past: 'bg-red-50 text-red-700 border-red-200', soon: 'bg-yellow-50 text-yellow-800 border-yellow-200', ok: 'bg-stone-50 text-text-secondary border-border' }
 /** The bid's due date with the days left (open opportunities only). */
 export function BidChip({ lead, today, label = true }) {
   const { t: w } = useT(RW)
@@ -71,7 +71,7 @@ export function BidChip({ lead, today, label = true }) {
   )
 }
 
-const DUE_TONE = { late: 'text-red-700 font-medium', today: 'text-amber-700 font-medium', planned: 'text-text-secondary', none: 'text-text-tertiary' }
+const DUE_TONE = { late: 'text-red-700 font-medium', today: 'text-yellow-700 font-medium', planned: 'text-text-secondary', none: 'text-text-tertiary' }
 /** An activity's date, red when late and amber when today. */
 export function DueDate({ date, today, done = false }) {
   const state = done ? 'planned' : dueState(date, today)
