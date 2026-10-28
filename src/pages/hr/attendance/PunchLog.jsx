@@ -149,7 +149,7 @@ export function AttendancePunchLog() {
                   ])}
                 </tbody>
               </table>
-              {!group && <Pagination page={page} pageSize={PAGE} count={all.length} onPage={n => setPage(String(n))} />}
+              {!group && <Pagination page={page} pageSize={PAGE} count={all.length} onPage={n => setPage(String(n))} words={t.pager} />}
             </div>
           )}
         </>

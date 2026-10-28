@@ -139,7 +139,7 @@ export function AttendanceFlags() {
               ])}
             </tbody>
           </table>
-          {!group && <Pagination page={page} pageSize={PAGE} count={count} onPage={n => setPage(String(n))} />}
+          {!group && <Pagination page={page} pageSize={PAGE} count={count} onPage={n => setPage(String(n))} words={t.pager} />}
         </div>
       )}
 

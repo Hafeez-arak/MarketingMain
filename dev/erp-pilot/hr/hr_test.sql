@@ -335,14 +335,16 @@ select pg_temp.eq('attendance: who corrected is on the record, before and after 
      from public.hr_attendance a join public.hr_attendance_changes c on c.attendance_id = a.id where a.id = pg_temp.att('T-005', pg_temp.fri())), 'true:true');
 select pg_temp.eq('attendance: nobody deletes a record (it is corrected)',
   pg_temp.q('staff.admin@arak-sa.com', format($s$with d as (delete from public.hr_attendance where id = %L returning 1) select count(*) from d$s$, pg_temp.att('T-005', pg_temp.fri()))), '0');
+-- The board button: someone not on a device, with no open record (rolled back).
+update public.hr_attendance set check_out = check_in + interval '1 minute' where employee_id = pg_temp.emp('T-001') and check_out is null;
 select pg_temp.eq('attendance: the board button checks in now',
-  pg_temp.q('staff.dev@arak-sa.com', format('select public.hr_attendance_toggle(%L, %L)', :arak, pg_temp.emp('T-006'))), 'in');
+  pg_temp.q('staff.dev@arak-sa.com', format('select public.hr_attendance_toggle(%L, %L)', :arak, pg_temp.emp('T-001'))), 'in');
 select pg_temp.refused('attendance: one open record at a time', 'staff.dev@arak-sa.com',
-  pg_temp.ins('T-006', (now() - interval '1 minute')::text, null), 'HR_ATTENDANCE_OVERLAP');
+  pg_temp.ins('T-001', (now() - interval '1 minute')::text, null), 'HR_ATTENDANCE_OVERLAP');
 select pg_temp.eq('attendance: ...and the second press checks out',
-  pg_temp.q('staff.dev@arak-sa.com', format('select public.hr_attendance_toggle(%L, %L)', :arak, pg_temp.emp('T-006'))), 'out');
+  pg_temp.q('staff.dev@arak-sa.com', format('select public.hr_attendance_toggle(%L, %L)', :arak, pg_temp.emp('T-001'))), 'out');
 select pg_temp.refused('attendance: View cannot press it', 'staff.marketing@arak-sa.com',
-  format('select public.hr_attendance_toggle(%L, %L)', :arak, pg_temp.emp('T-006')), 'HR_NO_ACCESS');
+  format('select public.hr_attendance_toggle(%L, %L)', :arak, pg_temp.emp('T-001')), 'HR_NO_ACCESS');
 
 -- ══ Attendance devices (20261128_attendance_2) ══
 -- Settings for the pairing and lateness: 08:00–17:00, 15 minutes' grace, from 1 September.
@@ -364,7 +366,7 @@ select pg_temp.eq('devices: the key is shown once and only its hash is kept',
 select pg_temp.refused('devices: nobody reads the key''s hash', 'staff.admin@arak-sa.com',
   'select key_hash from public.hr_devices limit 1', 'permission denied');
 select pg_temp.eq('devices: View sees the device list',
-  pg_temp.q('staff.marketing@arak-sa.com', 'select count(*) from public.hr_devices'), '1');
+  pg_temp.q('staff.marketing@arak-sa.com', 'select count(*) from public.hr_devices where name = ''Door (test)'''), '1');
 select pg_temp.refused('devices: a wrong key is refused', null,
   $s$select public.hr_device_sync('ARK1-00000000-0000-0000-0000-000000000000-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '{"punches": []}')$s$, 'HR_DEVICE_KEY');
 select pg_temp.refused('devices: an unreadable punch refuses the batch', null,
@@ -403,7 +405,7 @@ exception when others then
   insert into t (name, ok, detail) values ('devices: punches are final even below the app', sqlerrm like 'HR_PUNCH_FINAL%', sqlerrm);
 end $$;
 select pg_temp.eq('pairing: nothing is paired before the numbers are linked',
-  pg_temp.q('staff.marketing@arak-sa.com', format($s$select string_agg(device_user_no || '=' || state, ',' order by device_user_no, work_day) from public.hr_punch_days where workspace_id = %L$s$, :arak)),
+  pg_temp.q('staff.marketing@arak-sa.com', format($s$select string_agg(device_user_no || '=' || state, ',' order by device_user_no, work_day) from public.hr_punch_days where workspace_id = %L and device_name = 'Door (test)'$s$, :arak)),
   '4=unlinked,7=unlinked,7=unlinked,99=unlinked');
 select pg_temp.refused('pairing: Work cannot link numbers', 'staff.dev@arak-sa.com',
   format($s$select public.hr_device_link(%L, %L)$s$, :arak, json_build_object('7', pg_temp.emp('T-007'))::text), 'HR_NO_ACCESS');
@@ -418,7 +420,7 @@ select pg_temp.eq('pairing: first punch in, last punch out, a device record',
   (select to_char(check_in at time zone 'Asia/Riyadh', 'HH24:MI') || '-' || to_char(check_out at time zone 'Asia/Riyadh', 'HH24:MI') || ':' || source
      from public.hr_attendance where employee_id = pg_temp.emp('T-004') and device_day = pg_temp.dow(4)), '07:50-17:05:device');
 select pg_temp.eq('pairing: the review shows each day''s state',
-  pg_temp.q('staff.marketing@arak-sa.com', format($s$select string_agg(device_user_no || '=' || state, ',' order by device_user_no, work_day) from public.hr_punch_days where workspace_id = %L$s$, :arak)),
+  pg_temp.q('staff.marketing@arak-sa.com', format($s$select string_agg(device_user_no || '=' || state, ',' order by device_user_no, work_day) from public.hr_punch_days where workspace_id = %L and device_name = 'Door (test)'$s$, :arak)),
   '4=applied,7=applied,7=single,99=unlinked');
 do $$ begin
   update public.hr_attendance set check_in = check_in - interval '1 hour' where id = pg_temp.att('T-004', pg_temp.dow(4));

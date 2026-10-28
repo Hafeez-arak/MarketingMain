@@ -149,6 +149,8 @@ list sections (`modules.test.js`, `sectionAccess.test.js`, `i18n.test.js`).
 
 ## The fingerprint device: how his works, what it would take here
 
+**2026-10-28: done.** Attendance, fingerprint device included, was rebuilt in full; see ATTENDANCE.md. The attendance rows of the table above describe the first port.
+
 His (changes 0044–0046, `tools/attendance-bridge`, `AttendanceDeviceSyncController`):
 a ZKTeco terminal on the office network is read **read-only** by a
 PowerShell script on a Windows PC (vendor's 32-bit Standalone SDK,

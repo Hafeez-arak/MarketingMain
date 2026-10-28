@@ -19,6 +19,7 @@ export const AW = {
       everyone: 'Everyone on the device, linked or not: one row per person and day from the punches.',
     },
     backToRecords: 'Attendance records',
+    pager: { of: 'of', prev: '‹ Previous', next: 'Next ›', prevLabel: 'Previous page', nextLabel: 'Next page' },
 
     // Shared
     employee: 'Employee', person: 'Person', number: 'Number', day: 'Date', time: 'Time', hours: 'Hours', status: 'Status', source: 'Source',
@@ -121,6 +122,7 @@ export const AW = {
       everyone: 'كل من على الجهاز، مربوطًا أو لا: سطر لكل شخص ويوم من البصمات.',
     },
     backToRecords: 'سجلات الحضور',
+    pager: { of: 'من', prev: 'السابق ›', next: '‹ التالي', prevLabel: 'الصفحة السابقة', nextLabel: 'الصفحة التالية' },
 
     employee: 'الموظف', person: 'الشخص', number: 'الرقم', day: 'التاريخ', time: 'الوقت', hours: 'الساعات', status: 'الحالة', source: 'المصدر',
     notes: 'ملاحظات', punches: 'البصمات', device: 'الجهاز', from: 'من', to: 'إلى', month: 'الشهر', show: 'عرض', search: 'بحث', all: 'الكل',

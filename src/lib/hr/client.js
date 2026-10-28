@@ -9,7 +9,7 @@ import { supabase } from '../supabaseClient'
 // Errors come back as the database's message; the screens turn them into
 // words with errorKey() (logic.js).
 
-const EMP_COLS = 'id,workspace_id,employee_no,name_en,name_ar,job_title,department_id,manager_id,hire_date,status,end_date,end_reason,work_email,work_phone,user_id,notes,created_at,updated_at'
+const EMP_COLS = 'id,workspace_id,employee_no,name_en,name_ar,job_title,department_id,manager_id,hire_date,status,end_date,end_reason,work_email,work_phone,user_id,device_user_no,notes,created_at,updated_at'
 const out = ({ data, error }, key = 'rows') => (error ? { [key]: key === 'rows' ? [] : null, error: error.message } : { [key]: data ?? (key === 'rows' ? [] : null) })
 
 // ── Reads ──

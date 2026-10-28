@@ -112,7 +112,7 @@ export function AttendanceReview() {
               )
             })}</tbody>
           </table>
-          <Pagination page={page} pageSize={50} count={count} onPage={n => setPage(String(n))} />
+          <Pagination page={page} pageSize={50} count={count} onPage={n => setPage(String(n))} words={t.pager} />
         </div>
       )}
     </div>
@@ -415,7 +415,7 @@ export function AttendanceEveryone() {
               ])}
             </tbody>
           </table>
-          {!group && <Pagination page={page} pageSize={100} count={count} onPage={n => setPage(String(n))} />}
+          {!group && <Pagination page={page} pageSize={100} count={count} onPage={n => setPage(String(n))} words={t.pager} />}
         </div>
       )}
     </div>
