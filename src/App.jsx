@@ -53,6 +53,13 @@ import { TechnicalSubmittals } from './pages/technical/Submittals'
 import { TechnicalSettings } from './pages/technical/Settings'
 import { FinanceInvoices } from './pages/finance/index'
 import { FinanceProjects } from './pages/finance/Projects'
+import { HrEmployees } from './pages/hr/Employees'
+import { HrEmployee } from './pages/hr/Employee'
+import { HrDepartments } from './pages/hr/Departments'
+import { HrLeave } from './pages/hr/Leave'
+import { HrAttendance } from './pages/hr/Attendance'
+import { HrDocuments } from './pages/hr/Documents'
+import { HrSettings } from './pages/hr/Settings'
 import { fromLegacy, canVisit, PARKED } from './lib/modules'
 import { useLang, COMMON } from './lib/i18n'
 
@@ -220,6 +227,15 @@ function ProtectedApp() {
             {/* ── Finance ── read only, from Odoo Accounting. Parked too. */}
             <Route path="/finance"               element={parked('finance', <FinanceInvoices />)} />
             <Route path="/finance/projects"      element={parked('finance', <FinanceProjects />)} />
+
+            {/* ── HR ── Musa's HR rewritten in our stack (dev/erp-pilot/HR.md). */}
+            <Route path="/hr"                    element={<HrEmployees />} />
+            <Route path="/hr/employee"           element={<HrEmployee />} />
+            <Route path="/hr/departments"        element={<HrDepartments />} />
+            <Route path="/hr/leave"              element={<HrLeave />} />
+            <Route path="/hr/attendance"         element={<HrAttendance />} />
+            <Route path="/hr/documents"          element={<HrDocuments />} />
+            <Route path="/hr/settings"           element={<HrSettings />} />
 
             {/* ── Admin ── */}
             <Route path="/admin"                 element={<Navigate to="/admin/team" replace />} />
