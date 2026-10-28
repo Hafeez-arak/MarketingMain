@@ -23,6 +23,19 @@
         "--strictPort"
       ],
       "port": 5180
+    },
+    {
+      "name": "v2-shell",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--mode",
+        "v2",
+        "--port",
+        "5185",
+        "--strictPort"
+      ],
+      "port": 5185
     }
   ]
 }
