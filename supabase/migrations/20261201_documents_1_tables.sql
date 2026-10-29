@@ -42,17 +42,26 @@
 -- v2 ONLY: the local v2 database (dev/v2db). Safe to re-run.
 
 -- ── The section key ──
--- A check constraint is replaced whole: every key in the newest constraint
--- (20261125_crm_1_tables.sql) plus 'documents'.
-alter table public.section_access drop constraint if exists section_access_section_check;
-alter table public.section_access add constraint section_access_section_check
-  check (section in ('ceo', 'sales', 'marketing', 'insights', 'technical', 'finance', 'hr', 'contacts', 'crm', 'documents'));
-alter table public.tasks drop constraint if exists tasks_section_check;
-alter table public.tasks add constraint tasks_section_check
-  check (section in ('ceo', 'sales', 'marketing', 'insights', 'technical', 'finance', 'hr', 'contacts', 'crm', 'documents'));
-alter table public.meetings drop constraint if exists meetings_section_check;
-alter table public.meetings add constraint meetings_section_check
-  check (section in ('ceo', 'sales', 'marketing', 'insights', 'technical', 'finance', 'hr', 'contacts', 'crm', 'documents'));
+-- Replaced whole, from the keys the constraints hold now plus 'documents'
+-- (the way Pricing does it): several branches add their own key to the
+-- shared database, and a fixed list here would drop any key this file does
+-- not name (catalog, pricing) when the database is built from scratch.
+do $$
+declare
+  r record;
+  keys text[];
+  wanted constant text[] := array['ceo', 'sales', 'marketing', 'insights', 'technical', 'finance', 'hr', 'contacts', 'crm', 'documents'];
+begin
+  for r in select * from (values ('section_access', 'section_access_section_check'), ('tasks', 'tasks_section_check'), ('meetings', 'meetings_section_check')) v(t, c) loop
+    select coalesce(array_agg(m[1] order by m[1]), '{}') into keys
+      from pg_constraint k, regexp_matches(pg_get_constraintdef(k.oid), '''([a-z_]+)''::text', 'g') m
+     where k.conname = r.c and k.conrelid = ('public.' || r.t)::regclass;
+    keys := wanted || array(select x from unnest(keys) x where x <> all (wanted) order by x);
+    execute format('alter table public.%I drop constraint if exists %I', r.t, r.c);
+    execute format('alter table public.%I add constraint %I check (section in (%s))', r.t, r.c,
+                   (select string_agg(quote_literal(x), ', ') from unnest(keys) x));
+  end loop;
+end $$;
 
 -- ── Document types: the company's own list ──
 create table if not exists public.document_types (
