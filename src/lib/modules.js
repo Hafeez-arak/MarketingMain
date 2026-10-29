@@ -74,6 +74,23 @@ export const SECTIONS = [
     ],
   },
   {
+    // Musa's catalog (الكتالوج), rewritten in our stack (2026-10-30,
+    // dev/erp-pilot/CATALOG.md): the company's items and their
+    // specifications. No prices, no stock. view reads, manage edits (work
+    // is the same as view: his catalog has two permissions).
+    key: 'catalog', label: 'Catalog', ar: 'الكتالوج', icon: 'box', base: '/catalog', adminOnly: true,
+    blurb: 'Items and their specifications, named by the company. No prices or stock.',
+    blurbAr: 'الأصناف ومواصفاتها كما تسمّيها الشركة، بلا أسعار ولا مخزون.',
+    pages: [
+      { to: '/catalog', label: 'Items', ar: 'الأصناف', icon: 'box', exact: true, translated: true },
+      { to: '/catalog/fields', label: 'Specification fields', ar: 'حقول المواصفات', icon: 'grid', min: 'manage', translated: true },
+      // Reached from the list, not the menu.
+      { to: '/catalog/item', label: 'Item', ar: 'الصنف', icon: 'box', hidden: true, translated: true },
+      { to: '/catalog/new', label: 'New item', ar: 'صنف جديد', icon: 'box', hidden: true, min: 'manage', translated: true },
+      { to: '/catalog/edit', label: 'Edit item', ar: 'تعديل الصنف', icon: 'box', hidden: true, min: 'manage', translated: true },
+    ],
+  },
+  {
     key: 'marketing', label: 'Marketing', ar: 'التسويق', icon: 'megaphone', base: '/marketing',
     blurb: 'Plan, create, schedule and publish, and the brand behind it.',
     blurbAr: 'التخطيط والإنشاء والجدولة والنشر، والعلامة التجارية خلف ذلك.',

@@ -42,6 +42,7 @@ const APP_COLOURS = {
   ceo: ['#7c3aed', '#db2777'],
   sales: ['#ea580c', '#f59e0b'],
   crm: ['#0f766e', '#0891b2'],
+  catalog: ['#a16207', '#ca8a04'],
   marketing: ['#db2777', '#f97316'],
   insights: ['#2563eb', '#0ea5e9'],
   hr: ['#a21caf', '#7c3aed'],

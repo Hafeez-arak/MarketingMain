@@ -8,7 +8,8 @@ import { normalizeSearch } from '../contacts/logic'
 //   pages      every page the person may visit (lib/modules.js), in the
 //              browser, at once
 //   sales      leads                      ┐ one SQL function each
-//   crm        opportunities              │ (20261127_shell_2_search.sql),
+//   crm        opportunities              │
+//   catalog    items                      │ (20261127_shell_2_search.sql),
 //   contacts   organisations and people   │ run as the person so the
 //   hr         employees                  │ module's own RLS decides, and
 //   tasks      tasks                      │ asked only when the person can
@@ -37,6 +38,7 @@ export const GROUPS = [
   { key: 'pages', en: 'Pages', ar: 'الصفحات' },
   { key: 'leads', en: 'Leads', ar: 'العملاء المحتملون' },
   { key: 'opportunities', en: 'Opportunities', ar: 'الفرص البيعية' },
+  { key: 'items', en: 'Catalog items', ar: 'أصناف الكتالوج' },
   { key: 'organisations', en: 'Organisations', ar: 'الجهات' },
   { key: 'people', en: 'People', ar: 'الأشخاص' },
   { key: 'employees', en: 'Employees', ar: 'الموظفون' },
@@ -65,6 +67,10 @@ export const PROVIDERS = [
   {
     key: 'crm', section: 'crm', rpc: 'shell_search_crm',
     item: (r, lang) => ({ group: 'opportunities', icon: 'kanban', title: r.title, detail: pick(lang, r.detail, r.detail_ar), to: `/crm/lead?id=${r.id}` }),
+  },
+  {
+    key: 'catalog', section: 'catalog', rpc: 'shell_search_catalog',
+    item: (r, lang) => ({ group: 'items', icon: 'box', title: r.title, detail: pick(lang, r.detail, r.detail_ar), to: `/catalog/item?id=${r.id}` }),
   },
   {
     key: 'contacts', section: 'contacts', rpc: 'shell_search_contacts',

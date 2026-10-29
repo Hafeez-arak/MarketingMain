@@ -21,6 +21,7 @@ const WAIT_MS = 180 // between keystrokes before the database is asked
 const PARTS = {
   sales: { en: 'Leads', ar: 'العملاء المحتملون' }, crm: { en: 'CRM', ar: 'إدارة العملاء' },
   contacts: { en: 'Contacts', ar: 'جهات الاتصال' }, hr: { en: 'HR', ar: 'الموارد البشرية' },
+  catalog: { en: 'Catalog', ar: 'الكتالوج' },
   tasks: { en: 'Tasks', ar: 'المهام' }, requests: { en: 'Requests', ar: 'الطلبات' },
 }
 

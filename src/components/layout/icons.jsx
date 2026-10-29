@@ -9,6 +9,7 @@ const P = {
   home: <><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/></>,
   building: <><path d="M3 21h18"/><path d="M5 21V8l7-5 7 5v13"/><path d="M9 21v-6h6v6"/></>,
   funnel: <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/>,
+  box: <><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5"/><line x1="12" y1="13" x2="12" y2="21"/></>,
   kanban: <><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="5.5" y1="7" x2="6.5" y2="7"/><line x1="11.5" y1="7" x2="12.5" y2="7"/><line x1="11.5" y1="11" x2="12.5" y2="11"/><line x1="17.5" y1="7" x2="18.5" y2="7"/></>,
   target: <><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></>,
   search: <><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></>,
