@@ -8,7 +8,6 @@ import { monthStats } from '../../lib/leads/view'
 import LeadsBoard from './Board'
 import Pipeline, { AddLeadDialog } from './Pipeline'
 import SalesShell from './SalesShell'
-import ReplyTest from './ReplyTest'
 
 // ─── The sales team's app: Leads ──────────────────────────────────────────
 // What a 'sales' account sees instead of the marketing app (2026-10-11): one
@@ -23,8 +22,7 @@ import ReplyTest from './ReplyTest'
 // Two tabs since 2026-10-18: Inbox (every enquiry they can see, sorted by
 // the agent) and Pipeline (approved and hand-added leads, by stage). A
 // salesperson opens on the Pipeline, a sales admin on the Inbox. "Add lead"
-// is on both. A third, Test (2026-10-29), shows a sales admin the replies the
-// agent would send to last week's leads, before any reply goes out.
+// is on both.
 
 export default function SalesApp() {
   const { user, workspaces, activeWorkspaceId, switchWorkspace, canApproveLeads } = useAuth()
@@ -114,11 +112,7 @@ export default function SalesApp() {
           </div>
         </div>
 
-        <SubTabs items={[
-          { key: 'inbox', label: 'Inbox' },
-          { key: 'pipeline', label: openCount ? `Pipeline (${openCount})` : 'Pipeline' },
-          ...(canApproveLeads ? [{ key: 'test', label: 'Test' }] : []),
-        ]} value={view} onChange={setView} />
+        <SubTabs items={[{ key: 'inbox', label: 'Inbox' }, { key: 'pipeline', label: openCount ? `Pipeline (${openCount})` : 'Pipeline' }]} value={view} onChange={setView} />
 
         {error && <Notice tone="red" title="Something went wrong">{error}</Notice>}
 
@@ -129,9 +123,7 @@ export default function SalesApp() {
           <Stat label="Everything" value={stats.total} loading={loading} hint={`All enquiries in ${month}`} />
         </div>}
 
-        {view === 'test' && canApproveLeads
-          ? <ReplyTest workspaceId={activeWorkspaceId} refreshKey={refreshKey} />
-          : view === 'inbox'
+        {view === 'inbox'
           ? <LeadsBoard workspaceId={activeWorkspaceId} onReview={review} refreshKey={refreshKey} mailboxes={mailboxes} canApprove={canApproveLeads} team={team} me={user?.id || ''} />
           : <Pipeline workspaceId={activeWorkspaceId} onReview={review} refreshKey={refreshKey} mailboxes={mailboxes} canApprove={canApproveLeads} team={team} me={user?.id || ''} onCount={setOpenCount} focus={focus} />}
         {adding && (

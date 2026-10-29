@@ -10,7 +10,6 @@ import Pipeline, { AddLeadDialog } from './Pipeline'
 import CrmCard from './CrmCard'
 import TeamCard from './TeamCard'
 import AutoReplyCard from './AutoReplyCard'
-import ReplyTest from './ReplyTest'
 import { RULE_LABELS } from '../../lib/leads/qualify'
 import {
   monthStats, sheetHealth, modelName, money,
@@ -28,11 +27,9 @@ import {
 
 // Inbox: every enquiry, where leads are sorted, approved and assigned.
 // Pipeline (2026-10-18): the approved and hand-added ones, by stage.
-// Test (2026-10-29): the auto-replies last week's leads would get, unsent.
 const VIEWS = [
   { key: 'leads', label: 'Inbox' },
   { key: 'pipeline', label: 'Pipeline' },
-  { key: 'test', label: 'Test' },
   { key: 'settings', label: 'Agent settings' },
 ]
 
@@ -72,7 +69,7 @@ export default function LeadAgent() {
     : params.get('ms_error') ? { ok: false, code: params.get('ms_error') } : null
   // Leads is the page; the agent's own settings are one tab away (?view=settings).
   // Coming back from a mailbox sign-in lands on settings, where it happened.
-  const view = params.get('view') === 'settings' || msBack ? 'settings' : ['pipeline', 'test'].includes(params.get('view')) ? params.get('view') : 'leads'
+  const view = params.get('view') === 'settings' || msBack ? 'settings' : params.get('view') === 'pipeline' ? 'pipeline' : 'leads'
   const [adding, setAdding] = useState(false)
   // "Now" for the month and the Sheet's last call, taken when data loads
   // rather than during render.
@@ -156,8 +153,6 @@ export default function LeadAgent() {
 
       {view === 'leads' ? (
         <LeadsBoard workspaceId={activeWorkspaceId} onReview={review} refreshKey={refreshKey} mailboxes={status?.mailboxes || []} canApprove canTest team={team} me={user?.id || ''} />
-      ) : view === 'test' ? (
-        <ReplyTest workspaceId={activeWorkspaceId} refreshKey={refreshKey} />
       ) : view === 'pipeline' ? (
         <Pipeline workspaceId={activeWorkspaceId} onReview={review} refreshKey={refreshKey} mailboxes={status?.mailboxes || []} canApprove team={team} me={user?.id || ''} focus={params.get('lead') || ''} />
       ) : (
