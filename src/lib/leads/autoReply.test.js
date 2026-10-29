@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   greeting, cleanBlank, fillLine, buildReply, parseReply, replyRequest, replyUserPrompt, replyHtml,
+  signatureFromBody, replyMessage, replyPreviewHtml,
   REPLY_SCHEMA, REPLY_TEMPLATE, REPLY_SIGNATURE,
 } from './autoReply.js'
 import { toEnvelope } from './qualify.js'
@@ -88,6 +89,46 @@ describe('replyHtml', () => {
   })
   it('never lets the text inject markup', () => {
     expect(replyHtml('<script>x</script>')).not.toContain('<script>')
+  })
+})
+
+describe('the mailbox\'s Outlook signature', () => {
+  // The shape Outlook gives a draft with a signature (made-up company).
+  const body = '<html><head><style>p{}</style></head><body dir="ltr"><div class="x"><br></div>'
+    + '<div id="Signature"><div style="a"><br></div><table><tr><td><b><i>Thanks &amp; Regards!</i></b></td></tr>'
+    + '<tr><td><a href="https://nour.example"><img alt="Logo" src="cid:logo-1"></a><div onclick="x()">Customer Care</div>'
+    + '<a href="javascript:alert(1)">x</a><script>bad()</script></td></tr></table><div style="a"><br></div></div></body></html>'
+  const atts = [
+    { contentId: 'logo-1', name: 'image.png', contentType: 'image/png', contentBytes: 'AAAA' },
+    { contentId: 'old-copy', name: 'image.png', contentType: 'image/png', contentBytes: 'BBBB' },
+  ]
+  it('takes the <div id="Signature"> block and only the pictures it shows', () => {
+    const sig = signatureFromBody(body, atts)
+    expect(sig.html.startsWith('<table>')).toBe(true)
+    expect(sig.html.endsWith('</table>')).toBe(true)
+    expect(sig.html).toContain('Thanks &amp; Regards!')
+    expect(sig.images).toEqual([{ cid: 'logo-1', name: 'image.png', type: 'image/png', bytes: 'AAAA' }])
+  })
+  it('strips scripts, event handlers and javascript: links', () => {
+    const { html } = signatureFromBody(body, atts)
+    expect(html).not.toMatch(/<script|onclick|javascript:/i)
+  })
+  it('is null when the body has no signature', () => {
+    expect(signatureFromBody('<body><p>Hi</p></body>')).toBeNull()
+  })
+  it('sends the reply, then the signature, with its pictures attached inline', () => {
+    const msg = replyMessage('Dear Omar,\n\nThanks.', signatureFromBody(body, atts))
+    expect(msg.html).toMatch(/>Thanks\.<\/div><div[^>]*><br><\/div><table>/)
+    expect(msg.html).not.toContain('Best Regards')
+    expect(msg.attachments).toEqual([{ '@odata.type': '#microsoft.graph.fileAttachment', name: 'image.png', contentType: 'image/png', contentBytes: 'AAAA', contentId: 'logo-1', isInline: true }])
+  })
+  it('falls back to the plain signature when none was copied', () => {
+    const msg = replyMessage('Dear Omar,', null)
+    expect(msg.html).toContain('>ARAK Lighting</div>')
+    expect(msg.attachments).toEqual([])
+  })
+  it('shows the pictures in a browser preview as data: URLs', () => {
+    expect(replyPreviewHtml('Hi', signatureFromBody(body, atts))).toContain('src="data:image/png;base64,AAAA"')
   })
 })
 

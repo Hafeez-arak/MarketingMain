@@ -59,6 +59,75 @@ export function replyHtml(text, { signature = REPLY_SIGNATURE } = {}) {
   return [...paras, line(''), line(''), ...signature.map(line)].join('')
 }
 
+// ─── The mailbox's own Outlook signature (2026-10-29) ──────────────────────
+// The owner wants the signature the mailbox has in Outlook, pictures and all.
+// Outlook keeps it where the API cannot read it, so it is copied from an
+// email or draft in that mailbox (copy-signature.mjs): Outlook wraps it in
+// <div id="Signature">, and its pictures are inline attachments ("cid:").
+// It is stored on the mailbox (lead_mailboxes.reply_signature) and sent the
+// way Outlook sends it: the HTML after the reply, the pictures attached inline.
+
+/**
+ * The signature inside an Outlook body, with only the pictures it shows.
+ * `attachments` are Graph fileAttachments (contentId, name, contentType,
+ * contentBytes). Returns { html, images } or null when there is none.
+ * Scripts, event handlers and javascript: links are stripped, though the
+ * HTML comes from our own mailbox.
+ */
+export function signatureFromBody(bodyHtml, attachments = []) {
+  const html = String(bodyHtml ?? '')
+  const start = html.search(/<div[^>]*\bid="Signature"[^>]*>/i)
+  if (start < 0) return null
+  // The signature div runs to its matching </div>.
+  const tags = /<div\b[^>]*>|<\/div>/gi
+  tags.lastIndex = start
+  let depth = 0
+  let end = -1
+  for (let m = tags.exec(html); m; m = tags.exec(html)) {
+    depth += m[0][1] === '/' ? -1 : 1
+    if (!depth) { end = m.index + m[0].length; break }
+  }
+  if (end < 0) return null
+  const inner = html.slice(html.indexOf('>', start) + 1, end - '</div>'.length)
+    // Outlook's empty lines around it: the reply adds its own spacing.
+    .replace(/^(\s*<div[^>]*>\s*<br\s*\/?>\s*<\/div>)+|(<div[^>]*>\s*<br\s*\/?>\s*<\/div>\s*)+$/gi, '')
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/(href|src)\s*=\s*"\s*javascript:[^"]*"/gi, '$1="#"')
+    .trim()
+  if (!inner) return null
+  const cids = new Set([...inner.matchAll(/src="cid:([^"]+)"/gi)].map((m) => m[1]))
+  const images = attachments
+    .filter((a) => a?.contentId && cids.has(a.contentId) && a.contentBytes)
+    .map((a) => ({ cid: a.contentId, name: a.name || 'image.png', type: a.contentType || 'image/png', bytes: a.contentBytes }))
+  return { html: inner, images }
+}
+
+/**
+ * The email to send: the reply's paragraphs in the account's own style, then
+ * the mailbox's signature with its pictures as inline attachments. A mailbox
+ * with no signature copied yet ends with the plain REPLY_SIGNATURE.
+ * Returns { html, attachments } for Graph (message.body + message.attachments).
+ */
+export function replyMessage(text, signature = null) {
+  if (!signature?.html) return { html: replyHtml(text), attachments: [] }
+  const body = replyHtml(text, { signature: [] }).replace(/(<div[^>]*><br><\/div>)+$/, '')
+  return {
+    html: `${body}<div style="${MAIL_STYLE}"><br></div>${signature.html}`,
+    attachments: (signature.images || []).map((i) => ({
+      '@odata.type': '#microsoft.graph.fileAttachment',
+      name: i.name, contentType: i.type, contentBytes: i.bytes, contentId: i.cid, isInline: true,
+    })),
+  }
+}
+
+/** The same email for a browser to show: the pictures as data: URLs instead of attachments. */
+export function replyPreviewHtml(text, signature = null) {
+  const { html } = replyMessage(text, signature)
+  const byCid = new Map((signature?.images || []).map((i) => [i.cid, `data:${i.type};base64,${i.bytes}`]))
+  return html.replace(/src="cid:([^"]+)"/gi, (m, cid) => (byCid.has(cid) ? `src="${byCid.get(cid)}"` : m))
+}
+
 // ─── The greeting, in code ─────────────────────────────────────────────────
 
 const NOT_A_PERSON = /\b(sales|team|department|dept|procurement|purchas\w*|info|admin|office|support|account\w*|estimation|tender\w*|hr|noreply|no-reply|company|co|ltd|llc|est|group|trading|contracting)\b/i

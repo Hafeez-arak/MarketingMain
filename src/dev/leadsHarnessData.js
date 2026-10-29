@@ -183,7 +183,13 @@ window.fetch = async (input, init = {}) => {
     return json(NOTES)
   }
   // What a sales seat reads for the "Came in" filter (SalesApp).
-  if (url.includes('/rest/v1/lead_mailboxes')) return json(status.mailboxes.map(({ id, email }) => ({ id, email, label: '' })))
+  if (url.includes('/rest/v1/lead_mailboxes')) {
+    return json(status.mailboxes.map(({ id, email }, i) => ({
+      id, email, label: i ? '' : 'info@harness.example', can_send: true,
+      // The Test tab's signature (made up): what copy-signature.mjs stores.
+      reply_signature: i ? {} : { html: '<div style="font-family:Tahoma,sans-serif;font-size:13px"><b><i>Thanks &amp; Regards!</i></b><br><br><b><i>Customer Care</i></b><br>Harness Co</div>', images: [] },
+    })))
+  }
   if (url.includes('/api/leads/status')) return json(status)
   // The sales team (sales_team for the list, team for the settings card).
   if (url.includes('/rest/v1/rpc/sales_team')) return json(TEAM.map(({ user_id, email, full_name, approver, all_website_leads }) => ({ user_id, email, full_name, approver, all_website_leads })))

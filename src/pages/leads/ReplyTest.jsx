@@ -2,18 +2,40 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
 import { Skeleton } from '../../components/ui/index'
 import { Notice } from '../email/parts'
-import { REPLY_SIGNATURE } from '../../lib/leads/autoReply'
+import { replyPreviewHtml } from '../../lib/leads/autoReply'
 
 // ─── Test: the replies leads WOULD get (2026-10-29) ────────────────────────
 // Before any auto-reply is sent, the owner and the sales admin read what the
 // agent wrote for the last 15 qualified leads (scripts/lead-qualifier/reply-test.mjs
 // stores them as lead_replies status 'test'). Nothing here is ever sent, and
 // the tab is read only. RLS shows the rows to whoever may approve leads.
+//
+// Each reply is shown as the email will look: the text, then the mailbox's
+// own Outlook signature (lead_mailboxes.reply_signature, pictures included).
+// A website enquiry is answered from the first mailbox that may send, as
+// forwards are. The email sits in a sandboxed frame: no script in it can run.
 
 const day = (s) => (s ? new Date(s).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'Asia/Riyadh' }) : '')
 const cameIn = (lead) => (lead?.source === 'website_form' ? 'Website form' : lead?.mailbox || 'Email')
 
-function ReplyCard({ row }) {
+/** The mailbox a reply goes from: the one the email came to; a website enquiry, the first that may send. */
+function mailboxFor(lead, mailboxes) {
+  const to = String(lead?.mailbox || '').toLowerCase()
+  return mailboxes.find((m) => to && (m.label?.toLowerCase() === to || m.email?.toLowerCase() === to))
+    || (lead?.source === 'website_form' ? mailboxes.find((m) => m.can_send) : null)
+    || null
+}
+
+function EmailFrame({ html }) {
+  const [height, setHeight] = useState(320)
+  const doc = `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"></head><body style="margin:0;padding:4px 2px">${html}</body></html>`
+  return (
+    <iframe title="The reply as the email will look" sandbox="allow-same-origin allow-popups" srcDoc={doc} className="w-full border-0 block" style={{ height }}
+      onLoad={(e) => { try { setHeight(e.currentTarget.contentDocument.documentElement.scrollHeight + 8) } catch { /* keep the default */ } }} />
+  )
+}
+
+function ReplyCard({ row, mailbox }) {
   const lead = row.lead || {}
   const review = (lead.human_verdict || lead.verdict) === 'needs_review'
   return (
@@ -23,13 +45,14 @@ function ReplyCard({ row }) {
         <p className="text-[11px] text-text-tertiary">{day(lead.received_at)} · {cameIn(lead)}</p>
         {review && <p className="text-[11px] font-semibold text-amber-800">Needs review: replied only if the sales admin approves it</p>}
         <p className="text-xs text-text-secondary break-words"><span className="text-text-tertiary">They asked: </span>{lead.summary || lead.subject || '—'}</p>
+        {!row.skip_reason && <p className="text-[11px] text-text-tertiary break-words">From {mailbox?.label || mailbox?.email || 'info@'}</p>}
       </div>
       <div className="p-4 min-w-0">
         {row.skip_reason
           ? <p className="text-xs text-amber-800">No reply. {row.skip_reason}</p>
           : <>
             <p className="text-xs font-semibold text-text pb-2 mb-3 border-b border-border break-words">{row.subject}</p>
-            <p className="text-[13px] text-text leading-relaxed whitespace-pre-wrap break-words">{`${row.body}\n\n\n${REPLY_SIGNATURE.join('\n')}`}</p>
+            <EmailFrame html={replyPreviewHtml(row.body, mailbox?.reply_signature)} />
           </>}
       </div>
     </div>
@@ -37,19 +60,22 @@ function ReplyCard({ row }) {
 }
 
 export default function ReplyTest({ workspaceId, refreshKey }) {
-  const [loaded, setLoaded] = useState({ for: null, rows: [], error: '' })
+  const [loaded, setLoaded] = useState({ for: null, rows: [], mailboxes: [], error: '' })
 
   useEffect(() => {
     if (!workspaceId) return
     let live = true
-    supabase.from('lead_replies')
-      .select('id,subject,body,skip_reason,created_at,lead:leads(name,company,email,source,mailbox,received_at,summary,subject,verdict,human_verdict)')
-      .eq('workspace_id', workspaceId).eq('status', 'test')
-      .then(({ data, error }) => {
-        if (!live) return
-        const rows = (data || []).sort((a, b) => String(b.lead?.received_at || '').localeCompare(String(a.lead?.received_at || '')))
-        setLoaded({ for: workspaceId, rows, error: error ? error.message : '' })
-      })
+    Promise.all([
+      supabase.from('lead_replies')
+        .select('id,subject,body,skip_reason,created_at,lead:leads(name,company,email,source,mailbox,received_at,summary,subject,verdict,human_verdict)')
+        .eq('workspace_id', workspaceId).eq('status', 'test'),
+      supabase.from('lead_mailboxes').select('id,email,label,can_send,reply_signature').eq('workspace_id', workspaceId).order('created_at'),
+    ]).then(([replies, mbs]) => {
+      if (!live) return
+      const rows = (replies.data || []).sort((a, b) => String(b.lead?.received_at || '').localeCompare(String(a.lead?.received_at || '')))
+      // A mailbox read that fails only costs the signature (the plain one shows instead).
+      setLoaded({ for: workspaceId, rows, mailboxes: mbs.data || [], error: replies.error?.message || '' })
+    })
     return () => { live = false }
   }, [workspaceId, refreshKey])
 
@@ -59,15 +85,15 @@ export default function ReplyTest({ workspaceId, refreshKey }) {
   return (
     <div className="space-y-3">
       <Notice tone="sky" title="Test replies: nothing is sent">
-        The reply each of the last 15 qualified leads would get. Read them and say what to change. Replies start going out only after you approve them.
+        The reply each of the last 15 qualified leads would get, as the email will look. Read them and say what to change. Replies start going out only after you approve them.
       </Notice>
       {loaded.error && <Notice tone="red" title="The test replies did not load">{loaded.error}</Notice>}
       {loading
         ? <div className="space-y-3">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-40 w-full" />)}</div>
         : !loaded.error && (loaded.rows.length
           ? <>
-            <p className="text-xs text-text-tertiary">{written} {written === 1 ? 'reply' : 'replies'} for {loaded.rows.length} {loaded.rows.length === 1 ? 'lead' : 'leads'}, newest first, each with the info@ account&apos;s own signature.</p>
-            {loaded.rows.map((r) => <ReplyCard key={r.id} row={r} />)}
+            <p className="text-xs text-text-tertiary">{written} {written === 1 ? 'reply' : 'replies'} for {loaded.rows.length} {loaded.rows.length === 1 ? 'lead' : 'leads'}, newest first, each with its mailbox&apos;s own signature.</p>
+            {loaded.rows.map((r) => <ReplyCard key={r.id} row={r} mailbox={mailboxFor(r.lead, loaded.mailboxes)} />)}
           </>
           : <p className="text-xs text-text-tertiary">No test replies have been written yet.</p>)}
     </div>
