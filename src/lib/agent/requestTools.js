@@ -47,7 +47,7 @@ export const REQUEST_TOOLS = [
     cost: FREE,
     description:
       'Give a piece of work to a named colleague when the person tags them ("@Shadia redo this", ' +
-      '"ask Hafeez to fix the report"). Only people on the tag list can be tagged; the result ' +
+      '"ask Junaid to fix the report"). Only people on the tag list can be tagged; the result ' +
       'names who is allowed if the name does not match. Write a brief the colleague can act on ' +
       'without reading this conversation: what is wanted, why, which item, by when if they said.',
     input_schema: {

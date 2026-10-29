@@ -12,7 +12,7 @@ import { askAssistant, assistantMounted } from '../../lib/askAssistant'
 // ─── Requests ──────────────────────────────────────────────────────────────
 // 2026-10-18, PR 2 of docs/CEO-ASSISTANT-PLAN.md. Where "this isn't good,
 // change it" lands when the assistant cannot make the change itself, and
-// where tagged work for Shadia or Hafeez lives. Requests are made from the
+// where tagged work for Shadia or Junaid lives. Requests are made from the
 // assistant's chat; this page is for seeing and moving them.
 //
 // What each person sees is RLS's call: admins the whole board, everyone else
@@ -81,7 +81,7 @@ export function Requests() {
     <div className="space-y-4">
       <PageHeader
         title="Requests"
-        subtitle="Changes, fixes and tagged work from the assistant. Ask for something in the assistant, or tag Shadia or Hafeez with @, and it lands here.">
+        subtitle="Changes, fixes and tagged work from the assistant. Ask for something in the assistant, or tag Shadia or Junaid with @, and it lands here.">
         <Select value={view} onChange={e => setView(e.target.value)} className="w-52">
           {VIEWS.map(v => <option key={v.key} value={v.key}>{v.label}</option>)}
         </Select>
@@ -97,7 +97,7 @@ export function Requests() {
         <Empty
           icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>}
           title="No requests yet"
-          description="Tell the assistant what should change, or tag someone with @Shadia or @Hafeez. The request appears here and the right person is notified." />
+          description="Tell the assistant what should change, or tag someone with @Shadia or @Junaid. The request appears here and the right person is notified." />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
           {COLUMNS.map(col => {
