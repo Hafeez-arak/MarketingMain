@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { sendAfterFor, repeatOf, alreadyAnswered, replyMailbox, runAutoReplies, copySignature, DELAY_MIN, DELAY_MAX } from './_reply.js'
+import { sendAfterFor, repeatOf, alreadyAnswered, replyMailbox, websiteFromContact, runAutoReplies, copySignature, DELAY_MIN, DELAY_MAX } from './_reply.js'
 
 // Auto-replies (2026-10-29): queue a qualified lead's acknowledgement, send it
 // 15–20 minutes later from the mailbox it came to, with that mailbox's
@@ -26,6 +26,7 @@ function world({ since = SINCE, leads, conversation = [], mailboxes = [MB], mode
   const db = async (path, { method = 'GET', body } = {}) => {
     if (path.startsWith('lead_agent_settings?')) return [{ auto_reply_since: state.since }]
     if (path.startsWith('workspaces?')) return [{ name: 'Example Lighting' }]
+    if (path.startsWith('brand_profile?')) return [{ contact_info: 'Head office: Riyadh\nPhone: +966 11 000 0000\nWebsite: www.example.com' }]
     if (path === 'agent_usage') { state.usage.push(body); return null }
     if (path.startsWith('leads?')) {
       if (/[?&]id=eq\./.test(path)) return state.leads.filter((l) => path.includes(`id=eq.${l.id}`)).map((l) => ({ ...l }))
@@ -100,10 +101,18 @@ describe('the helpers', () => {
     expect(alreadyAnswered([theirs, forward], at)).toBe(false)
     expect(alreadyAnswered([theirs, forward, answer], at)).toBe(true)
   })
-  it('replies from the mailbox the email came to; a website enquiry from the first that may send', () => {
-    const other = { ...MB, id: 'mb-2', label: 'info@other.example', email: 'info@other.example' }
-    expect(replyMailbox({ source: 'email', mailbox: 'info@other.example' }, [MB, other])).toBe(other)
-    expect(replyMailbox({ source: 'website_form' }, [{ ...MB, can_send: false }, other])).toBe(other)
+  it('replies from the mailbox the email came to, never another', () => {
+    const sister = { ...MB, id: 'mb-2', label: 'info@sister.example', email: 'info@sister.example' }
+    expect(replyMailbox({ source: 'email', mailbox: 'info@sister.example' }, [MB, sister])).toBe(sister)
+    expect(replyMailbox({ source: 'email', mailbox: 'info@example.com' }, [sister, MB])).toBe(MB)
+    expect(replyMailbox({ source: 'email', mailbox: 'gone@example.com' }, [MB, sister])).toBeNull()
+  })
+  it('answers a website enquiry from the mailbox on the company\'s website domain, whatever was connected first', () => {
+    const sister = { ...MB, id: 'mb-2', label: 'info@sister.example', email: 'info@sister.example', created_at: '2026-09-01' }
+    expect(replyMailbox({ source: 'website_form' }, [sister, MB], 'example.com')).toBe(MB)
+    expect(replyMailbox({ source: 'website_form' }, [{ ...sister, can_send: false }, MB], '')).toBe(MB)
+    expect(websiteFromContact('Phone: 1\nWebsite: https://www.Example.com/en')).toBe('example.com')
+    expect(websiteFromContact('Phone: 1')).toBe('')
   })
 })
 
@@ -182,7 +191,8 @@ describe('sending', () => {
     expect(w.state.sent).toHaveLength(1)
   })
   it('answers a website enquiry with a new email to the address it gave', async () => {
-    const w = world({ leads: [lead({ id: 'w1', source: 'website_form', mailbox: '', email: 'nora@client.example', name: 'Nora', subject: 'Hotel' })] })
+    const sister = { ...MB, id: 'mb-2', label: 'info@sister.example', email: 'info@sister.example', created_at: '2026-09-01' }
+    const w = world({ leads: [lead({ id: 'w1', source: 'website_form', mailbox: '', email: 'nora@client.example', name: 'Nora', subject: 'Hotel' })], mailboxes: [sister, MB] })
     await run(w)
     w.state.now = '2026-10-29T09:21:00.000Z'
     await run(w)
@@ -217,13 +227,41 @@ describe('sending', () => {
     expect(w.state.sent).toEqual([])
     expect(w.state.replies[0]).toMatchObject({ status: 'failed' })
   })
-  it('ends with the plain signature when the mailbox has none copied', async () => {
+  it('never signs with another mailbox\'s signature: with none copied it waits, then drops after two hours', async () => {
     const w = world({ leads: [lead({ id: 'l1' })], mailboxes: [{ ...MB, reply_signature: {} }] })
     await run(w)
     w.state.now = '2026-10-29T09:21:00.000Z'
+    expect(await run(w)).toMatchObject({ sent: 0, held: 1 })
+    expect(w.state.sent).toEqual([])
+    expect(w.state.replies[0]).toMatchObject({ status: 'due', sent_at: null })
+    expect(w.state.replies[0].error).toMatch(/no signature copied yet/)
+    // The signature arrives in time: it goes, with that signature.
+    w.state.mailboxes = [MB]
+    w.state.now = '2026-10-29T09:40:00.000Z'
+    expect(await run(w)).toMatchObject({ sent: 1 })
+    expect(w.state.sent[0].body.message.body.content).toContain('Customer Care')
+  })
+  it('drops a reply that waited more than two hours for its signature', async () => {
+    const w = world({ leads: [lead({ id: 'l1' })], mailboxes: [{ ...MB, reply_signature: {} }] })
     await run(w)
-    expect(w.state.sent[0].body.message.body.content).toContain('>ARAK Lighting</div>')
-    expect(w.state.sent[0].body.message.attachments).toEqual([])
+    w.state.now = '2026-10-29T11:30:00.000Z'
+    await run(w)
+    expect(w.state.sent).toEqual([])
+    expect(w.state.replies[0]).toMatchObject({ status: 'skipped' })
+    expect(w.state.replies[0].skip_reason).toMatch(/waited too long/)
+  })
+  it('answers a sister company\'s email from its own mailbox with its own signature', async () => {
+    const sister = { ...MB, id: 'mb-2', label: 'info@sister.example', email: 'info@sister.example', created_at: '2026-09-01',
+      reply_signature: { html: '<p>Sister Lighting</p><img src="cid:s-1">', images: [{ cid: 's-1', name: 'image.png', type: 'image/png', bytes: 'SSSS' }] } }
+    const w = world({ leads: [lead({ id: 's1', mailbox: 'info@sister.example' })], mailboxes: [sister, MB] })
+    await run(w)
+    w.state.now = '2026-10-29T09:21:00.000Z'
+    await run(w)
+    const [s] = w.state.sent
+    expect(s.body.message.from).toEqual({ emailAddress: { address: 'info@sister.example' } })
+    expect(s.body.message.body.content).toContain('Sister Lighting')
+    expect(s.body.message.body.content).not.toContain('Customer Care')
+    expect(s.body.message.attachments.map((a) => a.contentId)).toEqual(['s-1'])
   })
 })
 

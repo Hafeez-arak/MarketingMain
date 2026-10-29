@@ -1,13 +1,17 @@
 import { accessToken, findMessage, requestKey } from './_mail.js'
 import { toEnvelope } from '../../src/lib/leads/qualify.js'
-import { replyRequest, parseReply, buildReply, replyMessage, signatureFromBody } from '../../src/lib/leads/autoReply.js'
+import { replyRequest, parseReply, buildReply, replyMessage, signatureFromBody, websiteFromContact } from '../../src/lib/leads/autoReply.js'
+
+export { websiteFromContact }
 
 // ─── Auto-replies: queue and send (2026-10-29) ─────────────────────────────
 // Every qualified lead gets one short acknowledgement (src/lib/leads/
 // autoReply.js), 15–20 minutes after its email arrived, from the mailbox it
-// came to, on the same thread, with that mailbox's own Outlook signature. A
-// website enquiry is answered by a new email from the first mailbox that may
-// send (info@), as forwards are. A needs-review lead is answered 15–20
+// came to, on the same thread, with that mailbox's own Outlook signature and
+// never another's (a CLB email: info@clb-sa.com with CLB's signature). A
+// website enquiry is answered by a new email from the mailbox on the
+// company's website domain (info@arak-sa.com). A mailbox with no signature
+// copied sends nothing: its replies wait, up to two hours. A needs-review lead is answered 15–20
 // minutes after a person approves it.
 //
 // Runs in the five-minute round (intakeWebsite, after the mailboxes), in two
@@ -32,6 +36,8 @@ export const REPEAT_DAYS = 14
 export const QUEUE_PER_ROUND = 5
 export const SEND_PER_ROUND = 8
 const STUCK_MS = 10 * 60_000
+/** How long a reply may wait for its mailbox's signature before it is dropped. */
+export const HOLD_MS = 2 * 3600_000
 
 const lower = (s) => String(s || '').trim().toLowerCase()
 const domainOf = (email) => lower(email).split('@')[1] || ''
@@ -161,7 +167,7 @@ async function finish(deps, id, patch) {
   await deps.db(`lead_replies?id=eq.${id}`, { method: 'PATCH', prefer: 'return=minimal', body: { ...patch, updated_at: deps.now().toISOString() } })
 }
 
-/** Send the replies whose time has come. Returns { sent, skipped, failed }. */
+/** Send the replies whose time has come. Returns { sent, skipped, failed, held }. */
 export async function sendDueReplies(deps, { workspaceId, deadline = Infinity, ownDomains = [] }) {
   const clock = deps.clock || Date.now
   const now = deps.now()
@@ -172,10 +178,11 @@ export async function sendDueReplies(deps, { workspaceId, deadline = Infinity, o
     method: 'PATCH', prefer: 'return=minimal', body: { status: 'failed', error: 'The send did not finish; it may or may not have gone. Not retried.', updated_at: now.toISOString() },
   }).catch(() => {})
 
-  const due = await deps.db(`lead_replies?workspace_id=eq.${workspaceId}&status=eq.due&sent_at=is.null&send_after=lte.${encodeURIComponent(now.toISOString())}&select=id,lead_id,subject,body&order=send_after.asc&limit=${SEND_PER_ROUND}`) || []
-  const out = { sent: 0, skipped: 0, failed: 0 }
+  const due = await deps.db(`lead_replies?workspace_id=eq.${workspaceId}&status=eq.due&sent_at=is.null&send_after=lte.${encodeURIComponent(now.toISOString())}&select=id,lead_id,subject,body,send_after&order=send_after.asc&limit=${SEND_PER_ROUND}`) || []
+  const out = { sent: 0, skipped: 0, failed: 0, held: 0 }
   if (!due.length) return out
   const mailboxes = await mailboxesOf(deps, workspaceId)
+  const site = await websiteDomainOf(deps, workspaceId)
   const own = [...new Set([...ownDomains, ...mailboxes.flatMap((m) => [domainOf(m.email), domainOf(m.label)])].filter(Boolean))]
 
   for (const row of due) {
@@ -185,8 +192,14 @@ export async function sendDueReplies(deps, { workspaceId, deadline = Infinity, o
     }) || []
     if (!claimed) continue
     try {
-      const r = await sendOne(deps, { workspaceId, row, mailboxes, own })
-      if (r.skipped) { await finish(deps, row.id, { status: 'skipped', skip_reason: r.skipped, sent_at: null }); out.skipped++ }
+      const r = await sendOne(deps, { workspaceId, row, mailboxes, own, site })
+      if (r.hold) {
+        // Nothing went. Wait for the signature, but not for ever: a reply
+        // hours late is worse than none.
+        const late = deps.now().getTime() - Date.parse(row.send_after) > HOLD_MS
+        await finish(deps, row.id, late ? { status: 'skipped', skip_reason: `${r.hold} It waited too long and was not sent.`, sent_at: null } : { sent_at: null, error: r.hold })
+        if (late) out.skipped++; else out.held++
+      } else if (r.skipped) { await finish(deps, row.id, { status: 'skipped', skip_reason: r.skipped, sent_at: null }); out.skipped++ }
       else if (r.ok) { await finish(deps, row.id, { status: 'sent', sent_at: deps.now().toISOString(), error: '' }); out.sent++ }
       else { await finish(deps, row.id, { status: 'failed', error: String(r.error || 'Not sent.').slice(0, 400) }); out.failed++ }
     } catch (err) {
@@ -197,10 +210,24 @@ export async function sendDueReplies(deps, { workspaceId, deadline = Infinity, o
   return out
 }
 
-/** The mailbox a reply goes from: the one it came to; a website enquiry, the first that may send. */
-export function replyMailbox(lead, mailboxes = []) {
+/**
+ * The mailbox a reply goes from, never mixed (the owner, 2026-10-29): an
+ * email is answered from the mailbox it came to (a CLB email from info@clb,
+ * an Arak one from info@arak); a website enquiry from the mailbox on the
+ * company's own website domain (`site`, from its Brand Brain contact
+ * details), else the first that may send.
+ */
+export function replyMailbox(lead, mailboxes = [], site = '') {
   if (lead.source === 'email') return mailboxes.find((m) => lower(m.label) === lower(lead.mailbox) || lower(m.email) === lower(lead.mailbox)) || null
-  return mailboxes.find((m) => m.can_send) || null
+  const onSite = site && mailboxes.find((m) => m.can_send && [domainOf(m.label), domainOf(m.email)].includes(lower(site)))
+  return onSite || mailboxes.find((m) => m.can_send) || null
+}
+
+async function websiteDomainOf(deps, workspaceId) {
+  try {
+    const [p] = await deps.db(`brand_profile?workspace_id=eq.${workspaceId}&select=contact_info`) || []
+    return websiteFromContact(p?.contact_info)
+  } catch { return '' }
 }
 
 /** The From the customer sees: the address they wrote to (info@, an alias), else the account's own. */
@@ -214,13 +241,15 @@ async function graphPost(deps, auth, path, body) {
   return { ok: false, error: `Microsoft answered ${r.status}${j?.error?.code ? ` (${j.error.code})` : ''}: ${String(j?.error?.message || '').slice(0, 200)}` }
 }
 
-async function sendOne(deps, { workspaceId, row, mailboxes, own }) {
+async function sendOne(deps, { workspaceId, row, mailboxes, own, site = '' }) {
   const [lead] = await deps.db(`leads?id=eq.${row.lead_id}&workspace_id=eq.${workspaceId}&select=${LEAD_FIELDS}`) || []
   if (!lead) return { skipped: 'The lead was deleted.' }
   if (!isQualified(lead)) return { skipped: 'No longer a qualified lead.' }
-  const mb = replyMailbox(lead, mailboxes)
+  const mb = replyMailbox(lead, mailboxes, site)
   if (!mb) return { error: `The mailbox ${lead.mailbox || ''} is not connected.` }
   if (!mb.can_send) return { error: `${mb.label || mb.email} can only read. On Agent settings, choose "Allow forwarding" on it.` }
+  // Only the mailbox's own signature: a CLB reply never signs as Arak.
+  if (!mb.reply_signature?.html) return { hold: `${mb.label || mb.email} has no signature copied yet (Agent settings → Auto-replies).` }
   const { html, attachments } = replyMessage(row.body, mb.reply_signature)
 
   if (lead.source === 'email') {

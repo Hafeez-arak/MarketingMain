@@ -193,6 +193,7 @@ window.fetch = async (input, init = {}) => {
     })))
   }
   if (url.includes('/api/leads/status')) return json(status)
+  if (url.includes('/rest/v1/brand_profile')) return json({ contact_info: 'Website: www.harness.example' })
   // Auto-replies (made up): on, one mailbox with a signature, one without.
   if (url.includes('/api/leads/auto_reply_status')) {
     return json({ ok: true, ready: true, since: autoReplySince, counts: { sent: 3, skipped: 1 }, mailboxes: [

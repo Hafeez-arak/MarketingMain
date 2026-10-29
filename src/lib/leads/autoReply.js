@@ -121,6 +121,12 @@ export function replyMessage(text, signature = null) {
   }
 }
 
+/** "arak-sa.com" from the Brand Brain's "Website: www.arak-sa.com"; '' when there is none. */
+export function websiteFromContact(contact) {
+  const m = String(contact || '').match(/website:\s*(?:https?:\/\/)?(?:www\.)?([a-z0-9.-]+\.[a-z]{2,})/i)
+  return m ? m[1].toLowerCase() : ''
+}
+
 /** The same email for a browser to show: the pictures as data: URLs instead of attachments. */
 export function replyPreviewHtml(text, signature = null) {
   const { html } = replyMessage(text, signature)
