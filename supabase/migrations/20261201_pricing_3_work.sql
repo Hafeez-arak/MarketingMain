@@ -23,8 +23,10 @@ declare
   s public.pricing_sheets;
   e jsonb; n integer := 0; keep uuid[];
 begin
-  select * into s from public.pricing_sheets where id = p_sheet for update;
+  select * into s from public.pricing_sheets where id = p_sheet;
   if not found then raise exception 'PRICING_NOT_FOUND' using errcode = 'P0001'; end if;
+  if not public.has_section(s.workspace_id, 'pricing', 'work') then raise exception 'PRICING_NOT_ALLOWED' using errcode = 'P0001'; end if;
+  perform 1 from public.pricing_sheets where id = p_sheet for update;
   if jsonb_typeof(p_lines) <> 'array' or jsonb_array_length(p_lines) = 0 then
     raise exception 'PRICING_NO_ROWS' using errcode = 'P0001';
   end if;
@@ -66,8 +68,10 @@ declare
   s public.pricing_sheets;
   e jsonb; n integer; c integer := 0;
 begin
-  select * into s from public.pricing_sheets where id = p_sheet for update;
+  select * into s from public.pricing_sheets where id = p_sheet;
   if not found then raise exception 'PRICING_NOT_FOUND' using errcode = 'P0001'; end if;
+  if not public.has_section(s.workspace_id, 'pricing', 'work') then raise exception 'PRICING_NOT_ALLOWED' using errcode = 'P0001'; end if;
+  perform 1 from public.pricing_sheets where id = p_sheet for update;
   if jsonb_typeof(p_lines) <> 'array' or jsonb_array_length(p_lines) = 0 then
     raise exception 'PRICING_NO_ROWS' using errcode = 'P0001';
   end if;
@@ -88,8 +92,11 @@ returns void
 language plpgsql
 set search_path = public
 as $$
-declare k text; v jsonb; l public.pricing_lines; np numeric;
+declare ws uuid; k text; v jsonb; l public.pricing_lines; np numeric;
 begin
+  select workspace_id into ws from public.pricing_sheets where id = p_sheet;
+  if ws is null then raise exception 'PRICING_NOT_FOUND' using errcode = 'P0001'; end if;
+  if not public.has_section(ws, 'pricing', 'work') then raise exception 'PRICING_NOT_ALLOWED' using errcode = 'P0001'; end if;
   perform public.pricing_require_draft(p_sheet, 'a line');
   for k, v in select * from jsonb_each(p_prices) loop
     select * into l from public.pricing_lines where id = k::uuid and sheet_id = p_sheet;
@@ -107,8 +114,11 @@ returns void
 language plpgsql
 set search_path = public
 as $$
-declare k text; v jsonb; l public.pricing_lines; o uuid;
+declare ws uuid; k text; v jsonb; l public.pricing_lines; o uuid;
 begin
+  select workspace_id into ws from public.pricing_sheets where id = p_sheet;
+  if ws is null then raise exception 'PRICING_NOT_FOUND' using errcode = 'P0001'; end if;
+  if not public.has_section(ws, 'pricing', 'work') then raise exception 'PRICING_NOT_ALLOWED' using errcode = 'P0001'; end if;
   perform public.pricing_require_draft(p_sheet, 'a line');
   for k, v in select * from jsonb_each(p_sel) loop
     select * into l from public.pricing_lines where id = k::uuid and sheet_id = p_sheet;
@@ -133,6 +143,7 @@ declare l public.pricing_lines;
 begin
   select * into l from public.pricing_lines where id = p_line;
   if not found then raise exception 'PRICING_NOT_FOUND' using errcode = 'P0001'; end if;
+  if not public.has_section(l.workspace_id, 'pricing', 'work') then raise exception 'PRICING_NOT_ALLOWED' using errcode = 'P0001'; end if;
   if not exists (select 1 from public.pricing_catalog_items(l.workspace_id) i where i.id = p_item and i.active) then
     raise exception 'PRICING_ITEM' using errcode = 'P0001';
   end if;
@@ -151,6 +162,7 @@ declare s public.pricing_sheets; q uuid;
 begin
   select * into s from public.pricing_sheets where id = p_sheet;
   if not found then raise exception 'PRICING_NOT_FOUND' using errcode = 'P0001'; end if;
+  if not public.has_section(s.workspace_id, 'pricing', 'work') then raise exception 'PRICING_NOT_ALLOWED' using errcode = 'P0001'; end if;
   perform public.pricing_require_draft(p_sheet, 'a supplier quote');
   if not exists (select 1 from public.pricing_lines where sheet_id = p_sheet) then
     raise exception 'PRICING_NO_LINES' using errcode = 'P0001';
@@ -176,8 +188,10 @@ set search_path = public
 as $$
 declare q public.supplier_quotes; e jsonb; ql public.supplier_quote_lines; pl public.pricing_lines;
 begin
-  select * into q from public.supplier_quotes where id = p_quote for update;
+  select * into q from public.supplier_quotes where id = p_quote;
   if not found then raise exception 'PRICING_NOT_FOUND' using errcode = 'P0001'; end if;
+  if not public.has_section(q.workspace_id, 'pricing', 'work') then raise exception 'PRICING_NOT_ALLOWED' using errcode = 'P0001'; end if;
+  perform 1 from public.supplier_quotes where id = p_quote for update;
   perform public.pricing_require_draft(q.sheet_id, 'a supplier quote');
   update public.supplier_quotes set
     status = p_header->>'status',
@@ -288,6 +302,9 @@ grant execute on function
   public.pricing_request_quote(uuid, uuid, text, date, text), public.pricing_save_quote(uuid, jsonb, jsonb, jsonb),
   public.pricing_leads(uuid), public.pricing_suppliers(uuid), public.pricing_catalog_items(uuid), public.pricing_people(uuid)
   to authenticated;
+
+-- The save functions above run as the caller and ask whether the sheet is a draft.
+grant execute on function public.pricing_require_draft(uuid, text) to authenticated;
 
 -- ── The Ctrl/Cmd+K search (the shape of 20261130_catalog_3_search.sql) ──
 -- SECURITY INVOKER: the pricing RLS decides what comes back. Matches the sheet
