@@ -274,23 +274,29 @@ export function InstagramPage() {
   // Zernio answers a new post with 'publishing' and only the sync workflow
   // ever learns it went live — which used to mean the daily 06:00 run, so a
   // post already on Instagram read "Publishing…" for the rest of the day.
-  // While anything is still publishing, ask again: first after 15s (Instagram
-  // needs a moment), then at most once a minute, and give up after ten tries
-  // so a post stuck at Zernio cannot keep the page calling it forever.
+  // While anything is still publishing, ask again: first after 15s, then every
+  // 30s. A carousel takes about a minute to land on Instagram, and a minute
+  // between asks left it reading "Publishing" for up to another minute after
+  // it was live. Give up after sixteen tries (~8 minutes, the hourly sync
+  // takes over) so a post stuck at Zernio cannot keep the page calling it
+  // forever. The count starts over for each new post that goes out; kept
+  // for the whole visit, it stopped asking at all once the first few posts
+  // had used it up.
   const zernioSync = useRef({ at: 0, runs: 0 })
   const hasPublishing = remotePosts.some(p => p.publishStatus === 'publishing')
   useEffect(() => {
     if (!hasPublishing || !activeWorkspaceId) return
+    zernioSync.current = { at: 0, runs: 0 }
     const tick = async () => {
       const s = zernioSync.current
-      if (s.runs >= 10 || Date.now() - s.at < 60000) return
+      if (s.runs >= 16 || Date.now() - s.at < 25000) return
       s.at = Date.now()
       s.runs += 1
       await syncZernio(state.webhooks?.zernioSync || defaultWebhookUrl('zernioSync'), activeWorkspaceId)
       fetchRemotePosts()
     }
     const first = setTimeout(tick, 15000)
-    const interval = setInterval(tick, 60000)
+    const interval = setInterval(tick, 30000)
     return () => { clearTimeout(first); clearInterval(interval) }
   }, [hasPublishing, activeWorkspaceId]) // eslint-disable-line react-hooks/exhaustive-deps
 
