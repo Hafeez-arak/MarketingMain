@@ -429,13 +429,16 @@ the same request again within 14 days, or for leads that arrived before
 auto-replies were switched on.
 
 1. **Database (once).** Run `supabase/migrations/20261107_lead_auto_reply.sql`
-   in the Supabase SQL editor. Until then the Auto-replies card on Agent
-   settings says it is waiting for a database update.
-2. **Signature.** In Outlook, start a new email from the mailbox (info@) so its
-   signature appears, and leave it in Drafts. On Agent settings → Auto-replies,
-   click **Copy signature from Outlook** beside that mailbox. Do it again
-   whenever the signature changes in Outlook. (Script:
-   `node --env-file=.env scripts/lead-qualifier/copy-signature.mjs --mailbox info@arak-sa.com`.)
+   in the Supabase SQL editor (applied 2026-10-29). Until then the Auto-replies
+   card on Agent settings says it is waiting for a database update.
+2. **Signature.** Each mailbox replies with its own signature, stored in
+   `lead_mailboxes.reply_signature` (set up behind the scenes; there is no button
+   on the page, so nobody overwrites it by accident). info@arak-sa.com's was
+   copied from its Outlook signature; info@clb-sa.com's was built by hand in the
+   same layout with CLB's details and colours. To copy one from Outlook again:
+   `node --env-file=.env scripts/lead-qualifier/copy-signature.mjs --mailbox info@arak-sa.com`
+   (never for CLB: its Outlook account holds a personal signature). A mailbox
+   with no signature sends nothing; its replies wait up to two hours.
 3. **Allow forwarding** must be on for the mailbox (section 8): replies are
    sent with the same permission.
 4. **Switch on** Auto-replies on the same card. It answers only leads that

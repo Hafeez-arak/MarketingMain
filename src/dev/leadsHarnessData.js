@@ -179,7 +179,6 @@ window.fetch = async (input, init = {}) => {
     autoReplySince = JSON.parse(init.body || '{}').on ? new Date().toISOString() : null
     return json({ ok: true, since: autoReplySince })
   }
-  if (url.includes('/api/leads/copy_signature')) return json({ ok: true, from: 'Drafts: (no subject)', pictures: 4 })
   // The sales team (sales_team for the list, team for the settings card).
   if (url.includes('/rest/v1/rpc/sales_team')) return json(TEAM.map(({ user_id, email, full_name, approver, all_website_leads }) => ({ user_id, email, full_name, approver, all_website_leads })))
   if (url.includes('/api/leads/team_save')) {
