@@ -8,7 +8,7 @@ import {
   fetchSheet, fetchLines, fetchLineCosts, fetchTotals, fetchIssues, fetchQuotes, fetchSheetOffers, fetchAudit, savePrices, transition, deleteSheet,
 } from '../../lib/pricing/client'
 import { PW } from './words'
-import { usePricingBase, field, quoteHref } from './usePricing'
+import { usePricingBase, field, fieldInline, quoteHref } from './usePricing'
 import { StatusBadge, StatusBar, Kpi, Facts, Alert, NoAccess } from './parts'
 
 // ─── Pricing → one sheet (v2) ──────────────────────────────────────────────
@@ -222,7 +222,7 @@ export function PricingSheetPage() {
                         <td className="px-3 py-2 text-end">
                           {draftEdit ? (
                             <input type="text" inputMode="decimal" dir="ltr" value={prices[l.id] ?? ''} onChange={e => setPrices(p => ({ ...p, [l.id]: e.target.value }))}
-                              aria-label={`${w.lcols.price} ${l.line_no}`} className={`${field} w-28 text-end`} />
+                              aria-label={`${w.lcols.price} ${l.line_no}`} className={`${fieldInline} w-28 text-end`} />
                           ) : <span className="tabular-nums" dir="ltr">{fmtMoney(l.unit_price)}</span>}
                         </td>
                         <td className="px-3 py-2 text-end tabular-nums" dir="ltr">{fmtMoney(c?.sell_total)}</td>

@@ -10,7 +10,7 @@ import {
   fetchQuote, fetchSheet, fetchLines, fetchQuoteOffers, saveQuote, deleteQuote, deleteAlternative,
 } from '../../lib/pricing/client'
 import { PW } from './words'
-import { usePricingBase, field, sheetHref } from './usePricing'
+import { usePricingBase, field, fieldInline, sheetHref } from './usePricing'
 import { Field, StatusBadge, StatusBar, NoAccess, Alert } from './parts'
 
 // ─── Pricing → one supplier quote (v2) ─────────────────────────────────────
@@ -151,12 +151,12 @@ export function PricingQuote() {
                     <tr key={r.id} className={`align-top ${r.is_alternative ? 'bg-stone-50/70' : ''}`}>
                       <td className="px-2 py-2 tabular-nums text-text-secondary">{r.is_alternative ? '' : l.line_no}</td>
                       <td className="px-2 py-2 min-w-[11rem]">{r.is_alternative ? <span className="border border-border rounded px-1.5 py-0.5 text-[11px]">{w.alt}</span> : <><bdi>{l.description}</bdi> <span className="text-[11px] text-text-tertiary" dir="ltr">({fmtNum(l.quantity)} {l.unit})</span></>}</td>
-                      <td className="px-2 py-1.5"><input value={o.quantity} onChange={x => setOF(r.id, 'quantity', x.target.value)} inputMode="decimal" className={`${field} w-20`} dir="ltr" aria-label={w.ocols.qty} aria-invalid={Boolean(e.quantity)} />{e.quantity && <span className="block text-[11px] text-red-600">{msg(e.quantity)}</span>}</td>
-                      <td className="px-2 py-1.5"><input value={o.unit_price} onChange={x => setOF(r.id, 'unit_price', x.target.value)} inputMode="decimal" placeholder="—" className={`${field} w-28`} dir="ltr" aria-label={w.ocols.price} aria-invalid={Boolean(e.unit_price)} />{e.unit_price && <span className="block text-[11px] text-red-600">{msg(e.unit_price)}</span>}</td>
-                      <td className="px-2 py-1.5"><input value={o.brand} onChange={x => setOF(r.id, 'brand', x.target.value)} maxLength={120} className={`${field} w-28`} dir="auto" aria-label={w.ocols.brand} /></td>
-                      <td className="px-2 py-1.5"><input value={o.model_no} onChange={x => setOF(r.id, 'model_no', x.target.value)} maxLength={120} className={`${field} w-28`} dir="ltr" aria-label={w.ocols.model} /></td>
+                      <td className="px-2 py-1.5"><input value={o.quantity} onChange={x => setOF(r.id, 'quantity', x.target.value)} inputMode="decimal" className={`${fieldInline} w-20`} dir="ltr" aria-label={w.ocols.qty} aria-invalid={Boolean(e.quantity)} />{e.quantity && <span className="block text-[11px] text-red-600">{msg(e.quantity)}</span>}</td>
+                      <td className="px-2 py-1.5"><input value={o.unit_price} onChange={x => setOF(r.id, 'unit_price', x.target.value)} inputMode="decimal" placeholder="—" className={`${fieldInline} w-28`} dir="ltr" aria-label={w.ocols.price} aria-invalid={Boolean(e.unit_price)} />{e.unit_price && <span className="block text-[11px] text-red-600">{msg(e.unit_price)}</span>}</td>
+                      <td className="px-2 py-1.5"><input value={o.brand} onChange={x => setOF(r.id, 'brand', x.target.value)} maxLength={120} className={`${fieldInline} w-28`} dir="auto" aria-label={w.ocols.brand} /></td>
+                      <td className="px-2 py-1.5"><input value={o.model_no} onChange={x => setOF(r.id, 'model_no', x.target.value)} maxLength={120} className={`${fieldInline} w-28`} dir="ltr" aria-label={w.ocols.model} /></td>
                       <td className="px-2 py-1.5 min-w-[10rem]"><input value={o.offered_description} onChange={x => setOF(r.id, 'offered_description', x.target.value)} maxLength={2000} className={field} dir="auto" aria-label={w.ocols.desc} /></td>
-                      <td className="px-2 py-1.5"><input value={o.lead_time_days} onChange={x => setOF(r.id, 'lead_time_days', x.target.value)} inputMode="numeric" className={`${field} w-20`} dir="ltr" aria-label={w.ocols.lead} aria-invalid={Boolean(e.lead_time_days)} />{e.lead_time_days && <span className="block text-[11px] text-red-600">{msg(e.lead_time_days)}</span>}</td>
+                      <td className="px-2 py-1.5"><input value={o.lead_time_days} onChange={x => setOF(r.id, 'lead_time_days', x.target.value)} inputMode="numeric" className={`${fieldInline} w-20`} dir="ltr" aria-label={w.ocols.lead} aria-invalid={Boolean(e.lead_time_days)} />{e.lead_time_days && <span className="block text-[11px] text-red-600">{msg(e.lead_time_days)}</span>}</td>
                       <td className="px-2 py-2 text-end tabular-nums" dir="ltr">{fmtMoney(r.landed_unit_cost)}</td>
                       <td className="px-2 py-1.5">{r.is_alternative && edit && (
                         <Button size="sm" variant="ghost" disabled={busy} onClick={async () => { setBusy(true); const out = await deleteAlternative(ws, r.id); setBusy(false); if (out.error) setError(out.error); else load() }}><span className="text-red-700">{w.removeAlt}</span></Button>
@@ -185,13 +185,13 @@ export function PricingQuote() {
                   const set = (k, v) => setAlts(xs => xs.map((x, j) => (j === i ? { ...x, [k]: v } : x)))
                   return (
                     <tr key={i}>
-                      <td className="px-2 py-1.5"><select value={a.pricing_line_id} onChange={e => set('pricing_line_id', e.target.value)} className={`${field} max-w-[16rem]`} aria-label={w.altLine}>
+                      <td className="px-2 py-1.5"><select value={a.pricing_line_id} onChange={e => set('pricing_line_id', e.target.value)} className={`${fieldInline} max-w-[16rem]`} aria-label={w.altLine}>
                         <option value="">—</option>{lines.map(l => <option key={l.id} value={l.id}>{l.line_no}. {l.description.slice(0, 50)}</option>)}
                       </select></td>
-                      <td className="px-2 py-1.5"><input value={a.quantity} onChange={e => set('quantity', e.target.value)} inputMode="decimal" placeholder={w.altQtyPh} className={`${field} w-24`} dir="ltr" aria-label={w.ocols.qty} /></td>
-                      <td className="px-2 py-1.5"><input value={a.unit_price} onChange={e => set('unit_price', e.target.value)} inputMode="decimal" className={`${field} w-28`} dir="ltr" aria-label={w.ocols.price} /></td>
-                      <td className="px-2 py-1.5"><input value={a.brand} onChange={e => set('brand', e.target.value)} maxLength={120} className={`${field} w-28`} dir="auto" aria-label={w.ocols.brand} /></td>
-                      <td className="px-2 py-1.5"><input value={a.model_no} onChange={e => set('model_no', e.target.value)} maxLength={120} className={`${field} w-28`} dir="ltr" aria-label={w.ocols.model} /></td>
+                      <td className="px-2 py-1.5"><input value={a.quantity} onChange={e => set('quantity', e.target.value)} inputMode="decimal" placeholder={w.altQtyPh} className={`${fieldInline} w-24`} dir="ltr" aria-label={w.ocols.qty} /></td>
+                      <td className="px-2 py-1.5"><input value={a.unit_price} onChange={e => set('unit_price', e.target.value)} inputMode="decimal" className={`${fieldInline} w-28`} dir="ltr" aria-label={w.ocols.price} /></td>
+                      <td className="px-2 py-1.5"><input value={a.brand} onChange={e => set('brand', e.target.value)} maxLength={120} className={`${fieldInline} w-28`} dir="auto" aria-label={w.ocols.brand} /></td>
+                      <td className="px-2 py-1.5"><input value={a.model_no} onChange={e => set('model_no', e.target.value)} maxLength={120} className={`${fieldInline} w-28`} dir="ltr" aria-label={w.ocols.model} /></td>
                       <td className="px-2 py-1.5 min-w-[10rem]"><input value={a.offered_description} onChange={e => set('offered_description', e.target.value)} maxLength={2000} className={field} dir="auto" aria-label={w.ocols.desc} /></td>
                     </tr>
                   )

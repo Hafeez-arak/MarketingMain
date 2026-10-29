@@ -6,7 +6,7 @@ import { useT } from '../../lib/i18n'
 import { fmtNum, parseNumber } from '../../lib/pricing/logic'
 import { fetchSettings, saveMinMargin } from '../../lib/pricing/client'
 import { PW } from './words'
-import { field } from './usePricing'
+import { fieldInline } from './usePricing'
 import { Field, NoAccess, Alert } from './parts'
 
 // ─── Pricing → settings (v2) ───────────────────────────────────────────────
@@ -56,7 +56,7 @@ export function PricingSettings() {
         <h2 className="text-sm font-semibold text-text">{w.minTitle}</h2>
         <p className="text-xs text-text-secondary">{w.minHelp}</p>
         <Field label={w.minLabel} error={invalid ? w.errors.nonNegative : ''} hint={saved === null ? w.minStateOff : w.minStateOn(fmtNum(saved))}>
-          <input value={value} onChange={e => setValue(e.target.value)} inputMode="decimal" disabled={!can} className={`${field} max-w-[10rem]`} dir="ltr" />
+          <input value={value} onChange={e => setValue(e.target.value)} inputMode="decimal" disabled={!can} className={`${fieldInline} max-w-[10rem]`} dir="ltr" />
         </Field>
         {can ? <Button type="submit" size="sm" disabled={busy || invalid}>{busy ? w.saving : w.save}</Button> : <p className="text-[11px] text-text-tertiary">{w.minNeedManage}</p>}
       </section>

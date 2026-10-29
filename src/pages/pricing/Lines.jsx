@@ -9,7 +9,7 @@ import {
 } from '../../lib/pricing/logic'
 import { fetchSheet, fetchLines, fetchQuotes, fetchSheetOffers, saveLines, importLines, errorText } from '../../lib/pricing/client'
 import { PW } from './words'
-import { usePricingBase, field, sheetHref } from './usePricing'
+import { usePricingBase, field, fieldInline, sheetHref } from './usePricing'
 import { NoAccess, Alert } from './parts'
 import { importMessage } from './importMessage'
 
@@ -151,21 +151,21 @@ export function PricingLines() {
                 return (
                   <tr key={r.key} className="align-top">
                     <td className="px-2 py-2 tabular-nums text-text-secondary">{i + 1}</td>
-                    <td className="px-2 py-1.5"><input value={r.boq_ref} onChange={x => set(r.key, { boq_ref: x.target.value })} maxLength={60} className={`${field} w-24`} dir="ltr" aria-label={w.lineCols.ref} /></td>
+                    <td className="px-2 py-1.5"><input value={r.boq_ref} onChange={x => set(r.key, { boq_ref: x.target.value })} maxLength={60} className={`${fieldInline} w-24`} dir="ltr" aria-label={w.lineCols.ref} /></td>
                     <td className="px-2 py-1.5 min-w-[16rem]">
                       <input value={r.description} onChange={x => set(r.key, { description: x.target.value })} maxLength={2000} className={field} dir="auto" aria-label={w.lineCols.description} aria-invalid={Boolean(e.description)} />
                       {e.description && <span className="block text-[11px] text-red-600">{w.errors[e.description]}</span>}
                     </td>
                     <td className="px-2 py-1.5">
-                      <input value={r.quantity} onChange={x => set(r.key, { quantity: x.target.value })} inputMode="decimal" className={`${field} w-24`} dir="ltr" aria-label={w.lineCols.qty} aria-invalid={Boolean(e.quantity)} />
+                      <input value={r.quantity} onChange={x => set(r.key, { quantity: x.target.value })} inputMode="decimal" className={`${fieldInline} w-24`} dir="ltr" aria-label={w.lineCols.qty} aria-invalid={Boolean(e.quantity)} />
                       {e.quantity && <span className="block text-[11px] text-red-600">{w.errors[e.quantity]}</span>}
                     </td>
                     <td className="px-2 py-1.5">
-                      <input value={r.unit} onChange={x => set(r.key, { unit: x.target.value })} maxLength={30} className={`${field} w-24`} dir="auto" aria-label={w.lineCols.unit} aria-invalid={Boolean(e.unit)} />
+                      <input value={r.unit} onChange={x => set(r.key, { unit: x.target.value })} maxLength={30} className={`${fieldInline} w-24`} dir="auto" aria-label={w.lineCols.unit} aria-invalid={Boolean(e.unit)} />
                       {e.unit && <span className="block text-[11px] text-red-600">{w.errors[e.unit]}</span>}
                     </td>
                     <td className="px-2 py-1.5">
-                      <select value={r.catalog_item_id} onChange={x => set(r.key, { catalog_item_id: x.target.value })} className={`${field} max-w-[14rem]`} aria-label={w.lineCols.item}>
+                      <select value={r.catalog_item_id} onChange={x => set(r.key, { catalog_item_id: x.target.value })} className={`${fieldInline} max-w-[14rem]`} aria-label={w.lineCols.item}>
                         <option value="">{w.noItem}</option>
                         {items.map(it => <option key={it.id} value={it.id}>{it.code} — {it.name}</option>)}
                       </select>
