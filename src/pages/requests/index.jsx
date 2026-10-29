@@ -38,6 +38,11 @@ const STATUS_TONE = {
   declined: 'text-text-tertiary bg-surface-subtle border-border',
 }
 
+// Requests and notes mix Arabic and English. `plaintext` sets each paragraph's
+// direction from its own first letter, so an Arabic paragraph reads right to
+// left (full stop on the left) even when the one above it is English.
+const MIXED_TEXT = { unicodeBidi: 'plaintext', textAlign: 'start' }
+
 function Chip({ children, className = '' }) {
   return <span className={`inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide border ${className}`}>{children}</span>
 }
@@ -212,13 +217,13 @@ function RequestPanel({ request: r, name, taggable, canEdit, userId, workspaceId
         {r.body && (
           <div>
             <p className="eyebrow mb-1">In their words</p>
-            <p className="text-sm text-text whitespace-pre-wrap leading-relaxed">{r.body}</p>
+            <p className="text-sm text-text whitespace-pre-wrap leading-relaxed" style={MIXED_TEXT}>{r.body}</p>
           </div>
         )}
         {r.brief && (
           <div>
             <p className="eyebrow mb-1">Brief</p>
-            <p className="text-sm text-text whitespace-pre-wrap leading-relaxed">{r.brief}</p>
+            <p className="text-sm text-text whitespace-pre-wrap leading-relaxed" style={MIXED_TEXT}>{r.brief}</p>
           </div>
         )}
         {assistantMounted() && (
@@ -235,8 +240,11 @@ function RequestPanel({ request: r, name, taggable, canEdit, userId, workspaceId
 
         {canEdit && (
           <div className="border border-border bg-surface-subtle/60 p-3 space-y-2">
-            <Textarea label="Note for the asker" rows={2} value={note} onChange={e => setNote(e.target.value)}
-              placeholder="What was done, or why not" />
+            {/* Grows with the note so a long answer (often English then Arabic)
+                can be read whole before it is sent; each paragraph takes its own
+                direction, so the Arabic half reads right to left. */}
+            <Textarea label="Note for the asker" rows={3} autoGrow maxHeight={480} value={note} onChange={e => setNote(e.target.value)}
+              style={MIXED_TEXT} placeholder="What was done, or why not" />
             <Input label="Link (optional)" value={link} onChange={e => setLink(e.target.value)} placeholder="e.g. the pull request" />
             <div className="flex flex-wrap gap-2 pt-1">
               {r.status !== 'in_progress' && r.status !== 'done' && <Button size="sm" variant="secondary" disabled={busy} onClick={() => move({ status: 'in_progress' })}>Start</Button>}
@@ -264,7 +272,7 @@ function RequestPanel({ request: r, name, taggable, canEdit, userId, workspaceId
                   <span className="font-medium text-text">{name(ev.actor) || 'Someone'}</span>{' '}
                   <span className="text-text-secondary">{describe(ev)}</span>{' '}
                   <span className="text-text-tertiary">{timeAgo(ev.created_at)}</span>
-                  {ev.body && ev.kind !== 'created' && <p className="text-text-secondary whitespace-pre-wrap mt-0.5">{ev.body}</p>}
+                  {ev.body && ev.kind !== 'created' && <p className="text-text-secondary whitespace-pre-wrap mt-0.5" style={MIXED_TEXT}>{ev.body}</p>}
                 </li>
               ))}
             </ul>
