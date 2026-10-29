@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
 import { Skeleton } from '../../components/ui/index'
 import { Notice } from '../email/parts'
+import { REPLY_SIGNATURE } from '../../lib/leads/autoReply'
 
 // ─── Test: the replies leads WOULD get (2026-10-29) ────────────────────────
 // Before any auto-reply is sent, the owner and the sales admin read what the
@@ -28,7 +29,7 @@ function ReplyCard({ row }) {
           ? <p className="text-xs text-amber-800">No reply. {row.skip_reason}</p>
           : <>
             <p className="text-xs font-semibold text-text pb-2 mb-3 border-b border-border break-words">{row.subject}</p>
-            <p className="text-[13px] text-text leading-relaxed whitespace-pre-wrap break-words">{row.body}</p>
+            <p className="text-[13px] text-text leading-relaxed whitespace-pre-wrap break-words">{`${row.body}\n\n\n${REPLY_SIGNATURE.join('\n')}`}</p>
           </>}
       </div>
     </div>
@@ -65,7 +66,7 @@ export default function ReplyTest({ workspaceId, refreshKey }) {
         ? <div className="space-y-3">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-40 w-full" />)}</div>
         : !loaded.error && (loaded.rows.length
           ? <>
-            <p className="text-xs text-text-tertiary">{written} {written === 1 ? 'reply' : 'replies'} for {loaded.rows.length} {loaded.rows.length === 1 ? 'lead' : 'leads'}, newest first. The signature goes under each one.</p>
+            <p className="text-xs text-text-tertiary">{written} {written === 1 ? 'reply' : 'replies'} for {loaded.rows.length} {loaded.rows.length === 1 ? 'lead' : 'leads'}, newest first, each with the info@ account&apos;s own signature.</p>
             {loaded.rows.map((r) => <ReplyCard key={r.id} row={r} />)}
           </>
           : <p className="text-xs text-text-tertiary">No test replies have been written yet.</p>)}

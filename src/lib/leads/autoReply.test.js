@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
-  greeting, cleanBlank, fillLine, buildReply, parseReply, replyRequest, replyUserPrompt, REPLY_SCHEMA, REPLY_TEMPLATE,
+  greeting, cleanBlank, fillLine, buildReply, parseReply, replyRequest, replyUserPrompt, replyHtml,
+  REPLY_SCHEMA, REPLY_TEMPLATE, REPLY_SIGNATURE,
 } from './autoReply.js'
 import { toEnvelope } from './qualify.js'
 
@@ -74,6 +75,19 @@ describe('buildReply', () => {
   })
   it('the template is two paragraphs', () => {
     expect(REPLY_TEMPLATE).toHaveLength(2)
+  })
+})
+
+describe('replyHtml', () => {
+  it('ends with the info@ account\'s own signature, in its style', () => {
+    const html = replyHtml('Dear Omar,\n\nThank you & welcome.')
+    expect(html).toContain('>Dear Omar,</div>')
+    expect(html).toContain('>Thank you &amp; welcome.</div>')
+    expect(html.endsWith('>Best Regards,</div><div style="font-family:Aptos,Aptos_EmbeddedFont,Aptos_MSFontService,Calibri,Helvetica,sans-serif;font-size:12pt;color:rgb(0,0,0)">ARAK Lighting</div>')).toBe(true)
+    expect(REPLY_SIGNATURE).toEqual(['Best Regards,', 'ARAK Lighting'])
+  })
+  it('never lets the text inject markup', () => {
+    expect(replyHtml('<script>x</script>')).not.toContain('<script>')
   })
 })
 

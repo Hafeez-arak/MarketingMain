@@ -40,6 +40,25 @@ export const REPLY_TEMPLATE = [
   'We have received your request, and our sales team is reviewing it now. A sales engineer will contact you as soon as possible.',
 ]
 
+/**
+ * The signature the info@ account already uses on its own replies (read from
+ * its Sent Items, 2026-10-29: Outlook keeps signatures where the API cannot
+ * read them). Plain text, so it shows the same in every mail app.
+ */
+export const REPLY_SIGNATURE = ['Best Regards,', 'ARAK Lighting']
+
+// Outlook's own default, as in the account's replies.
+const MAIL_STYLE = 'font-family:Aptos,Aptos_EmbeddedFont,Aptos_MSFontService,Calibri,Helvetica,sans-serif;font-size:12pt;color:rgb(0,0,0)'
+
+const escHtml = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+
+/** The reply as the email's HTML body: its paragraphs, then the signature, in the account's own style. */
+export function replyHtml(text, { signature = REPLY_SIGNATURE } = {}) {
+  const line = (s) => `<div style="${MAIL_STYLE}">${s ? escHtml(s) : '<br>'}</div>`
+  const paras = String(text ?? '').split('\n\n').flatMap((p, i) => [...(i ? [line('')] : []), ...p.split('\n').map(line)])
+  return [...paras, line(''), line(''), ...signature.map(line)].join('')
+}
+
 // ─── The greeting, in code ─────────────────────────────────────────────────
 
 const NOT_A_PERSON = /\b(sales|team|department|dept|procurement|purchas\w*|info|admin|office|support|account\w*|estimation|tender\w*|hr|noreply|no-reply|company|co|ltd|llc|est|group|trading|contracting)\b/i
