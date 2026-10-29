@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Button, Spinner, Skeleton, Toggle, ConfirmDialog } from '../../components/ui/index'
+import { Spinner, Skeleton, Toggle, ConfirmDialog } from '../../components/ui/index'
 import { leadsApi } from '../../lib/leads/client'
 
 // ─── Auto-replies, on Agent settings (2026-10-29) ──────────────────────────
-// The switch, each mailbox's Outlook signature, and what was sent. Switching
+// The switch, whether each mailbox has its signature, and what was sent.
+// The signatures are set up behind the scenes (no copy button since
+// 2026-10-29: the owner had it removed so nobody overwrites them). Switching
 // on stores the moment: only leads that arrive after it are answered
 // (api/leads/_reply.js). Before the database has the columns (migration
 // 20261107), the card says so and changes nothing.
@@ -14,7 +16,6 @@ export default function AutoReplyCard({ workspaceId, onError }) {
   const [state, setState] = useState(null)
   const [busy, setBusy] = useState('')
   const [confirming, setConfirming] = useState(false)
-  const [note, setNote] = useState('')
 
   useEffect(() => {
     if (!workspaceId) return
@@ -24,21 +25,11 @@ export default function AutoReplyCard({ workspaceId, onError }) {
   }, [workspaceId])
 
   async function setOn(on) {
-    setBusy('switch'); setNote('')
+    setBusy('switch')
     const r = await leadsApi('set_auto_reply', workspaceId, { on })
     setBusy('')
     if (r.error) return onError(r.error)
     setState((s) => ({ ...s, since: r.since }))
-  }
-
-  async function copy(mb) {
-    setBusy(`sig:${mb.id}`); setNote('')
-    const r = await leadsApi('copy_signature', workspaceId, { mailbox_id: mb.id })
-    setBusy('')
-    if (r.error) return onError(r.error)
-    setNote(`${mb.label || mb.email}: signature copied from ${r.from}, ${r.pictures} pictures.`)
-    const fresh = await leadsApi('auto_reply_status', workspaceId)
-    if (!fresh.error) setState(fresh)
   }
 
   const on = Boolean(state?.since)
@@ -71,25 +62,20 @@ export default function AutoReplyCard({ workspaceId, onError }) {
                 </p>
                 <div className="space-y-2">
                   {(state.mailboxes || []).map((mb) => (
-                    <div key={mb.id} className="flex items-center justify-between gap-3 border-t border-border pt-2">
+                    <div key={mb.id} className="border-t border-border pt-2">
                       <div className="min-w-0">
                         <p className="text-xs font-medium text-text truncate">{mb.label || mb.email}</p>
                         <p className="text-[11px] text-text-tertiary">
                           {!mb.can_send ? 'Read only: it cannot send replies.'
-                            : mb.signature ? `Signature copied ${when(mb.signature.at)}, ${mb.signature.pictures} pictures.`
-                              : 'No signature copied yet: its replies wait until one is copied (at most two hours).'}
+                            : mb.signature ? 'Signature ready.'
+                              : 'No signature yet: its replies wait until one is set up (at most two hours).'}
                         </p>
                       </div>
-                      <Button size="xs" variant="secondary" onClick={() => copy(mb)} disabled={Boolean(busy)}>
-                        {busy === `sig:${mb.id}` ? <Spinner size="sm" /> : 'Copy signature from Outlook'}
-                      </Button>
                     </div>
                   ))}
                 </div>
-                <p className="text-[11px] text-text-tertiary">To copy a signature, start a new email from that account in Outlook so the signature appears, and leave it in Drafts.</p>
               </>
             )}
-      {note && <p className="text-xs text-sage-700">{note}</p>}
 
       <ConfirmDialog open={confirming} onClose={() => setConfirming(false)} onConfirm={() => setOn(true)}
         title="Switch auto-replies on?"

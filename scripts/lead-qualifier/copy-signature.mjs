@@ -1,12 +1,16 @@
 #!/usr/bin/env node
 // ─── Copy a lead mailbox's Outlook signature for its auto-replies ─────────
-// The same as "Copy signature from Outlook" on Agent settings
-// (api/leads/_reply.js copySignature): Outlook keeps signatures where the
+// The only way to (re)copy one (the page's button was removed 2026-10-29 so
+// nobody overwrites a signature by accident). api/leads/_reply.js
+// copySignature: Outlook keeps signatures where the
 // Graph API cannot read them, so it is copied from the newest draft or sent
 // email in that mailbox that carries it (<div id="Signature">), with its
 // inline pictures, into lead_mailboxes.reply_signature. Sends nothing.
 //
 //   node --env-file=.env scripts/lead-qualifier/copy-signature.mjs --mailbox info@arak-sa.com
+//
+// Never for info@clb-sa.com: its Outlook account holds a personal signature;
+// CLB's reply signature was built by hand and stored directly.
 
 import { db } from '../../api/agent/_supabase.js'
 import { leadDeps } from '../../api/leads/_deps.js'

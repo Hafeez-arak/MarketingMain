@@ -12,7 +12,6 @@ import { crmTeams, setCrmTeam, pullCards } from './_crmCard.js'
 import { assignLead, teamList, teamSave, teamCheckOdoo } from './_assign.js'
 import { addLead, trackLead, deleteLead } from './_pipeline.js'
 import { leadDeps, openRouterKey, hasDeploymentKey, describeKey, sendAlert } from './_deps.js'
-import { copySignature } from './_reply.js'
 import { previewLenses } from '../agent/_investigate.js'
 
 // ─── /api/leads/<action> ───────────────────────────────────────────────────
@@ -356,13 +355,6 @@ const actions = {
     } catch {
       return fail(503, 'The database is not ready for auto-replies yet (migration 20261107).')
     }
-  },
-
-  async copy_signature({ workspaceId, body }) {
-    if (!isUuid(body.mailbox_id)) return fail(400, 'Which mailbox?')
-    const out = await copySignature(leadDeps(), { workspaceId, mailboxId: body.mailbox_id })
-    if (out.error) return fail(out.status, out.error)
-    return out
   },
 
   async set_enabled({ workspaceId, body }) {
