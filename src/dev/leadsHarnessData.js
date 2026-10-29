@@ -139,12 +139,31 @@ const WATCHLIST = [
   { name: 'Example Controls Co', note: 'Made-up rival: KNX integrator.', domain: '', lines: ['controls'], city: 'Jeddah', brands: [] },
 ]
 
+const REPLIES = [
+  {
+    id: 'r1', subject: 'RE: RFQ – Lighting – Nour Towers', skip_reason: '',
+    body: 'Dear Omar Haddad,\n\nThank you for your enquiry regarding the lighting fixtures for Nour Towers.\n\nWe have received your request, and our sales team is reviewing it now. A sales engineer will contact you as soon as possible.',
+    lead: { name: 'Omar Haddad', company: 'Nour Contracting', email: 'omar@nour.example', source: 'email', mailbox: 'info@harness.example', received_at: '2026-10-28T08:10:00Z', summary: 'Quote the lighting fixtures for Nour Towers against the attached BOQ.', subject: 'RFQ – Lighting – Nour Towers', verdict: 'qualified', human_verdict: null },
+  },
+  {
+    id: 'r2', subject: 'Your enquiry to Harness Co', skip_reason: '',
+    body: 'Dear Sara Malik,\n\nThank you for your enquiry regarding backlit panels for a hotel project.\n\nWe have received your request, and our sales team is reviewing it now. A sales engineer will contact you as soon as possible.',
+    lead: { name: 'Sara Malik', company: '', email: 'sara@example.com', source: 'website_form', mailbox: '', received_at: '2026-10-27T12:00:00Z', summary: 'Backlit panels for a hotel.', subject: 'Hotel', verdict: 'qualified', human_verdict: null },
+  },
+  {
+    id: 'r3', subject: '', body: '', skip_reason: 'Same request again: RFQ – Lighting – Nour Towers (2026-10-20) already got the reply.',
+    lead: { name: 'Omar Haddad', company: 'Nour Contracting', email: 'omar@nour.example', source: 'email', mailbox: 'info@harness.example', received_at: '2026-10-26T08:10:00Z', summary: 'Reminder about the Nour Towers RFQ.', subject: 'RE: RFQ – Lighting – Nour Towers', verdict: 'qualified', human_verdict: null },
+  },
+]
+
 window.fetch = async (input, init = {}) => {
   const url = typeof input === 'string' ? input : input.url
   if (url.includes('/src/') || url.includes('/node_modules/') || url.includes('/@')) return original(input, init)
   if (mode === 'hang') return new Promise(() => {})
   if (mode === 'fail') return Promise.reject(new TypeError('Failed to fetch'))
   if (url.includes('/rest/v1/leads')) return restLeads(url)
+  // The Test tab: replies the agent would send (made up).
+  if (url.includes('/rest/v1/lead_replies')) return json(REPLIES)
   // The sales app's Research page: the committed research fixture, and an
   // empty tracker (the page then shows this run's own openings and events).
   if (url.includes('/rest/v1/research_runs')) return json(runsFixture)
