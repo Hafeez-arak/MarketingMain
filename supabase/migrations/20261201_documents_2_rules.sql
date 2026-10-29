@@ -88,7 +88,11 @@ $$;
 revoke all on function public.documents_people(uuid) from public, anon;
 grant execute on function public.documents_people(uuid) to authenticated;
 
-/** The employees a document can be linked to (employees' papers need Manage). */
+/**
+ * The employees a document can be linked to or named for: all of them for
+ * whoever reads employees' papers (Documents Manage, HR Manage), and a person
+ * themselves for their own. (Creating one needs Manage: the screen checks.)
+ */
 create or replace function public.documents_employees(ws uuid)
 returns table (id uuid, employee_no text, name_en text, name_ar text, status text)
 language sql
@@ -98,13 +102,15 @@ set search_path = public
 as $$
   select e.id, e.employee_no, e.name_en, e.name_ar, e.status
     from public.hr_employees e
-   where e.workspace_id = ws and public.has_section(ws, 'documents', 'manage')
+   where e.workspace_id = ws
+     and (public.has_section(ws, 'documents', 'manage') or public.has_section(ws, 'hr', 'manage')
+          or (public.has_section(ws, 'hr', 'view') and e.id is not distinct from public.hr_my_employee(ws)))
    order by (e.status = 'active') desc, e.name_en;
 $$;
 revoke all on function public.documents_employees(uuid) from public, anon;
 grant execute on function public.documents_employees(uuid) to authenticated;
 
-/** The suppliers a document can be linked to: Contacts organisations with the supplier role. */
+/** The suppliers a document is linked to or named for: Contacts organisations with the supplier role. */
 create or replace function public.documents_suppliers(ws uuid)
 returns table (id uuid, contact_no text, name text, name_ar text, status text)
 language sql
@@ -114,7 +120,7 @@ set search_path = public
 as $$
   select o.id, o.contact_no, o.name, o.name_ar, o.status
     from public.contacts_orgs o
-   where o.workspace_id = ws and 'supplier' = any(o.roles) and public.has_section(ws, 'documents', 'work')
+   where o.workspace_id = ws and 'supplier' = any(o.roles) and public.has_section(ws, 'documents', 'view')
    order by (o.status = 'active') desc, o.name;
 $$;
 revoke all on function public.documents_suppliers(uuid) from public, anon;
@@ -684,6 +690,51 @@ create policy "company-documents delete" on storage.objects for delete to authen
 drop policy if exists "hr-papers read by documents" on storage.objects;
 create policy "hr-papers read by documents" on storage.objects for select to authenticated
   using (bucket_id = 'hr-papers' and public.documents_file_ok(bucket_id, name, false));
+
+-- ── Saving the review form: the document's details and its pending version, together ──
+-- One transaction, so a refused confirmation leaves nothing half saved. Runs
+-- as the caller: RLS and the rules above apply to both updates. A draft may
+-- also change its type and link (a confirmed document never does: the guard).
+create or replace function public.documents_review_save(doc uuid, doc_fields jsonb, ver_fields jsonb, confirm boolean default false)
+returns void
+language plpgsql
+set search_path = public
+as $$
+declare
+  d public.company_documents%rowtype;
+  v uuid;
+begin
+  select * into d from public.company_documents where id = doc;
+  if not found then
+    raise exception 'DOCUMENT_NOT_ALLOWED' using errcode = 'P0001';
+  end if;
+  select id into v from public.company_document_versions where document_id = doc and status = 'pending';
+  if v is null then
+    raise exception 'DOCUMENT_NO_PENDING' using errcode = 'P0001';
+  end if;
+  update public.company_documents set
+    title = coalesce(nullif(btrim(doc_fields ->> 'title'), ''), title),
+    responsible_id = case when doc_fields ? 'responsible_id' then nullif(doc_fields ->> 'responsible_id', '')::uuid else responsible_id end,
+    notes = case when doc_fields ? 'notes' then nullif(btrim(doc_fields ->> 'notes'), '') else notes end,
+    confidential = case when doc_fields ? 'confidential' then (doc_fields ->> 'confidential')::boolean else confidential end,
+    type_id = case when d.confirmed_at is null and doc_fields ? 'type_id' then (doc_fields ->> 'type_id')::uuid else type_id end,
+    link_kind = case when d.confirmed_at is null and doc_fields ? 'link_kind' then doc_fields ->> 'link_kind' else link_kind end,
+    employee_id = case when d.confirmed_at is null and doc_fields ? 'link_kind' then nullif(doc_fields ->> 'employee_id', '')::uuid else employee_id end,
+    supplier_id = case when d.confirmed_at is null and doc_fields ? 'link_kind' then nullif(doc_fields ->> 'supplier_id', '')::uuid else supplier_id end,
+    asset_id = case when d.confirmed_at is null and doc_fields ? 'link_kind' then nullif(doc_fields ->> 'asset_id', '')::uuid else asset_id end
+  where id = doc;
+  update public.company_document_versions set
+    number = case when ver_fields ? 'number' then nullif(btrim(ver_fields ->> 'number'), '') else number end,
+    issuer = case when ver_fields ? 'issuer' then nullif(btrim(ver_fields ->> 'issuer'), '') else issuer end,
+    issue_date = case when ver_fields ? 'issue_date' then nullif(ver_fields ->> 'issue_date', '')::date else issue_date end,
+    expiry_date = case when ver_fields ? 'expiry_date' then nullif(ver_fields ->> 'expiry_date', '')::date else expiry_date end,
+    sources = coalesce(ver_fields -> 'sources', sources),
+    status = case when confirm then 'current' else status end
+  where id = v;
+end;
+$$;
+revoke all on function public.documents_review_save(uuid, jsonb, jsonb, boolean) from public, anon;
+grant execute on function public.documents_review_save(uuid, jsonb, jsonb, boolean) to authenticated;
 
 -- ── Alerts: once per document, expiry and threshold ──
 -- For a confirmed, non-archived document with an expiry date and a

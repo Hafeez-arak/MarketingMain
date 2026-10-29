@@ -46,6 +46,7 @@ const APP_COLOURS = {
   insights: ['#2563eb', '#0ea5e9'],
   hr: ['#a21caf', '#7c3aed'],
   contacts: ['#0e7490', '#14b8a6'],
+  documents: ['#b45309', '#d97706'],
   admin: ['#334155', '#6366f1'],
   technical: ['#b45309', '#f59e0b'],
   finance: ['#15803d', '#0d9488'],

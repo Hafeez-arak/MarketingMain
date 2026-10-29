@@ -52,6 +52,11 @@ import { CrmLeadForm } from './pages/crm/LeadForm'
 import { CrmActivities } from './pages/crm/Activities'
 import { CrmAnalysis } from './pages/crm/Analysis'
 import { CrmSettings } from './pages/crm/Settings'
+import { DocumentsList } from './pages/documents/Documents'
+import { DocumentNew } from './pages/documents/DocumentNew'
+import { DocumentReview } from './pages/documents/Review'
+import { DocumentPage } from './pages/documents/Document'
+import { DocumentTypes } from './pages/documents/Types'
 import { ContactsPage } from './pages/contacts/index'
 import { ContactsOrgPage } from './pages/contacts/Org'
 import { ContactsPeoplePage } from './pages/contacts/People'
@@ -273,6 +278,11 @@ function ProtectedApp() {
             <Route path="/crm/activities"        element={<CrmActivities />} />
             <Route path="/crm/analysis"          element={<CrmAnalysis />} />
             <Route path="/crm/settings"          element={<CrmSettings />} />
+            <Route path="/documents"             element={<DocumentsList />} />
+            <Route path="/documents/new"         element={<DocumentNew />} />
+            <Route path="/documents/review"      element={<DocumentReview />} />
+            <Route path="/documents/document"    element={<DocumentPage />} />
+            <Route path="/documents/types"       element={<DocumentTypes />} />
             {/* ── Contacts ── Musa's ERP item 3, in our stack. */}
             <Route path="/contacts"              element={<ContactsPage />} />
             <Route path="/contacts/people"       element={<ContactsPeoplePage />} />

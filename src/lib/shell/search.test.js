@@ -79,7 +79,7 @@ describe('pages', () => {
 describe('access', () => {
   it('asks only the modules the person can open', () => {
     expect(providersFor(SARA).map(p => p.key)).toEqual(['crm', 'tasks', 'requests'])
-    expect(providersFor(ADMIN).map(p => p.key)).toEqual(['sales', 'crm', 'contacts', 'hr', 'tasks', 'requests'])
+    expect(providersFor(ADMIN).map(p => p.key)).toEqual(['sales', 'crm', 'contacts', 'hr', 'documents', 'tasks', 'requests'])
     expect(providersFor(NOBODY).map(p => p.key)).toEqual(['tasks', 'requests'])
   })
 

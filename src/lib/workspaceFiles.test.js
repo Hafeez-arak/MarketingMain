@@ -53,6 +53,7 @@ const OBJECTS = {
   'creative-studio': [`${WS}/up.png`, 'sess-1/render.mp4', 'sess-other/keep.mp4', `${OTHER}/keep.png`],
   'schedule-uploads': [`references/${WS}/r.png`, `references/${OTHER}/keep.png`, 'instagram/2026-05-14/keep.jpg'],
   'hr-papers': [`${WS}/emp1/a.pdf`, `${OTHER}/emp9/keep.pdf`],
+  'company-documents': [`${WS}/doc1/v.pdf`, `${OTHER}/doc9/keep.pdf`],
   'instagram-posts': ['1778675656016-.webp'],
 }
 const SESSIONS = [{ id: 'sess-1', workspace_id: WS }, { id: 'sess-other', workspace_id: OTHER }]
@@ -82,8 +83,9 @@ describe('workspaceFiles', () => {
       'creative-studio': [`${WS}/up.png`, 'sess-1/render.mp4'],
       'schedule-uploads': [`references/${WS}/r.png`],
       'hr-papers': [`${WS}/emp1/a.pdf`],
+      'company-documents': [`${WS}/doc1/v.pdf`],
     })
-    expect(countFiles(files)).toBe(7)
+    expect(countFiles(files)).toBe(8)
     expect(JSON.stringify(files)).not.toContain('keep')
   })
 
@@ -94,13 +96,13 @@ describe('workspaceFiles', () => {
   it('removes everything it collected', async () => {
     const client = fakeClient(OBJECTS, SESSIONS)
     const files = await collectCompanyFiles(client, WS)
-    expect(await removeCompanyFiles(client.storage, files)).toEqual({ removed: 7, failed: 0 })
-    expect(client.storage.removed).toHaveLength(7)
+    expect(await removeCompanyFiles(client.storage, files)).toEqual({ removed: 8, failed: 0 })
+    expect(client.storage.removed).toHaveLength(8)
   })
 
   it('counts failures instead of throwing, including deletes storage silently skipped', async () => {
     const client = fakeClient(OBJECTS, SESSIONS, { failRemove: 'brand-assets', silentlySkip: 'm.gif' })
     const files = await collectCompanyFiles(client, WS)
-    expect(await removeCompanyFiles(client.storage, files)).toEqual({ removed: 4, failed: 3 })
+    expect(await removeCompanyFiles(client.storage, files)).toEqual({ removed: 5, failed: 3 })
   })
 })
