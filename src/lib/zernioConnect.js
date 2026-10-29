@@ -364,6 +364,14 @@ export async function fetchFollowerHistory(workspaceId, accountId, range = 30) {
   return call('followers', { workspace_id: workspaceId, account_id: accountId, ...window })
 }
 
+// Who follows a LinkedIn company page, as weekly snapshots (newest first).
+// See src/lib/linkedinAudience.js for what is done with them.
+export async function fetchLinkedInAudience(workspaceId, accountId) {
+  const res = await call('audience', { workspace_id: workspaceId, account_id: accountId })
+  if (res.error) return { error: res.error }
+  return { snapshots: res.snapshots || [], liveError: res.live_error || '' }
+}
+
 // Every post live on one account since it was connected — through this app
 // or on the platform directly — for the Instagram page's "All posts" tab.
 export async function fetchAccountFeed(workspaceId, accountId) {

@@ -2,6 +2,7 @@ import { db } from './_supabase.js'
 import { callModel } from './_provider.js'
 import { loadBrandContext } from './_context.js'
 import { liveZernioAnalytics } from './_zernioLive.js'
+import { readLinkedInAudience } from './_linkedinAudience.js'
 import { COMPANY_EXECUTORS } from './_company.js'
 import { textIn } from '../../src/lib/agent/loop.js'
 import {
@@ -38,7 +39,7 @@ const run = async (name, workspaceId, args) => {
 export async function gatherFacts(workspaceId, now = new Date()) {
   const w = briefWindow(now)
   const since = encodeURIComponent(w.from)
-  const [leads, qualified, snapshot, targets, deals, opps, signals, requests, live] = await Promise.all([
+  const [leads, qualified, snapshot, targets, deals, opps, signals, requests, live, audience] = await Promise.all([
     within(run('get_leads_summary', workspaceId, { days: 7 }), 30_000, null),
     within(run('get_leads', workspaceId, { days: 7, verdict: 'qualified', limit: 12 }), 30_000, null),
     within(run('get_company_snapshot', workspaceId, { days: 7 }), 30_000, null),
@@ -51,6 +52,7 @@ export async function gatherFacts(workspaceId, now = new Date()) {
     within(db(`requests?${ws(workspaceId)}&or=(status.in.(new,in_progress),closed_at.gte.${since})&order=updated_at.desc&limit=30` +
       '&select=title,kind,status,resolution,assigned_to,closed_at'), 20_000, []),
     within(liveZernioAnalytics(workspaceId, { days: 14 }), 45_000, { available: false }),
+    within(readLinkedInAudience(workspaceId), 20_000, { available: false }),
   ])
 
   const pick = x => x && ({
@@ -87,6 +89,8 @@ export async function gatherFacts(workspaceId, now = new Date()) {
       })),
     },
     social: socialFacts(live, posts),
+    // Who follows the LinkedIn page, this week against last (see src/lib/linkedinAudience.js).
+    linkedin_audience: audience,
     email: snapshot?.email || null,
     market: {
       latest_research: snapshot?.latest_research_run || null,

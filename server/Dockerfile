@@ -29,6 +29,7 @@ RUN printf '{"name":"arak-agent","private":true,"type":"module"}\n' > package.js
 
 COPY api/agent ./api/agent
 COPY api/zernio/_zernio.js ./api/zernio/_zernio.js
+COPY api/zernio/_audience.js ./api/zernio/_audience.js
 COPY src/lib ./src/lib
 COPY server/agent.js ./server/agent.js
 COPY server/agentHandlers ./server/agentHandlers

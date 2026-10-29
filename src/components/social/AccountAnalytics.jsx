@@ -12,6 +12,7 @@ import { ReachSplit } from './ReachSplit'
 import { resolveRange } from '../../lib/dateRange'
 import { MetricLabel, ScopeBanner } from '../analytics/MetricLabel'
 import { LinkedInInsights } from './LinkedInInsights'
+import { LinkedInAudience } from './LinkedInAudience'
 
 // ─── One connected account's analytics ─────────────────────────────────────
 // The Analytics tab on a platform page, and the body of /analytics. Same
@@ -216,6 +217,10 @@ export function AccountAnalytics({ platform, accounts = [], loadingAccounts = fa
           <LinkedInInsights dash={current} days={days} isPage={isPage} />
         )}
       </Card>
+
+      {/* Who follows a company page — its own weekly read, so a range change
+          above does not fetch it again. */}
+      {platform === 'linkedin' && isPage && <LinkedInAudience account={account} />}
 
       {/* `!current`, not `!current && loading`: the first load is deferred a
           tick, so `loading` is still false on the first paint and the graphs

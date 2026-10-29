@@ -4,6 +4,8 @@ import {
   syncAccountPosts, feedPlan, mergeFeedPages, FEED_MAX_PAGES,
 } from './_zernio.js'
 import { mayDisconnect, protectionReason } from '../../src/lib/platformSafety.js'
+import { AUDIENCE_HISTORY_WEEKS, isCompanyPage, readLinkedInDemographics, snapshotRow } from './_audience.js'
+import { hasDemographics, weekStartOf } from '../../src/lib/linkedinAudience.js'
 
 // ─── Per-workspace OAuth ───────────────────────────────────────────────────
 //
@@ -509,6 +511,67 @@ const handlers = {
       toDate: plan.toDate,
       ...Object.fromEntries(plan.requests.map((r, i) => [r.key, results[i]])),
     }
+  },
+
+  // Who follows a LinkedIn company page — industry, job function, seniority,
+  // company size — as weekly snapshots, so this week can be compared with the
+  // last. The first look in a week takes that week's snapshot if the Sunday
+  // cron has not; see api/zernio/_audience.js and src/lib/linkedinAudience.js.
+  //
+  // A failed stored read (the table not there yet, Supabase down) still shows
+  // this week's live numbers, just without a comparison. A failed live read
+  // still shows what is stored, with the reason beside it.
+  async audience(z, { ws, profileId, body }) {
+    const accountId = String(body.account_id || '').trim()
+    if (!accountId) return fail('account_id is required.', 400)
+
+    const account = await requireOwnedAccount(z, { workspaceId: ws.id, profileId, accountId })
+    if (!isCompanyPage(account)) {
+      return fail('Follower demographics exist only for LinkedIn company pages.', 400)
+    }
+
+    const table = 'linkedin_audience_snapshots'
+    let stored = []
+    let storeOk = true
+    try {
+      stored = await supa(
+        `${table}?workspace_id=eq.${ws.id}&zernio_account_id=eq.${encodeURIComponent(accountId)}` +
+        `&order=week_start.desc&limit=${AUDIENCE_HISTORY_WEEKS}` +
+        '&select=week_start,captured_at,followers,demographics',
+        { token: SERVICE_KEY },
+      ) || []
+    } catch (err) {
+      console.error('[audience] stored read failed:', err.message)
+      storeOk = false
+    }
+
+    let liveError = ''
+    if (!stored.some(s => s.week_start === weekStartOf())) {
+      try {
+        const demographics = await readLinkedInDemographics(z, accountId)
+        if (hasDemographics(demographics)) {
+          const row = snapshotRow({
+            workspaceId: ws.id, accountId, followers: account.followers_count, demographics,
+          })
+          if (storeOk) {
+            // ignore-duplicates: a cron or another tab that got there first
+            // keeps its row, and this answer shows ours — both are this week.
+            await supa(`${table}?on_conflict=workspace_id,zernio_account_id,week_start`, {
+              token: SERVICE_KEY, method: 'POST', body: row,
+              prefer: 'resolution=ignore-duplicates,return=minimal',
+            }).catch(err => console.error('[audience] snapshot write failed:', err.message))
+          }
+          stored = [{
+            week_start: row.week_start, captured_at: row.captured_at,
+            followers: row.followers, demographics: row.demographics,
+          }, ...stored]
+        }
+      } catch (err) {
+        liveError = err instanceof ZernioError ? explainZernioError(err) : String(err.message || err)
+      }
+    }
+
+    return { account, snapshots: stored, live_error: liveError }
   },
 
   // "Refresh from Zernio". The account list is re-read and mirrored (follower

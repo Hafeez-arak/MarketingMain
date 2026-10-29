@@ -207,6 +207,11 @@ export const CEO_BRIEF_IDENTITY = [
   '- "Needs you" is only for what the CEO himself should decide or push: a person',
   '  to give ownership to, a client to call, a priority to set. Not tasks for staff.',
   '- If live social numbers are missing, do not mention social performance at all.',
+  '- linkedin_audience says who follows the LinkedIn page: the share in customer sectors',
+  '  against lighting/electrical suppliers and early-career people, and the change since',
+  '  last week. He asked whether the followers are potential customers; answer that in',
+  '  one social point when it is available. Location is not measured: never guess the',
+  '  share in Saudi Arabia.',
 ].join('\n')
 
 /** The user turn: the facts, as JSON, with the week named. */
