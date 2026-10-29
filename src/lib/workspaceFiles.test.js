@@ -97,7 +97,7 @@ describe('workspaceFiles', () => {
     const client = fakeClient(OBJECTS, SESSIONS)
     const files = await collectCompanyFiles(client, WS)
     expect(await removeCompanyFiles(client.storage, files)).toEqual({ removed: 8, failed: 0 })
-    expect(client.storage.removed).toHaveLength(7)
+    expect(client.storage.removed).toHaveLength(8)
   })
 
   it('counts failures instead of throwing, including deletes storage silently skipped', async () => {
