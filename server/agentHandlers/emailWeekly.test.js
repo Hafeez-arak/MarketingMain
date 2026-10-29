@@ -98,6 +98,29 @@ describe('POST /api/agent/emailWeekly', () => {
     expect(state.modelCalls).toHaveLength(0)
   })
 
+  it('skips the Monday run for a company that switched weekly drafts off', async () => {
+    state.rows['email_settings?'] = [{ workspace_id: WS, weekly_drafts_enabled: false }]
+    const { status, json } = await run({ workspace_id: WS, trigger: 'scheduled' })
+    expect(status).toBe(200)
+    expect(json.skipped).toMatch(/switched off/)
+    expect(state.modelCalls).toHaveLength(0)
+    expect(state.calls.some(c => c.method === 'POST')).toBe(false)
+  })
+
+  it('still writes when a person presses the button with weekly drafts off', async () => {
+    state.rows['email_settings?'] = [{ workspace_id: WS, weekly_drafts_enabled: false }]
+    state.auth = { ok: true, as: 'user' }
+    const { json } = await run({ workspace_id: WS })
+    expect(json.ok).toBe(true)
+    expect(state.modelCalls).toHaveLength(1)
+  })
+
+  it('reads a settings failure as switched on, as it was before the switch existed', async () => {
+    state.rows['email_settings?'] = () => Promise.reject(new Error('column does not exist'))
+    const { json } = await run({ workspace_id: WS })
+    expect(json).toMatchObject({ ok: true, options: 3 })
+  })
+
   it('writes anyway when a person presses the button', async () => {
     state.rows['email_contacts?'] = []
     state.auth = { ok: true, as: 'user' }

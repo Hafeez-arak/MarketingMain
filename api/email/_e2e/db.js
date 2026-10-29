@@ -22,6 +22,7 @@ export const EMAIL_MIGRATIONS = [
   '20261003_website_signup_key',
   '20261009_outreach_warmup_safety',
   '20261011_outreach_variation',
+  '20261029_email_weekly_drafts_switch',
   // The lead tables, for the trigger that puts enquirers into marketing
   // groups and the rpc websiteSignup calls (20261016).
   '20261006_lead_agent',

@@ -389,7 +389,7 @@ export async function dismissLeadForOutreach(ws, id) {
 
 const SETTINGS_FIELDS = ['from_name', 'from_email', 'reply_to', 'company_address', 'warmup_enabled',
   'provider_daily_limit', 'provider_monthly_limit', 'cold_sending_enabled',
-  'newsletter_name', 'subscribe_offer', 'subscribe_gift_url']
+  'newsletter_name', 'subscribe_offer', 'subscribe_gift_url', 'weekly_drafts_enabled']
 
 export async function saveSettings(ws, settings) {
   const row = { workspace_id: ws, updated_at: new Date().toISOString() }

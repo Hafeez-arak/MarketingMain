@@ -7,7 +7,9 @@ import { Notice } from './parts'
 // ─── Settings ──────────────────────────────────────────────────────────────
 // The newsletter lane only: who it is from, what every footer says, and how
 // fast sending may grow. Outreach has its own settings where the work is
-// (Outreach → Mailboxes), so nothing here can be mistaken for them. One-time setup outside the app (Resend, DNS, Vercel) is not shown
+// (Outreach → Mailboxes), so nothing here can be mistaken for them. The weekly
+// AI drafts switch saves the moment it is flipped, apart from the form, like
+// the outreach switch does. One-time setup outside the app (Resend, DNS, Vercel) is not shown
 // here on purpose; it lives in docs/EMAIL-SETUP.md.
 
 const PLANS = [
@@ -40,6 +42,8 @@ function SettingsForm({ workspaceId, reload, initial: s }) {
   }))
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState(null)
+  const [weekly, setWeekly] = useState(s.weekly_drafts_enabled !== false)
+  const [switching, setSwitching] = useState(false)
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
   const errors = {
@@ -68,9 +72,40 @@ function SettingsForm({ workspaceId, reload, initial: s }) {
     }
   }
 
+  // Off stops the Monday run for this company only. The button on
+  // Newsletters still writes them on request.
+  async function switchWeekly(on) {
+    setSwitching(true); setMessage(null)
+    try {
+      await saveSettings(workspaceId, { weekly_drafts_enabled: on })
+      setWeekly(on)
+      setMessage(on
+        ? { tone: 'sage', text: 'Weekly AI drafts are on. The next three arrive on Monday.' }
+        : { tone: 'amber', text: 'Weekly AI drafts are off. None are written on Mondays until this is switched back on.' })
+      await reload()
+    } catch (err) {
+      setMessage({ tone: 'red', text: err.message })
+    } finally {
+      setSwitching(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
       {message && <Notice tone={message.tone}>{message.text}</Notice>}
+
+      <Card>
+        <SectionHead title="Weekly AI drafts" subtitle="Every Monday at 07:30 Riyadh time, three options for the week's newsletter appear on the Newsletters tab. Each week's drafts count against the monthly AI budget, a few cents." />
+        <div className="p-5 space-y-2">
+          <div className={switching ? 'opacity-60 pointer-events-none' : ''}>
+            <Toggle checked={weekly} onChange={switchWeekly}
+              label={weekly ? 'On: write three drafts every Monday' : 'Off: no drafts are written on Mondays'} />
+          </div>
+          <p className="text-[11px] text-text-tertiary">
+            Saved as soon as it is switched. With it off, “Write this week's drafts now” on Newsletters still writes them when someone asks.
+          </p>
+        </div>
+      </Card>
 
       <Card>
         <SectionHead title="Newsletter sender" subtitle="Who newsletters come from. They go out from a separate address, so staff mailboxes and outreach are never affected. Outreach mailboxes are under Outreach → Mailboxes." />

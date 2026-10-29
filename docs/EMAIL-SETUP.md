@@ -195,6 +195,14 @@ First run: n8n → Agent — weekly email drafts → **Execute workflow** (Run n
 or the button in App → Email → Newsletters. The drafts appear at the top of the
 Newsletters tab.
 
+**Switching them off.** App → Email → Settings → *Weekly AI drafts*. Off makes
+the Monday run skip that company (no model call, nothing spent); the
+Newsletters button still writes them on request. It needs the column from
+`supabase/migrations/20261029_email_weekly_drafts_switch.sql` in the database,
+and the agent container rebuilt (the `docker compose up -d --build agent` line
+above) for the Monday run to obey it. Until both are done, the Monday run keeps
+writing.
+
 ---
 
 ## Rules to keep
