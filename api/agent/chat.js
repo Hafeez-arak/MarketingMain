@@ -7,6 +7,7 @@ import { ADMIN_EDITS_PROMPT } from '../../src/lib/agent/adminTools.js'
 import { COMPANY_PROMPT } from '../../src/lib/agent/companyTools.js'
 import { REQUESTS_PROMPT } from '../../src/lib/agent/requestTools.js'
 import { writeCeoBrief } from './_ceoBrief.js'
+import { captureLinkedInAudiences } from './_linkedinAudience.js'
 import {
   validateAttachments, userContent, storedAttachments, attachmentNote,
 } from '../../src/lib/agent/attachments.js'
@@ -92,7 +93,9 @@ async function readBody(req) {
 //   POST { workspace_id, mode: 'ceo_brief' }   an admin pressing "Write a fresh brief"
 //   GET  ?cron=ceo-brief  Bearer CRON_SECRET     Vercel Cron, Sunday 07:00 Riyadh
 //
-// The writer is api/agent/_ceoBrief.js.
+// The writer is api/agent/_ceoBrief.js. The same Sunday run first takes the
+// week's LinkedIn follower-demographics snapshot (api/agent/_linkedinAudience.js),
+// so the brief and the LinkedIn page compare the same two weeks.
 
 const bearerOf = req => String(req.headers?.authorization || '').replace(/^Bearer\s+/i, '')
 
@@ -102,6 +105,8 @@ async function ceoBriefCron(req, res) {
     res.status(401).json({ ok: false })
     return
   }
+  // Before the briefs, so each one reads this week's snapshot. Never throws.
+  const audiences = await captureLinkedInAudiences()
   const companies = await db('workspaces?ceo_brief_enabled=eq.true&select=id,name')
   const results = []
   // One at a time: each is a paid call, and the cap check before each one is
@@ -114,7 +119,7 @@ async function ceoBriefCron(req, res) {
       results.push({ company: w.name, ok: false, error: err?.message || String(err) })
     }
   }
-  res.status(200).json({ ok: true, results })
+  res.status(200).json({ ok: true, results, linkedin_audiences: audiences })
 }
 
 export default async function handler(req, res) {

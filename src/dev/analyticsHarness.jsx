@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { AuthContext } from '../store/auth'
 import { AccountAnalytics } from '../components/social/AccountAnalytics'
 import '../index.css'
+import AUDIENCE from './linkedinAudienceFixture.json'
 
 // ─── Dev-only Analytics-tab harness ────────────────────────────────────────
 // The platform page's Analytics tab — account insights strip, KPI strip,
@@ -236,6 +237,21 @@ function installFetch(platform) {
         followers: 1800 + i * 2,
       }))
       return json({ ok: true, followers: { stats: { [body.account_id]: rows }, accounts: [] } })
+    }
+    // Who follows the page: Zernio's real answer for ARAK Lighting on
+    // 2026-10-29 as this week, and last week as the same with 60 fewer
+    // construction followers and 40 more from electrical manufacturing, so
+    // every change marker has something to show.
+    if (url.includes('/api/zernio/audience')) {
+      await new Promise(r => setTimeout(r, 400))
+      const lastWeek = Object.fromEntries(Object.entries(AUDIENCE).map(([dim, rows]) => [dim, rows.map(r => ({
+        ...r,
+        value: r.id === 'urn:li:industry:48' ? r.value - 60 : r.id === 'urn:li:industry:112' ? r.value + 40 : r.value,
+      }))]))
+      return json({ ok: true, live_error: '', snapshots: [
+        { week_start: '2026-10-25', followers: 4866, demographics: AUDIENCE },
+        { week_start: '2026-10-18', followers: 4840, demographics: lastWeek },
+      ] })
     }
     if (url.includes('/api/zernio/sync')) {
       await new Promise(r => setTimeout(r, 600))
