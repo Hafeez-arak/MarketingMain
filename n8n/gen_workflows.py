@@ -1997,8 +1997,8 @@ try {
       // no such column (selecting it is a 400 that skips the whole table), and
       // every row in it is Instagram by definition.
       const cols = table === 'generated_posts'
-        ? 'id,workspace_id,platform,zernio_post_id,zernio_account_id,publish_status'
-        : 'id,workspace_id,zernio_post_id,zernio_account_id,publish_status';
+        ? 'id,workspace_id,platform,zernio_post_id,zernio_account_id,publish_status,platform_post_url'
+        : 'id,workspace_id,zernio_post_id,zernio_account_id,publish_status,platform_post_url';
       const rows = await req({ method:'GET',
         url:`${SUPA_URL}/rest/v1/${table}?select=${cols}&zernio_post_id=neq.&publish_status=in.(published,scheduled,publishing)${wsFilter}&limit=500`,
         headers:sHeaders, json:true });
@@ -2045,9 +2045,11 @@ try {
 
       // Fallback: too new for a timeline — store current totals as today.
       if (!wrote){
+        // A failed read here must not skip the status check below: that is
+        // the one thing a brand-new post needs from this loop.
         single = await req({ method:'GET',
           url:`${ZBASE}/analytics?postId=${encodeURIComponent(t.zernio_post_id)}`,
-          headers:zHeadersFor(t.workspace_id), json:true });
+          headers:zHeadersFor(t.workspace_id), json:true }).catch(() => null);
         const perPlatform = (single && single.platformAnalytics) || [];
         // Prefer the per-platform breakdown; fall back to the roll-up when
         // Zernio hasn't split it out yet.
@@ -2092,29 +2094,36 @@ try {
       // This used to run only on the fallback path — but a post that is live
       // is exactly the one that HAS a timeline, so it took the primary path
       // and was never reconciled. Checked for every unfinished post now.
-      if (t.publish_status !== 'published'){
+      //
+      // A published row with no link is unfinished too. Right after a post
+      // goes live the analytics read says 'published' while its
+      // platformPostUrl is still null (syncStatus 'pending'); taking that
+      // answer flipped the row with a blank link, and nothing ever came back
+      // for it because published rows were skipped from then on.
+      if (t.publish_status !== 'published' || !t.platform_post_url){
         try {
           if (!single){
             single = await req({ method:'GET',
               url:`${ZBASE}/analytics?postId=${encodeURIComponent(t.zernio_post_id)}`,
-              headers:zHeadersFor(t.workspace_id), json:true });
+              headers:zHeadersFor(t.workspace_id), json:true }).catch(() => null);
           }
           const zStatus = String((single && single.status) || '').toLowerCase();
-          if (zStatus === 'published'){
+          if (zStatus === 'published' && single.platformPostUrl){
             await req({ method:'PATCH', url:`${SUPA_URL}/rest/v1/${t.post_table}?id=eq.${t.id}`,
               headers:{ ...sHeaders, Prefer:'return=minimal' },
               body:{ publish_status:'published',
                      published_at: single.publishedAt || new Date().toISOString(),
-                     platform_post_url: single.platformPostUrl || '' }, json:true });
+                     platform_post_url: single.platformPostUrl }, json:true });
           } else {
-            // Not live by the analytics read — ask the post itself. A post the
+            // Not live by the analytics read, or live without its link yet —
+            // ask the post itself, which carries both per target. A post the
             // platform refused used to stay 'scheduled' here forever, then read
             // as "gone out" once its time passed (postLock), so nobody ever saw
             // it had failed. GET /v1/posts/{id} carries status 'failed' and
             // the platform's reason on each target's errorMessage.
             const got = await req({ method:'GET',
               url:`${ZBASE}/posts/${encodeURIComponent(t.zernio_post_id)}`,
-              headers:zHeadersFor(t.workspace_id), json:true });
+              headers:zHeadersFor(t.workspace_id), json:true }).catch(() => null);
             const post = (got && got.post) || got || {};
             const pStatus = String(post.status || '').toLowerCase();
             const targetsZ = Array.isArray(post.platforms) ? post.platforms : [];
@@ -2127,11 +2136,22 @@ try {
               failedMarked++;
             } else if (pStatus === 'published'){
               const live = targetsZ.find(x => x && x.status === 'published') || {};
+              const url = live.platformPostUrl || (single && single.platformPostUrl) || t.platform_post_url || '';
+              // Already published and still no link anywhere: nothing to write.
+              if (t.publish_status !== 'published' || url){
+                await req({ method:'PATCH', url:`${SUPA_URL}/rest/v1/${t.post_table}?id=eq.${t.id}`,
+                  headers:{ ...sHeaders, Prefer:'return=minimal' },
+                  body:{ publish_status:'published',
+                         published_at: live.publishedAt || (single && single.publishedAt) || new Date().toISOString(),
+                         platform_post_url: url }, json:true });
+              }
+            } else if (zStatus === 'published' && t.publish_status !== 'published'){
+              // The post read failed but analytics already says live: flip it
+              // now, and the link comes on a later run (the row has none).
               await req({ method:'PATCH', url:`${SUPA_URL}/rest/v1/${t.post_table}?id=eq.${t.id}`,
                 headers:{ ...sHeaders, Prefer:'return=minimal' },
                 body:{ publish_status:'published',
-                       published_at: live.publishedAt || new Date().toISOString(),
-                       platform_post_url: live.platformPostUrl || '' }, json:true });
+                       published_at: single.publishedAt || new Date().toISOString() }, json:true });
             }
           }
         } catch (e) { /* non-fatal */ }

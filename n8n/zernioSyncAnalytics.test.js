@@ -110,8 +110,8 @@ describe('publish status', () => {
     expect(pg.tables.post_analytics).toHaveLength(1)
   })
 
-  it('does not ask about a post that is already published', async () => {
-    const pg = db({ posts: [post()] })
+  it('does not ask about a post that is already published with its link', async () => {
+    const pg = db({ posts: [post({ platform_post_url: 'https://www.instagram.com/p/DdQrdjPlStO/' })] })
     const { routes, asked } = zernio({ timeline: { [LIVE_POST]: LIVE_TIMELINE }, single: { [LIVE_POST]: LIVE_SINGLE } })
     await run(pg, routes)
     expect(asked.filter(([kind]) => kind === 'single')).toEqual([])
@@ -122,6 +122,58 @@ describe('publish status', () => {
     const { routes } = zernio({ single: { [LIVE_POST]: { ...LIVE_SINGLE, status: 'scheduled', platformAnalytics: [], analytics: {} } } })
     await run(pg, routes)
     expect(pg.tables.generated_posts[0].publish_status).toBe('scheduled')
+  })
+})
+
+// 2026-10-29, @araklighting's crystal ring carousel: live on Instagram at
+// 12:33:55, but the analytics read right after said 'published' with
+// platformPostUrl null (still syncing). The row flipped with a blank link and
+// was never asked about again. GET /posts/{id} had the link all along. Shapes
+// are the two answers Zernio gave for that post.
+describe('a post that has only just gone live', () => {
+  const FRESH = '6ae33cf5eb15681874de62a2'
+  const URL_ = 'https://www.instagram.com/p/DfFBGAZDoew/'
+  const freshSingle = {
+    postId: FRESH, status: 'published', publishedAt: '2026-10-29T12:33:55.175Z',
+    platformPostUrl: null, syncStatus: 'pending',
+    analytics: { ...ZEROS, engagementRate: 0, lastUpdated: null },
+    platformAnalytics: [{ platform: 'instagram', status: 'published', publishedAt: null,
+                          platformPostUrl: null, analytics: null, syncStatus: 'pending' }],
+  }
+  const freshPost = { _id: FRESH, status: 'published', publishedAt: null, platforms: [
+    { platform: 'instagram', status: 'published', publishedAt: '2026-10-29T12:33:55.175Z', platformPostUrl: URL_ },
+  ] }
+
+  it('is marked published with its Instagram link', async () => {
+    const pg = db({ posts: [post({ zernio_post_id: FRESH, publish_status: 'publishing' })] })
+    const { routes } = zernio({ single: { [FRESH]: freshSingle }, posts: { [FRESH]: freshPost } })
+    await run(pg, routes)
+    expect(pg.tables.generated_posts[0]).toMatchObject({
+      publish_status: 'published', published_at: '2026-10-29T12:33:55.175Z', platform_post_url: URL_,
+    })
+  })
+
+  it('gets its link on a later run when it was marked published without one', async () => {
+    const pg = db({ posts: [post({ zernio_post_id: FRESH, platform_post_url: '' })] })
+    const { routes } = zernio({ single: { [FRESH]: freshSingle }, posts: { [FRESH]: freshPost } })
+    await run(pg, routes)
+    expect(pg.tables.generated_posts[0].platform_post_url).toBe(URL_)
+  })
+
+  it('is still marked published when the post read fails', async () => {
+    const pg = db({ posts: [post({ zernio_post_id: FRESH, publish_status: 'publishing' })] })
+    const { routes } = zernio({ single: { [FRESH]: freshSingle } })
+    await run(pg, routes)
+    expect(pg.tables.generated_posts[0]).toMatchObject({
+      publish_status: 'published', published_at: '2026-10-29T12:33:55.175Z',
+    })
+  })
+
+  it('is still checked when its analytics read fails outright', async () => {
+    const pg = db({ posts: [post({ zernio_post_id: FRESH, publish_status: 'publishing' })] })
+    const { routes } = zernio({ posts: { [FRESH]: freshPost } })
+    await run(pg, routes)
+    expect(pg.tables.generated_posts[0]).toMatchObject({ publish_status: 'published', platform_post_url: URL_ })
   })
 })
 
