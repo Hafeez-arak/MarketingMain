@@ -139,23 +139,6 @@ const WATCHLIST = [
   { name: 'Example Controls Co', note: 'Made-up rival: KNX integrator.', domain: '', lines: ['controls'], city: 'Jeddah', brands: [] },
 ]
 
-const REPLIES = [
-  {
-    id: 'r1', subject: 'RE: RFQ – Lighting – Nour Towers', skip_reason: '',
-    body: 'Dear Omar Haddad,\n\nThank you for your enquiry regarding the lighting fixtures for Nour Towers.\n\nWe have received your request, and our sales team is reviewing it now. A sales engineer will contact you as soon as possible.',
-    lead: { name: 'Omar Haddad', company: 'Nour Contracting', email: 'omar@nour.example', source: 'email', mailbox: 'info@harness.example', received_at: '2026-10-28T08:10:00Z', summary: 'Quote the lighting fixtures for Nour Towers against the attached BOQ.', subject: 'RFQ – Lighting – Nour Towers', verdict: 'qualified', human_verdict: null },
-  },
-  {
-    id: 'r2', subject: 'Your enquiry to Harness Co', skip_reason: '',
-    body: 'Dear Sara Malik,\n\nThank you for your enquiry regarding backlit panels for a hotel project.\n\nWe have received your request, and our sales team is reviewing it now. A sales engineer will contact you as soon as possible.',
-    lead: { name: 'Sara Malik', company: '', email: 'sara@example.com', source: 'website_form', mailbox: '', received_at: '2026-10-27T12:00:00Z', summary: 'Backlit panels for a hotel.', subject: 'Hotel', verdict: 'qualified', human_verdict: null },
-  },
-  {
-    id: 'r3', subject: '', body: '', skip_reason: 'Same request again: RFQ – Lighting – Nour Towers (2026-10-20) already got the reply.',
-    lead: { name: 'Omar Haddad', company: 'Nour Contracting', email: 'omar@nour.example', source: 'email', mailbox: 'info@harness.example', received_at: '2026-10-26T08:10:00Z', summary: 'Reminder about the Nour Towers RFQ.', subject: 'RE: RFQ – Lighting – Nour Towers', verdict: 'qualified', human_verdict: null },
-  },
-]
-
 let autoReplySince = null
 
 window.fetch = async (input, init = {}) => {
@@ -164,8 +147,6 @@ window.fetch = async (input, init = {}) => {
   if (mode === 'hang') return new Promise(() => {})
   if (mode === 'fail') return Promise.reject(new TypeError('Failed to fetch'))
   if (url.includes('/rest/v1/leads')) return restLeads(url)
-  // The Test tab: replies the agent would send (made up).
-  if (url.includes('/rest/v1/lead_replies')) return json(REPLIES)
   // The sales app's Research page: the committed research fixture, and an
   // empty tracker (the page then shows this run's own openings and events).
   if (url.includes('/rest/v1/research_runs')) return json(runsFixture)
@@ -185,15 +166,8 @@ window.fetch = async (input, init = {}) => {
     return json(NOTES)
   }
   // What a sales seat reads for the "Came in" filter (SalesApp).
-  if (url.includes('/rest/v1/lead_mailboxes')) {
-    return json(status.mailboxes.map(({ id, email }, i) => ({
-      id, email, label: i ? '' : 'info@harness.example', can_send: true,
-      // The Test tab's signature (made up): what copy-signature.mjs stores.
-      reply_signature: i ? {} : { html: '<div style="font-family:Tahoma,sans-serif;font-size:13px"><b><i>Thanks &amp; Regards!</i></b><br><br><b><i>Customer Care</i></b><br>Harness Co</div>', images: [] },
-    })))
-  }
+  if (url.includes('/rest/v1/lead_mailboxes')) return json(status.mailboxes.map(({ id, email }) => ({ id, email, label: '' })))
   if (url.includes('/api/leads/status')) return json(status)
-  if (url.includes('/rest/v1/brand_profile')) return json({ contact_info: 'Website: www.harness.example' })
   // Auto-replies (made up): on, one mailbox with a signature, one without.
   if (url.includes('/api/leads/auto_reply_status')) {
     return json({ ok: true, ready: true, since: autoReplySince, counts: { sent: 3, skipped: 1 }, mailboxes: [

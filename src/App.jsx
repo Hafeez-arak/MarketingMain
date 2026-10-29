@@ -31,6 +31,7 @@ import SalesApp                   from './pages/leads/SalesApp'
 import SalesResearch              from './pages/leads/SalesResearch'
 import Targets                    from './pages/sales/Targets'
 import AgentBrief                 from './pages/admin/AgentBrief'
+import { SHOW_AGENT_BRIEF }       from './lib/hiddenPages'
 import { MediaLibrary }            from './pages/media/index'
 import { SocialOverview, SocialPlatform } from './pages/social/index'
 import { InstagramPage } from './pages/social/InstagramPage'
@@ -161,7 +162,8 @@ function ProtectedApp() {
             {/* Admin only: the page sends anyone else to the dashboard. */}
             <Route path="/leads"                 element={<LeadAgent />} />
             <Route path="/targets"               element={<Targets />} />
-            <Route path="/agent-brief"           element={<AgentBrief />} />
+            {/* Hidden for everyone since 2026-10-29, not removed (src/lib/hiddenPages.js). */}
+            <Route path="/agent-brief"           element={SHOW_AGENT_BRIEF ? <AgentBrief /> : <Navigate to="/" replace />} />
             <Route path="/media"                 element={<MediaLibrary />} />
             <Route path="/social"                element={<SocialOverview />} />
             <Route path="/social/approvals"      element={<PostApprovals />} />

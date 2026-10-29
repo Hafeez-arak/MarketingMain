@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react'
 import { fetchPendingCount } from '../../lib/access'
 import { fetchScheduledPosts } from '../../lib/scheduledPosts'
 import { needsQueueAttention } from '../../lib/postLock'
+import { SHOW_AGENT_BRIEF } from '../../lib/hiddenPages'
 
 const nav = [
   { section: 'Overview', items: [
@@ -43,8 +44,9 @@ const nav = [
     { to: '/insights',  label: 'Research', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg> },
   ]},
   // Admin only (2026-10-08): what the research agent searches for, word for
-  // word, and the ICPs it works from.
-  { section: 'Admin', adminOnly: true, items: [
+  // word, and the ICPs it works from. Hidden for everyone since 2026-10-29,
+  // not removed (src/lib/hiddenPages.js).
+  { section: 'Admin', adminOnly: true, hidden: !SHOW_AGENT_BRIEF, items: [
     { to: '/agent-brief', label: 'Agent Brief', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg> },
   ]},
   { section: 'Assets', items: [
@@ -211,7 +213,7 @@ export function Sidebar() {
           flush against the sidebar's own border. Inset nav pills would put the
           marker in the middle of a gutter, floating. */}
       <nav className="flex-1 overflow-y-auto scrollbar-thin py-3">
-        {nav.filter(group => isAccessAdmin || !group.adminOnly).map((group, gi) => (
+        {nav.filter(group => !group.hidden && (isAccessAdmin || !group.adminOnly)).map((group, gi) => (
           <div key={group.section} className={gi > 0 ? 'mt-5' : ''}>
             <p className="px-5 mb-1.5 eyebrow text-text-disabled">{group.section}</p>
             {group.items.map(item => (
