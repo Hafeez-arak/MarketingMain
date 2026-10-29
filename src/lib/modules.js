@@ -91,6 +91,28 @@ export const SECTIONS = [
     ],
   },
   {
+    // Musa's pricing module (التسعير), rewritten in our stack (2026-12-01,
+    // dev/erp-pilot/PRICING.md): pricing sheets per opportunity, supplier
+    // quotes, landed cost, margin and approval. view reads (cost and margin
+    // included), work edits drafts and submits, manage approves and sets the
+    // minimum margin.
+    key: 'pricing', label: 'Pricing', ar: 'التسعير', icon: 'calculator', base: '/pricing', adminOnly: true,
+    blurb: 'Pricing sheets per opportunity: supplier quotes, landed cost, margin and approval.',
+    blurbAr: 'كشوف التسعير لكل فرصة: عروض الموردين والتكلفة الواصلة والهامش والاعتماد.',
+    pages: [
+      { to: '/pricing', label: 'Pricing sheets', ar: 'كشوف التسعير', icon: 'calculator', exact: true, translated: true },
+      { to: '/pricing/settings', label: 'Settings', ar: 'الإعدادات', icon: 'gear', translated: true },
+      // Reached from the list, not the menu.
+      { to: '/pricing/sheet', label: 'Pricing sheet', ar: 'كشف التسعير', icon: 'calculator', hidden: true, translated: true },
+      { to: '/pricing/new', label: 'New pricing sheet', ar: 'كشف تسعير جديد', icon: 'calculator', hidden: true, min: 'work', translated: true },
+      { to: '/pricing/edit', label: 'Edit pricing sheet', ar: 'تعديل كشف التسعير', icon: 'calculator', hidden: true, min: 'work', translated: true },
+      { to: '/pricing/lines', label: 'BOQ lines', ar: 'بنود جدول الكميات', icon: 'calculator', hidden: true, min: 'work', translated: true },
+      { to: '/pricing/compare', label: 'Compare suppliers', ar: 'مقارنة الموردين', icon: 'calculator', hidden: true, translated: true },
+      { to: '/pricing/quote-new', label: 'Ask a supplier to quote', ar: 'طلب عرض من مورد', icon: 'calculator', hidden: true, min: 'work', translated: true },
+      { to: '/pricing/quote', label: 'Supplier quote', ar: 'عرض المورد', icon: 'calculator', hidden: true, translated: true },
+    ],
+  },
+  {
     key: 'marketing', label: 'Marketing', ar: 'التسويق', icon: 'megaphone', base: '/marketing',
     blurb: 'Plan, create, schedule and publish, and the brand behind it.',
     blurbAr: 'التخطيط والإنشاء والجدولة والنشر، والعلامة التجارية خلف ذلك.',

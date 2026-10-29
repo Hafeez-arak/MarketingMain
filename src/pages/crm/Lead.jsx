@@ -14,6 +14,7 @@ import { RW } from './words'
 import { useCrmBase, field, fieldInline } from './useCrmBase'
 import { Dialog, Stars, TagChips, StatusBadge, BidChip, DueDate, NoAccess } from './parts'
 import { OrgForm } from '../contacts/parts'
+import { PricingPanel } from '../pricing/LeadPanel'
 
 // ─── CRM → one opportunity (v2) ────────────────────────────────────────────
 // 2026-10-28, dev/erp-pilot/CRM.md. Musa's opportunity record: the actions
@@ -279,6 +280,8 @@ export function CrmLead() {
           </p>
         )}
       </section>
+
+      <PricingPanel ws={ws} lead={lead} />
 
       <section className="space-y-2">
         <h2 className="text-sm font-semibold text-text">{w.activities} <span className="font-normal text-text-tertiary">{w.planned(plannedCount)}</span></h2>

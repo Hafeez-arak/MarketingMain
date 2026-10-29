@@ -22,6 +22,7 @@ const PARTS = {
   sales: { en: 'Leads', ar: 'العملاء المحتملون' }, crm: { en: 'CRM', ar: 'إدارة العملاء' },
   contacts: { en: 'Contacts', ar: 'جهات الاتصال' }, hr: { en: 'HR', ar: 'الموارد البشرية' },
   catalog: { en: 'Catalog', ar: 'الكتالوج' },
+  pricing: { en: 'Pricing', ar: 'التسعير' },
   tasks: { en: 'Tasks', ar: 'المهام' }, requests: { en: 'Requests', ar: 'الطلبات' },
 }
 

@@ -56,6 +56,14 @@ import { CatalogPage } from './pages/catalog'
 import { CatalogItem } from './pages/catalog/Item'
 import { CatalogItemForm } from './pages/catalog/ItemForm'
 import { CatalogFields } from './pages/catalog/Fields'
+import { PricingPage } from './pages/pricing'
+import { PricingSheetForm } from './pages/pricing/SheetForm'
+import { PricingSheetPage } from './pages/pricing/Sheet'
+import { PricingLines } from './pages/pricing/Lines'
+import { PricingCompare } from './pages/pricing/Compare'
+import { PricingQuoteNew } from './pages/pricing/QuoteNew'
+import { PricingQuote } from './pages/pricing/Quote'
+import { PricingSettings } from './pages/pricing/Settings'
 import { ContactsPage } from './pages/contacts/index'
 import { ContactsOrgPage } from './pages/contacts/Org'
 import { ContactsPeoplePage } from './pages/contacts/People'
@@ -282,6 +290,15 @@ function ProtectedApp() {
             <Route path="/catalog/new"           element={<CatalogItemForm />} />
             <Route path="/catalog/edit"          element={<CatalogItemForm key="edit" />} />
             <Route path="/catalog/fields"        element={<CatalogFields />} />
+            <Route path="/pricing"               element={<PricingPage />} />
+            <Route path="/pricing/new"           element={<PricingSheetForm mode="new" />} />
+            <Route path="/pricing/edit"          element={<PricingSheetForm mode="edit" key="edit" />} />
+            <Route path="/pricing/sheet"         element={<PricingSheetPage />} />
+            <Route path="/pricing/lines"         element={<PricingLines />} />
+            <Route path="/pricing/compare"       element={<PricingCompare />} />
+            <Route path="/pricing/quote-new"     element={<PricingQuoteNew />} />
+            <Route path="/pricing/quote"         element={<PricingQuote />} />
+            <Route path="/pricing/settings"      element={<PricingSettings />} />
             {/* ── Contacts ── Musa's ERP item 3, in our stack. */}
             <Route path="/contacts"              element={<ContactsPage />} />
             <Route path="/contacts/people"       element={<ContactsPeoplePage />} />
