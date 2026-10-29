@@ -467,7 +467,8 @@ select pg_temp.refused('attendance: View cannot press it', 'staff.marketing@arak
 -- Settings for the pairing and lateness: 08:00–17:00, 15 minutes' grace, from 1 September.
 update public.hr_settings set daily_hours = 9, schedule_from = '2026-09-01', repeat_punch_minutes = 3 where workspace_id = :arak;
 -- Clean days for the device: the last Wednesday and Thursday before today, without seed sessions for T-007.
-create function pg_temp.dow(p int) returns date as $$ select hr_today() - (((extract(dow from hr_today())::int - p + 7) % 7) + case when extract(dow from hr_today())::int = p then 7 else 0 end) $$ language sql;
+-- A day of that weekday at least a week back: always past, and past the three days an early-leave email waits.
+create function pg_temp.dow(p int) returns date as $$ select hr_today() - 7 - ((extract(dow from hr_today())::int - p + 7) % 7) $$ language sql;
 delete from public.hr_attendance where employee_id in (pg_temp.emp('T-007'), pg_temp.emp('T-004')) and day in (pg_temp.dow(3), pg_temp.dow(4));
 
 select pg_temp.refused('devices: Work cannot register one', 'staff.dev@arak-sa.com',
@@ -522,7 +523,7 @@ exception when others then
   insert into t (name, ok, detail) values ('devices: punches are final even below the app', sqlerrm like 'HR_PUNCH_FINAL%', sqlerrm);
 end $$;
 select pg_temp.eq('pairing: nothing is paired before the numbers are linked',
-  pg_temp.q('staff.marketing@arak-sa.com', format($s$select string_agg(device_user_no || '=' || state, ',' order by device_user_no, work_day) from public.hr_punch_days where workspace_id = %L and device_name = 'Door (test)'$s$, :arak)),
+  pg_temp.q('staff.marketing@arak-sa.com', format($s$select string_agg(device_user_no || '=' || state, ',' order by device_user_no, state) from public.hr_punch_days where workspace_id = %L and device_name = 'Door (test)'$s$, :arak)),
   '4=unlinked,7=unlinked,7=unlinked,99=unlinked');
 select pg_temp.refused('pairing: Work cannot link numbers', 'staff.dev@arak-sa.com',
   format($s$select public.hr_device_link(%L, %L)$s$, :arak, json_build_object('7', pg_temp.emp('T-007'))::text), 'HR_NO_ACCESS');
@@ -537,7 +538,7 @@ select pg_temp.eq('pairing: first punch in, last punch out, a device record',
   (select to_char(check_in at time zone 'Asia/Riyadh', 'HH24:MI') || '-' || to_char(check_out at time zone 'Asia/Riyadh', 'HH24:MI') || ':' || source
      from public.hr_attendance where employee_id = pg_temp.emp('T-004') and device_day = pg_temp.dow(4)), '07:50-17:05:device');
 select pg_temp.eq('pairing: the review shows each day''s state',
-  pg_temp.q('staff.marketing@arak-sa.com', format($s$select string_agg(device_user_no || '=' || state, ',' order by device_user_no, work_day) from public.hr_punch_days where workspace_id = %L and device_name = 'Door (test)'$s$, :arak)),
+  pg_temp.q('staff.marketing@arak-sa.com', format($s$select string_agg(device_user_no || '=' || state, ',' order by device_user_no, state) from public.hr_punch_days where workspace_id = %L and device_name = 'Door (test)'$s$, :arak)),
   '4=applied,7=applied,7=single,99=unlinked');
 do $$ begin
   update public.hr_attendance set check_in = check_in - interval '1 hour' where id = pg_temp.att('T-004', pg_temp.dow(4));
