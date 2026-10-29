@@ -22,6 +22,8 @@ export function WeeklyDrafts({ workspaceId, data, reload, setTab }) {
   const row = data.aiDrafts
   const thisWeek = weekOf()
   const current = row && row.week_of === thisWeek ? row : null
+  // Switched off in Settings: Mondays write nothing, the button still does.
+  const weeklyOff = data.settings?.weekly_drafts_enabled === false
   const [requesting, setRequesting] = useState(false)
   const [error, setError] = useState('')
   const [confirmAgain, setConfirmAgain] = useState(false)
@@ -111,7 +113,9 @@ export function WeeklyDrafts({ workspaceId, data, reload, setTab }) {
           <p className="text-xs text-text-tertiary mt-1">
             {current?.status === 'ready'
               ? `Week of ${shortDate(current.week_of)} · written ${dateTime(current.finished_at)} from your Brand Brain, the latest research, the calendar and past emails.`
-              : 'Every Monday at 07:30 Riyadh time, three options for the week\'s email, from your Brand Brain, the latest research, the calendar and how past emails did.'}
+              : weeklyOff
+                ? 'Weekly drafts are switched off in Settings, so none are written on Mondays. You can still write this week\'s now.'
+                : 'Every Monday at 07:30 Riyadh time, three options for the week\'s email, from your Brand Brain, the latest research, the calendar and how past emails did.'}
           </p>
         </div>
         {current?.status === 'ready' ? (
@@ -140,7 +144,7 @@ export function WeeklyDrafts({ workspaceId, data, reload, setTab }) {
         )}
 
         {!running && !current && row && (
-          <p className="text-xs text-text-tertiary">Last drafts were for the week of {shortDate(row.week_of)}. This week's arrive on Monday, or write them now.</p>
+          <p className="text-xs text-text-tertiary">Last drafts were for the week of {shortDate(row.week_of)}. {weeklyOff ? 'Weekly drafts are off, but you can write this week\'s now.' : 'This week\'s arrive on Monday, or write them now.'}</p>
         )}
 
         {!running && current?.status === 'ready' && (
@@ -201,7 +205,7 @@ export function WeeklyDrafts({ workspaceId, data, reload, setTab }) {
         )}
 
         {!running && !current && !row && (
-          <p className="text-xs text-text-tertiary">No drafts yet. The first arrive on Monday, or write them now.</p>
+          <p className="text-xs text-text-tertiary">{weeklyOff ? 'No drafts yet. Weekly drafts are off, but you can write this week\'s now.' : 'No drafts yet. The first arrive on Monday, or write them now.'}</p>
         )}
       </div>
 

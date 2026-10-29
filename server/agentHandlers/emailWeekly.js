@@ -133,6 +133,16 @@ export default async function handler(req, res) {
   const ws = q(workspaceId)
 
   try {
+    // ── Switched off in Email → Settings ──
+    // Only the schedule obeys it; the button is a person asking. select=* so
+    // a database without the column yet reads as "on", as it was before.
+    if (trigger === 'scheduled') {
+      const [settings] = await db(`email_settings?workspace_id=eq.${ws}&select=*`).catch(() => []) || []
+      if (settings?.weekly_drafts_enabled === false) {
+        return res.status(200).json({ ok: true, skipped: 'Weekly drafts are switched off in Email settings.' })
+      }
+    }
+
     // ── One writer per workspace-week ──
     const [existing] = await db(`email_ai_drafts?workspace_id=eq.${ws}&week_of=eq.${week}&select=id,status,started_at`) || []
     if (existing?.status === 'ready' && !force) {
