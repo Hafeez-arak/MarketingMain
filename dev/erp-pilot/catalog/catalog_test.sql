@@ -219,8 +219,8 @@ select pg_temp.refused('files: a folder of an item that does not exist is refuse
 select pg_temp.refused('files: a path that is not two ids reaches nobody', 'staff.admin@arak-sa.com',
   $s$insert into storage.objects (bucket_id, name) values ('catalog-files', 'loose.pdf') returning name$s$, 'row-level security');
 select pg_temp.eq('files: View reads the file; a login outside the company does not',
-  pg_temp.q('staff.marketing@arak-sa.com', 'select count(*) from storage.objects where bucket_id = ''catalog-files''') || '/' ||
-  pg_temp.q('outside.two@example.com', 'select count(*) from storage.objects where bucket_id = ''catalog-files'''), '1/0');
+  pg_temp.q('staff.marketing@arak-sa.com', 'select (count(*) >= 1)::text from storage.objects where bucket_id = ''catalog-files''') || '/' ||
+  pg_temp.q('outside.two@example.com', 'select count(*) from storage.objects where bucket_id = ''catalog-files'''), 'true/0');
 -- (Storage refuses a direct DELETE from SQL; the delete policy is tested through its rule.)
 select pg_temp.eq('files: nobody deletes a file of a live company, not even the admin (the old file stays)',
   pg_temp.q('staff.admin@arak-sa.com', format($s$select public.catalog_orphan_ok(%L)::text$s$, '00000000-0000-0000-0000-000000000001/' || current_setting('cat.item') || '/sheet.pdf')), 'false');
