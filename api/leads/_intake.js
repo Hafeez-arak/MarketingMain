@@ -139,12 +139,17 @@ export async function intakeWebsite(deps, { key, rows = [] }) {
   if (deps.checkMail) {
     try { mail = await deps.checkMail({ workspaceId, deadline: started + TOTAL_BUDGET_MS }) } catch (err) { mail = { error: String(err.message || err).slice(0, 300) } }
   }
+  // Auto-replies to qualified leads (_reply.js): queue the new ones, send
+  // those whose 15–20 minutes are up. Off until the company switches it on.
+  // A little past the round's budget: the Sheet waits up to a minute.
+  let replies = null
+  if (deps.autoReply) replies = await deps.autoReply({ workspaceId, deadline: started + TOTAL_BUDGET_MS + 10_000 }).catch(() => null)
   // The battle cards read back from Odoo, when one of the two daily times
   // (07:50, 13:00 Riyadh) has passed since the last read; else a no-op.
   if (deps.crmPull) await deps.crmPull({ workspaceId }).catch(() => {})
   // Is everything still working? (at most every 10 minutes; see _health.js)
   if (deps.health) await deps.health({ workspaceId }).catch(() => {})
-  return { status: 200, results, mail }
+  return { status: 200, results, mail, replies }
 }
 
 /** Time the website rows may take in one call, and the call as a whole. */

@@ -2,6 +2,7 @@ import { db } from '../agent/_supabase.js'
 import { sealSecret, openSecret } from '../email/_secrets.js'
 import { msConfig, createGraphMail } from '../email/_graph.js'
 import { checkMail } from './_mail.js'
+import { runAutoReplies } from './_reply.js'
 import { runHealth } from './_health.js'
 import { supabaseStorage } from './_files.js'
 import { checkWebsite } from './_website.js'
@@ -132,6 +133,7 @@ export function leadDeps() {
     storage: supabaseStorage({ url: SUPABASE_URL, key: SERVICE_KEY }),
   }
   deps.checkMail = (args) => checkMail(deps, args)
+  deps.autoReply = (args) => runAutoReplies(deps, args)
   deps.website = (domain) => checkWebsite(deps, domain)
   deps.health = (args) => runHealth(deps, { pageUrl: `${APP_URL}/leads`, ...args })
   // The battle cards read back from Odoo at 07:50 and 13:00 Riyadh (_crmCard.js).
