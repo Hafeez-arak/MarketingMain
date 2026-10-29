@@ -163,11 +163,12 @@ export async function fetchSuppliers(ws) {
 // ── Documents ──
 
 /** The company's documents this person may read (RLS decides), or one employee's. */
-export async function fetchDocuments(ws, { employeeId = '' } = {}) {
+export async function fetchDocuments(ws, { employeeId = '', kind = '' } = {}) {
   if (!ws) return { rows: [] }
   const { rows, error } = await readAll(() => {
     let q = supabase.from('company_documents').select(DOC_COLS).eq('workspace_id', ws)
     if (employeeId) q = q.eq('employee_id', employeeId)
+    if (kind) q = q.eq('link_kind', kind)
     return q.order('created_at', { ascending: false }).order('id')
   })
   return error ? { rows, ...fail(error) } : { rows }

@@ -1,4 +1,5 @@
 import { supabase } from '../supabaseClient'
+import { fetchDocuments as fetchEmployeeDocuments, fetchTypes as fetchDocumentTypes } from '../documents/client'
 
 // ─── HR: the browser's reads and writes (v2) ───────────────────────────────
 // 2026-10-28, parity pass 2026-10-29. Straight to the database with the
@@ -11,7 +12,6 @@ import { supabase } from '../supabaseClient'
 // message; the screens turn them into words with errorKey() (logic.js).
 
 const EMP_COLS = 'id,workspace_id,employee_no,name_en,name_ar,job_title,job_id,trade,employment_type,is_direct_labor,department_id,manager_id,hire_date,status,end_date,end_reason,work_email,work_phone,user_id,device_user_no,created_at,updated_at'
-const DOC_COLS = 'id,employee_id,doc_type,doc_number,issue_date,expiry_date,notes,file_path,file_name,file_size,file_type'
 const CONTRACT_COLS = 'id,employee_id,contract_no,contract_type,start_date,end_date,weekly_hours,status,notes,created_at'
 const out = ({ data, error }, key = 'rows') => (error ? { [key]: key === 'rows' ? [] : null, error: error.message } : { [key]: data ?? (key === 'rows' ? [] : null) })
 
@@ -35,11 +35,15 @@ export const fetchPrivate = (ws, employeeId) =>
     .select('employee_id,nationality,id_type,id_number,birth_date,gender,mobile,emergency_contact,emergency_phone,address,notes')
     .eq('workspace_id', ws).eq('employee_id', employeeId).maybeSingle().then(r => out(r, 'row'))
 
-/** Papers: one person's, or the company's (the expiring-soon view). RLS returns only what this login may read. */
-export function fetchDocuments(ws, employeeId = '') {
-  let q = supabase.from('hr_documents').select(DOC_COLS).eq('workspace_id', ws)
-  if (employeeId) q = q.eq('employee_id', employeeId)
-  return q.order('expiry_date', { ascending: true, nullsFirst: false }).limit(5000).then(r => out(r))
+/**
+ * Papers: one person's, or the company's (the expiring-soon view). They live
+ * in Documents since 20261201_documents_3_hr_move.sql: these are the
+ * employees' documents this login may read, with the company's types (for
+ * each paper's name and alert days). `error` is in words, not a message.
+ */
+export async function fetchDocuments(ws, employeeId = '') {
+  const [d, t] = await Promise.all([fetchEmployeeDocuments(ws, { employeeId, kind: 'employee' }), fetchDocumentTypes(ws)])
+  return { rows: d.rows, types: t.rows, error: d.error || t.error || '' }
 }
 
 /** Contracts: one person's, or all of the company's (Manage; the person themselves sees their own). */
@@ -130,39 +134,13 @@ export async function deleteEmployee(ws, id) {
   return { row: { id } }
 }
 
-const DOC_KEYS = ['doc_type', 'doc_number', 'issue_date', 'expiry_date', 'notes', 'file_path', 'file_name', 'file_size', 'file_type']
-export const saveDocument = (ws, me, employeeId, id, fields) => (id
-  ? supabase.from('hr_documents').update(clean(fields, DOC_KEYS)).eq('workspace_id', ws).eq('id', id).select('id').maybeSingle()
-  : supabase.from('hr_documents').insert({ ...clean(fields, DOC_KEYS), workspace_id: ws, employee_id: employeeId, created_by: me }).select('id').single()
-).then(r => out(r, 'row'))
-
-/** Delete a paper and its file. */
-export async function deleteDocument(ws, id, filePath = '') {
-  const r = await supabase.from('hr_documents').delete().eq('workspace_id', ws).eq('id', id).select('id')
-  if (r.error) return { error: r.error.message }
-  if (filePath) await removePaperFiles([filePath])
-  return { row: { id } }
-}
-
-// ── Paper files (private bucket 'hr-papers', <workspace>/<employee>/<file>) ──
-
-/** Upload one file; the stored name is a fresh id so nothing is overwritten. */
-export async function uploadPaperFile(path, file) {
-  const r = await supabase.storage.from('hr-papers').upload(path, file, { contentType: file.type, upsert: false })
-  return r.error ? { error: r.error.message } : { path }
-}
+// ── Files of papers kept before they moved to Documents (bucket 'hr-papers') ──
 
 /** Remove files from Storage; a failure only leaves an orphan under the company's folder. */
 export async function removePaperFiles(paths) {
   const list = (paths || []).filter(Boolean)
   if (!list.length) return
   try { await supabase.storage.from('hr-papers').remove(list) } catch { /* the company folder is cleaned when the company is deleted */ }
-}
-
-/** A short-lived link to open a paper's file. */
-export async function paperFileUrl(path) {
-  const r = await supabase.storage.from('hr-papers').createSignedUrl(path, 120)
-  return r.error ? { error: r.error.message } : { url: r.data.signedUrl }
 }
 
 // ── Contracts: a draft is edited; the rest is a change of status ──

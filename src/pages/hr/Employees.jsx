@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Button, PageHeader, Skeleton } from '../../components/ui/index'
 import { useT } from '../../lib/i18n'
 import { filterEmployees, groupEmployees, expiringDocs, nameOf, riyadhToday } from '../../lib/hr/logic'
+import { typeName } from '../../lib/documents/logic'
 import { saveEmployee, savePrivate, fetchDocuments, fetchRunningContracts } from '../../lib/hr/client'
 import { HW } from './words'
 import { useHrBase, fieldInline, empName, fmtDate } from './useHrBase'
@@ -32,6 +33,7 @@ export function HrEmployees() {
   const status = params.has('status') ? (params.get('status') === 'all' ? '' : params.get('status')) : 'active'
   const [creating, setCreating] = useState(false)
   const [docs, setDocs] = useState(null)
+  const [docTypes, setDocTypes] = useState({})
   const [running, setRunning] = useState(null)
   const today = riyadhToday()
   const manage = can('manage')
@@ -41,11 +43,11 @@ export function HrEmployees() {
     if (!ws) return
     let cancelled = false
     fetchRunningContracts(ws).then(out => { if (!cancelled && !out.error) setRunning(new Set(out.rows)) })
-    if (manage) fetchDocuments(ws).then(out => { if (!cancelled) setDocs(out.rows) })
+    if (manage) fetchDocuments(ws).then(out => { if (!cancelled) { setDocs(out.rows); setDocTypes(Object.fromEntries(out.types.map(x => [x.id, x]))) } })
     return () => { cancelled = true }
   }, [ws, manage])
 
-  const alerts = useMemo(() => (docs && employees ? expiringDocs(docs, employees, today) : []), [docs, employees, today])
+  const alerts = useMemo(() => (docs && employees ? expiringDocs(docs, employees, docTypes, today) : []), [docs, employees, docTypes, today])
   const expiringIds = useMemo(() => new Set(alerts.map(d => d.employee_id)), [alerts])
   const shown = useMemo(() => filterEmployees(employees || [], { q, department: dept, status, kind, expiringIds, runningIds: running })
     .sort((a, b) => nameOf(a, lang).localeCompare(nameOf(b, lang), lang)), [employees, q, dept, status, kind, expiringIds, running, lang])
@@ -71,7 +73,7 @@ export function HrEmployees() {
           <ul className="mt-1 space-y-0.5 text-amber-900">
             {alerts.slice(0, 8).map(d => (
               <li key={d.id} className="text-xs">
-                <Link to={`/hr/employee?id=${d.employee_id}`} className="hover:underline" dir="auto">{empName(employees, d.employee_id, lang)}</Link> · {t.docTypes[d.doc_type]}:{' '}
+                <Link to={`/hr/employee?id=${d.employee_id}`} className="hover:underline" dir="auto">{empName(employees, d.employee_id, lang)}</Link> · {typeName(docTypes[d.type_id], lang) || d.title}:{' '}
                 {d.expiry_date < today ? t.expiredOn(fmtDate(d.expiry_date, lang)) : t.expiresOn(fmtDate(d.expiry_date, lang))}
               </li>
             ))}

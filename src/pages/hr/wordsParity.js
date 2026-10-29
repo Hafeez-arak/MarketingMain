@@ -8,7 +8,7 @@ export const PW = {
     employeesSubtitle: 'The company\'s people: who they are, where they sit, who they report to. HR managers keep the personal file, papers and contracts.',
     departmentsSubtitle: 'Departments (with the one they sit under) and the job positions. An archived one keeps its history and takes no new people.',
     leaveSubtitle: 'Requests and decisions, who is off, and the balances. HR managers decide; nobody decides their own.',
-    documentsSubtitle: d => `Papers of people still employed that have expired or expire within ${d} days, soonest first. HR managers only.`,
+    documentsSubtitle: () => 'Papers of people still employed that have expired or are within their type\'s alert days (set in Documents), soonest first. HR managers only.',
     settingsSubtitle: 'The company\'s leave types.',
 
     pickEmployee: 'Choose an employee', prev: 'Previous', next: 'Next', labourKind: 'Kind of work',
@@ -116,7 +116,7 @@ export const PW = {
     employeesSubtitle: 'موظفو الشركة: من هم، وأين يعملون، ولمن يتبعون. الملف الشخصي والوثائق والعقود بيد مديري الموارد البشرية.',
     departmentsSubtitle: 'الأقسام (والقسم الذي يتبع له كل منها) والمسميات الوظيفية. المؤرشف يحتفظ بتاريخه ولا يُضاف إليه أحد.',
     leaveSubtitle: 'الطلبات وقراراتها، ومن في إجازة، والأرصدة. يقرر مديرو الموارد البشرية، ولا أحد يقرر لنفسه.',
-    documentsSubtitle: d => `وثائق الموظفين الحاليين التي انتهت أو تنتهي خلال ${d} يومًا، الأقرب أولًا. لمديري الموارد البشرية فقط.`,
+    documentsSubtitle: () => 'وثائق الموظفين الحاليين التي انتهت أو دخلت أيام تنبيه نوعها (تُحدَّد في المستندات)، الأقرب أولًا. لمديري الموارد البشرية فقط.',
     settingsSubtitle: 'أنواع الإجازات في الشركة.',
 
     pickEmployee: 'اختر موظفًا', prev: 'السابق', next: 'التالي', labourKind: 'نوع العمالة',

@@ -9,14 +9,13 @@
 // Days are 'YYYY-MM-DD' strings in Riyadh's calendar and times 'HH:MM'
 // (or 'HH:MM:SS' as Postgres returns them). No React, no IO.
 
+import { docState as documentState } from '../documents/logic'
+
 export const DOC_WARN_DAYS = 60 // papers expiring within this many days are "soon" (his number)
-export const DOC_TYPES = ['national_id', 'iqama', 'passport', 'work_permit', 'health_cert', 'driving_license', 'other']
 export const LEAVE_STATUSES = ['pending', 'approved', 'rejected', 'cancelled']
 export const CONTRACT_STATUSES = ['draft', 'running', 'expired', 'cancelled']
 export const EMPLOYMENT_TYPES = ['full_time', 'part_time', 'contractor']
 export const ID_TYPES = ['national_id', 'iqama', 'passport']
-export const PAPER_MAX_BYTES = 10 * 1024 * 1024
-export const PAPER_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
 
 const DAY_MS = 86_400_000
 const toUtc = day => Date.parse(`${day}T00:00:00Z`)
@@ -108,19 +107,16 @@ export function groupEmployees(rows, by = '') {
 
 // ── Papers and contracts ──
 
-/** 'none' (no expiry) | 'expired' | 'soon' | 'ok', and the days left. */
-export function docState(doc, today) {
-  if (!doc?.expiry_date) return { state: 'none', days: null }
-  const days = daysBetween(today, doc.expiry_date)
-  return { state: days < 0 ? 'expired' : days <= DOC_WARN_DAYS ? 'soon' : 'ok', days }
-}
-
-/** Papers of active employees that have expired or expire soon, soonest first. */
-export function expiringDocs(docs, employees, today) {
+/**
+ * Papers of active employees that have expired or are within their type's
+ * alert days (the Documents app's rule), soonest first. `typesById` are the
+ * company's document types.
+ */
+export function expiringDocs(docs, employees, typesById, today) {
   const active = new Set(employees.filter(e => e.status === 'active').map(e => e.id))
   return docs
-    .filter(d => active.has(d.employee_id) && ['expired', 'soon'].includes(docState(d, today).state))
-    .sort((a, b) => a.expiry_date.localeCompare(b.expiry_date))
+    .filter(d => active.has(d.employee_id) && ['expired', 'expiring'].includes(documentState(d, typesById[d.type_id], today)))
+    .sort((a, b) => String(a.expiry_date).localeCompare(String(b.expiry_date)))
 }
 
 /** Running, with an end date within DOC_WARN_DAYS (his "ending soon"; past-due ones count). */
@@ -233,25 +229,6 @@ export function errorKey(message = '') {
   ]) if (m.includes(needle)) return key
   return ''
 }
-
-// ── Paper files ──
-
-/** What is wrong with a file before it is sent, or '' (keys of the words file's `errors`). */
-export function paperFileProblem(file) {
-  if (!file) return ''
-  if (!PAPER_TYPES.includes(file.type)) return 'FILE_TYPE'
-  if (file.size > PAPER_MAX_BYTES) return 'FILE_SIZE'
-  if (file.size <= 0) return 'FILE_SIZE'
-  return ''
-}
-
-/** <workspace>/<employee>/<id>.<ext>: the folder rule of the bucket, a name with nothing from the user in it. */
-export function paperPath(ws, employeeId, file, id = crypto.randomUUID()) {
-  const ext = ({ 'application/pdf': 'pdf', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' })[file.type] || 'bin'
-  return `${ws}/${employeeId}/${id}.${ext}`
-}
-
-export const formatBytes = n => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`)
 
 // ── History ──
 

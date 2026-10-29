@@ -2,16 +2,17 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Button, PageHeader, Skeleton, Spinner } from '../../components/ui/index'
 import { useT } from '../../lib/i18n'
-import {
-  nameOf, docState, contractEndingSoon, ledgerBalance, riyadhToday, matchLogin, paperFileProblem, paperPath, formatBytes, DOC_TYPES,
-} from '../../lib/hr/logic'
+import { nameOf, contractEndingSoon, ledgerBalance, riyadhToday, matchLogin } from '../../lib/hr/logic'
+import { docState as documentState, daysLeft, typeName } from '../../lib/documents/logic'
 import { buildDays, sheetTotals, hm } from '../../lib/hr/attendance'
 import { fetchRecordsBetween, fetchPunchDays, fetchFlags, fetchAttendanceSettings } from '../../lib/hr/attendanceClient'
 import { AW } from './attendance/words'
 import {
-  saveEmployee, savePrivate, fetchPrivate, deleteEmployee, fetchDocuments, saveDocument, deleteDocument, fetchContracts, saveContract,
-  fetchLeaveTypes, fetchAllocations, fetchLeaveRequests, fetchLogins, uploadPaperFile, removePaperFiles, paperFileUrl,
+  saveEmployee, savePrivate, fetchPrivate, deleteEmployee, fetchDocuments, fetchContracts, saveContract,
+  fetchLeaveTypes, fetchAllocations, fetchLeaveRequests, fetchLogins,
 } from '../../lib/hr/client'
+import { useAuth } from '../../store/auth'
+import { DW } from '../documents/words'
 import { HW } from './words'
 import { useHrBase, field, fmtDate, empName, STATE_TONE, contractTone } from './useHrBase'
 import { Dialog, ErrorText, Field, Pill, NoAccess } from './parts'
@@ -22,14 +23,17 @@ import { History } from './History'
 // ─── HR → one employee (v2) ────────────────────────────────────────────────
 // 2026-10-28, parity pass 2026-10-29. /hr/employee?id=. The profile, their
 // team, their leave balances today and attendance this month; for HR
-// managers (his hr.manage) or the person themselves, their papers (each with
-// an optional scan) and contracts; for HR managers also the personal file
+// managers (his hr.manage) or the person themselves, their papers (kept in
+// the Documents app since 2026-10-29: this page lists them and opens them
+// there) and contracts; for HR managers also the personal file
 // and the history of every change. Manage edits, ends employment, links a
 // login (matched by the work email), and deletes a person who was never used.
 
 export function HrEmployee() {
   const { t, lang, dir } = useT(HW)
   const { t: at } = useT(AW)
+  const { t: dw } = useT(DW)
+  const { canSection } = useAuth()
   const base = useHrBase()
   const { ws, me, can, employees, departments, jobs, error, reload } = base
   const navigate = useNavigate()
@@ -43,6 +47,7 @@ export function HrEmployee() {
   const seesPapers = manage || own
 
   const [docs, setDocs] = useState(null)
+  const [docTypes, setDocTypes] = useState({})
   const [contracts, setContracts] = useState(null)
   const [types, setTypes] = useState([])
   const [allocations, setAllocations] = useState([])
@@ -64,7 +69,7 @@ export function HrEmployee() {
       fetchPunchDays(ws, { from: `${month}-01`, to: today, employeeIds: [id], all: true }), fetchFlags(ws, { from: `${month}-01`, to: today, employeeIds: [id], all: true }),
       fetchAttendanceSettings(ws), manage ? fetchLogins(ws) : Promise.resolve({ rows: [] }), manage ? fetchPrivate(ws, id) : Promise.resolve({ row: null }),
     ])
-    setDocs(d.rows); setContracts(c.rows); setTypes(ty.rows); setAllocations(al.rows); setRequests(r.rows)
+    setDocs(d.rows); setDocTypes(Object.fromEntries(d.types.map(x => [x.id, x]))); setContracts(c.rows); setTypes(ty.rows); setAllocations(al.rows); setRequests(r.rows)
     setAttendance({ records: a.rows, punchDays: p.rows, flags: f.rows }); setSettings(s.row); setLogins(l.rows); setPersonal(pr.row)
     setLoadError(d.error || c.error || ty.error || al.error || r.error || a.error || p.error || f.error || pr.error || '')
     setTick(x => x + 1)
@@ -86,26 +91,6 @@ export function HrEmployee() {
   const balanceTypes = types.filter(ty => ty.needs_balance && ty.active)
   const close = () => setDialog(null)
   const saved = async out => { if (!out.error) { close(); await reload(); await load() } return out }
-
-  /** A paper and its optional file: upload first, save the row, then drop the replaced file. */
-  async function savePaper(doc, fields, file, dropFile) {
-    let extra = {}
-    if (file) {
-      const path = paperPath(ws, e.id, file)
-      const up = await uploadPaperFile(path, file)
-      if (up.error) return up
-      extra = { file_path: path, file_name: file.name, file_size: file.size, file_type: file.type }
-    } else if (dropFile) extra = { file_path: null, file_name: null, file_size: null, file_type: null }
-    const out = await saveDocument(ws, me, e.id, doc.id, { ...fields, ...extra })
-    if (out.error) { if (file) await removePaperFiles([extra.file_path]); return out }
-    if ((file || dropFile) && doc.file_path) await removePaperFiles([doc.file_path])
-    return out
-  }
-
-  async function openFile(path) {
-    const out = await paperFileUrl(path)
-    if (out.error) setActionError(out.error); else window.open(out.url, '_blank', 'noopener')
-  }
 
   async function removePerson() {
     if (!window.confirm(t.confirmDeleteEmployee)) return
@@ -224,32 +209,36 @@ export function HrEmployee() {
         </section>
       </div>
 
-      {/* Papers */}
+      {/* Papers: kept in the Documents app */}
       <section className="bg-white border border-border p-4 space-y-3">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-text">{t.papers}</h2>
-          {manage && <Button size="xs" variant="secondary" onClick={() => setDialog({ doc: {} })}>{t.addPaper}</Button>}
+          <span className="flex items-center gap-3">
+            {seesPapers && canSection('documents', 'view') && <Link to="/documents" className="text-[11px] underline text-text-secondary">{dw.hr.moreInDocuments}</Link>}
+            {manage && canSection('documents', 'manage') && <Link to={`/documents/new?employee=${e.id}`} className="text-[11px] border border-border px-2 py-1 hover:border-stone-400">{dw.hr.addPaper}</Link>}
+          </span>
         </div>
         {!seesPapers ? <p className="text-xs text-text-tertiary">{t.papersHidden}</p> : docs === null ? <Spinner size="sm" /> : docs.length === 0 ? <p className="text-xs text-text-tertiary">{t.noPapers}</p> : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
-              <thead><tr className="text-text-tertiary"><th className="text-start font-medium py-1">{t.docType}</th><th className="text-start font-medium">{t.docNumber}</th><th className="text-start font-medium">{t.issueDate}</th><th className="text-start font-medium">{t.expiryDate}</th><th className="text-start font-medium">{t.currentFile}</th><th /></tr></thead>
-              <tbody>{docs.map(d => {
-                const st = docState(d, today)
+              <thead><tr className="text-text-tertiary"><th className="text-start font-medium py-1">{t.docType}</th><th className="text-start font-medium">{t.docNumber}</th><th className="text-start font-medium">{t.issueDate}</th><th className="text-start font-medium">{t.expiryDate}</th></tr></thead>
+              <tbody>{docs.filter(d => !d.archived_at).map(d => {
+                const state = documentState(d, docTypes[d.type_id], today)
+                const left = daysLeft(d, today)
+                const row = <>{typeName(docTypes[d.type_id], lang) || d.title}{d.notes && <span className="block text-text-tertiary" dir="auto">{d.notes}</span>}</>
                 return (
                   <tr key={d.id} className="border-t border-border">
-                    <td className="py-1.5">{t.docTypes[d.doc_type]}{d.notes && <span className="block text-text-tertiary" dir="auto">{d.notes}</span>}</td>
-                    <td><bdi dir="ltr">{d.doc_number}</bdi></td>
+                    <td className="py-1.5">{canSection('documents', 'view') ? <Link to={`/documents/document?id=${d.id}`} className="hover:underline">{row}</Link> : row}</td>
+                    <td><bdi dir="ltr">{d.number}</bdi></td>
                     <td>{fmtDate(d.issue_date, lang)}</td>
-                    <td>{d.expiry_date ? <span className="flex flex-wrap items-center gap-1.5">{fmtDate(d.expiry_date, lang)} {st.state !== 'ok' && <Pill tone={STATE_TONE[st.state]}>{st.days < 0 ? `${t.docStates.expired} ${t.expiredAgo(-st.days)}` : t.expiresIn(st.days)}</Pill>}</span> : '—'}</td>
-                    <td>{d.file_path ? <button type="button" className="underline text-text-secondary" onClick={() => openFile(d.file_path)} title={d.file_name}>{t.openFile}{d.file_size ? ` (${formatBytes(d.file_size)})` : ''}</button> : <span className="text-text-tertiary">—</span>}</td>
-                    <td className="text-end">{manage && <button type="button" className="underline text-text-secondary" onClick={() => setDialog({ doc: d })}>{t.edit}</button>}</td>
+                    <td>{state === 'draft' ? <Pill tone={STATE_TONE.soon}>{dw.states.draft}</Pill> : d.expiry_date ? <span className="flex flex-wrap items-center gap-1.5">{fmtDate(d.expiry_date, lang)} {state === 'expired' && <Pill tone={STATE_TONE.expired}>{`${t.docStates.expired} ${t.expiredAgo(-left)}`}</Pill>}{state === 'expiring' && <Pill tone={STATE_TONE.soon}>{t.expiresIn(left)}</Pill>}</span> : '—'}</td>
                   </tr>
                 )
               })}</tbody>
             </table>
           </div>
         )}
+        <p className="text-[11px] text-text-tertiary">{dw.hr.fromDocuments}{manage && !canSection('documents', 'manage') ? ` ${dw.hr.needsDocuments}` : ''}</p>
       </section>
 
       {/* Contracts */}
@@ -314,13 +303,6 @@ export function HrEmployee() {
       {dialog === 'login' && (
         <Dialog title={t.login} onClose={close}>
           <LoginForm employee={e} logins={logins} employees={employees} onCancel={close} onSubmit={userId => saveEmployee(ws, me, e.id, { user_id: userId }).then(saved)} />
-        </Dialog>
-      )}
-      {dialog?.doc && (
-        <Dialog title={dialog.doc.id ? t.edit : t.addPaper.replace('+ ', '')} onClose={close}>
-          <DocForm initial={dialog.doc} onCancel={close}
-            onSubmit={(fields, file, dropFile) => savePaper(dialog.doc, fields, file, dropFile).then(saved)}
-            onDelete={dialog.doc.id ? () => deleteDocument(ws, dialog.doc.id, dialog.doc.file_path).then(saved) : null} />
         </Dialog>
       )}
       {dialog === 'contract' && (
@@ -400,47 +382,6 @@ function LoginForm({ employee, logins, employees, onSubmit, onCancel }) {
         </select>
       </Field>
       <FormFoot busy={s.busy} error={s.error} onCancel={onCancel} />
-    </form>
-  )
-}
-
-function DocForm({ initial, onSubmit, onCancel, onDelete }) {
-  const { t, dir } = useT(HW)
-  const [f, setF] = useState({ doc_type: initial.doc_type || 'iqama', doc_number: initial.doc_number || '', issue_date: initial.issue_date || '', expiry_date: initial.expiry_date || '', notes: initial.notes || '' })
-  const [file, setFile] = useState(null)
-  const [dropFile, setDropFile] = useState(false)
-  const set = (k, v) => setF(x => ({ ...x, [k]: v }))
-  const s = useSubmit(onSubmit)
-  const problem = paperFileProblem(file)
-  return (
-    <form dir={dir} className="space-y-3" onSubmit={ev => {
-      ev.preventDefault()
-      if (problem) { s.setError(t.errors[problem]); return }
-      s.run(f, file, dropFile)
-    }}>
-      <div className="grid grid-cols-2 gap-2">
-        <Field label={t.docType}>
-          <select value={f.doc_type} onChange={ev => set('doc_type', ev.target.value)} className={field}>
-            {DOC_TYPES.map(k => <option key={k} value={k}>{t.docTypes[k]}</option>)}
-          </select>
-        </Field>
-        <Field label={t.docNumber}><input value={f.doc_number} onChange={ev => set('doc_number', ev.target.value)} className={field} dir="ltr" /></Field>
-        <Field label={t.issueDate}><input type="date" value={f.issue_date} onChange={ev => set('issue_date', ev.target.value)} className={field} /></Field>
-        <Field label={t.expiryDate}><input type="date" value={f.expiry_date} min={f.issue_date || undefined} onChange={ev => set('expiry_date', ev.target.value)} className={field} /></Field>
-      </div>
-      <Field label={t.notes} hint={f.doc_type === 'other' ? t.otherHelp : null}>
-        <input value={f.notes} required={f.doc_type === 'other'} onChange={ev => set('notes', ev.target.value)} className={field} dir="auto" />
-      </Field>
-      <Field label={initial.file_path && !dropFile ? t.replaceFile : t.attachFile} hint={t.fileHelp}>
-        <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp" onChange={ev => { setFile(ev.target.files?.[0] || null); setDropFile(false) }} className="block w-full text-xs mt-1" />
-      </Field>
-      {initial.file_path && !file && (
-        <label className="flex items-center gap-2 text-xs text-text-secondary">
-          <input type="checkbox" checked={dropFile} onChange={ev => setDropFile(ev.target.checked)} />{t.removeFile}: <span dir="auto">{initial.file_name}</span>
-        </label>
-      )}
-      {s.busy && file && <p className="text-[11px] text-text-tertiary">{t.uploading}</p>}
-      <FormFoot busy={s.busy} error={s.error} onCancel={onCancel} onDelete={onDelete} />
     </form>
   )
 }
