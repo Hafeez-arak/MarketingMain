@@ -208,7 +208,8 @@ set search_path = public
 as $$
 declare
   t    public.document_types%rowtype;
-  sync boolean := current_setting('documents.sync', true) = (case when tg_op = 'DELETE' then old.id else new.id end)::text;
+  -- coalesce: the setting does not exist yet in a fresh session (null, not false).
+  sync boolean := coalesce(current_setting('documents.sync', true) = (case when tg_op = 'DELETE' then old.id else new.id end)::text, false);
 begin
   if tg_op = 'DELETE' then
     if public.documents_company_gone(old.workspace_id) then
