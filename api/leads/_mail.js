@@ -618,7 +618,7 @@ export const MAX_EMAIL_FILE = 4_300_000
  * the email moves folder, out of Junk say). Read only, Mail.Read.
  * Returns { lead, mailboxes, msg, auth } or { status, error }.
  */
-async function findMessage(deps, { workspaceId, leadId, select }) {
+export async function findMessage(deps, { workspaceId, leadId, select }) {
   const [lead] = await deps.db(`leads?id=eq.${leadId}&workspace_id=eq.${workspaceId}&source=eq.email&select=id,mailbox,source_ref,subject,received_at,link`) || []
   if (!lead) return { status: 404, error: 'That email is not a lead of this company.' }
   const mailboxes = await deps.db(`lead_mailboxes?workspace_id=eq.${workspaceId}&select=*`) || []

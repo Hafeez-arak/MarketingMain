@@ -156,6 +156,8 @@ const REPLIES = [
   },
 ]
 
+let autoReplySince = null
+
 window.fetch = async (input, init = {}) => {
   const url = typeof input === 'string' ? input : input.url
   if (url.includes('/src/') || url.includes('/node_modules/') || url.includes('/@')) return original(input, init)
@@ -191,6 +193,18 @@ window.fetch = async (input, init = {}) => {
     })))
   }
   if (url.includes('/api/leads/status')) return json(status)
+  // Auto-replies (made up): on, one mailbox with a signature, one without.
+  if (url.includes('/api/leads/auto_reply_status')) {
+    return json({ ok: true, ready: true, since: autoReplySince, counts: { sent: 3, skipped: 1 }, mailboxes: [
+      { id: 'mb-1', email: 'a.box@harness.example', label: 'info@harness.example', can_send: true, signature: { from: 'Drafts: (no subject)', at: '2026-10-29T11:32:00Z', pictures: 4 } },
+      { id: 'mb-2', email: 'info@other.example', label: '', can_send: true, signature: null },
+    ] })
+  }
+  if (url.includes('/api/leads/set_auto_reply')) {
+    autoReplySince = JSON.parse(init.body || '{}').on ? new Date().toISOString() : null
+    return json({ ok: true, since: autoReplySince })
+  }
+  if (url.includes('/api/leads/copy_signature')) return json({ ok: true, from: 'Drafts: (no subject)', pictures: 4 })
   // The sales team (sales_team for the list, team for the settings card).
   if (url.includes('/rest/v1/rpc/sales_team')) return json(TEAM.map(({ user_id, email, full_name, approver, all_website_leads }) => ({ user_id, email, full_name, approver, all_website_leads })))
   if (url.includes('/api/leads/team_save')) {

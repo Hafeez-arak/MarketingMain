@@ -9,6 +9,7 @@ import LeadsBoard from './Board'
 import Pipeline, { AddLeadDialog } from './Pipeline'
 import CrmCard from './CrmCard'
 import TeamCard from './TeamCard'
+import AutoReplyCard from './AutoReplyCard'
 import ReplyTest from './ReplyTest'
 import { RULE_LABELS } from '../../lib/leads/qualify'
 import {
@@ -208,6 +209,7 @@ export default function LeadAgent() {
                 onChange={(crm) => setStatus((st) => ({ ...st, crm }))} onError={setError} />
               <TeamCard workspaceId={activeWorkspaceId} team={team} loading={loading} odooConnected={Boolean(status?.crm?.connected)}
                 onChange={setTeam} onError={setError} />
+              <AutoReplyCard workspaceId={activeWorkspaceId} onError={setError} />
             </div>
             <Connection workspaceId={activeWorkspaceId} status={status} loading={loading} onChange={setStatus} onError={setError} onReload={reload} now={now} />
           </div>

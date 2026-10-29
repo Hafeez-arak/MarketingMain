@@ -12,6 +12,7 @@ import { crmTeams, setCrmTeam, pullCards } from './_crmCard.js'
 import { assignLead, teamList, teamSave, teamCheckOdoo } from './_assign.js'
 import { addLead, trackLead, deleteLead } from './_pipeline.js'
 import { leadDeps, openRouterKey, hasDeploymentKey, describeKey, sendAlert } from './_deps.js'
+import { copySignature } from './_reply.js'
 import { previewLenses } from '../agent/_investigate.js'
 
 // ─── /api/leads/<action> ───────────────────────────────────────────────────
@@ -314,6 +315,54 @@ const actions = {
   async health_check_now({ workspaceId }) {
     const out = await leadDeps().health({ workspaceId, force: true })
     return { issues: (out.issues || []).map((i) => ({ key: i.key, title: i.title })), sent: Boolean(out.sent?.ok), error: out.error || '' }
+  },
+
+  /**
+   * Auto-replies (2026-10-29): on or off, each mailbox's signature, and what
+   * was sent. Read apart from status: the columns arrive with migration
+   * 20261107, and until then this says so instead of breaking the page.
+   */
+  async auto_reply_status({ workspaceId }) {
+    let since
+    let mailboxes
+    try {
+      const [row] = await db(`lead_agent_settings?workspace_id=eq.${workspaceId}&select=auto_reply_since`) || []
+      since = row?.auto_reply_since || null
+      mailboxes = (await db(`lead_mailboxes?workspace_id=eq.${workspaceId}&select=id,email,label,can_send,reply_signature&order=created_at`) || [])
+        .map(({ reply_signature: s, ...m }) => ({ ...m, signature: s?.html ? { from: s.copied_from || '', at: s.copied_at || null, pictures: (s.images || []).length } : null }))
+    } catch {
+      return { ready: false }
+    }
+    const rows = await db(`lead_replies?workspace_id=eq.${workspaceId}&status=neq.test&select=status`) || []
+    const counts = rows.reduce((c, r) => ({ ...c, [r.status]: (c[r.status] || 0) + 1 }), {})
+    return { ready: true, since, mailboxes, counts }
+  },
+
+  async set_auto_reply({ workspaceId, body }) {
+    await settingsFor(workspaceId)
+    try {
+      const [row] = await db(`lead_agent_settings?workspace_id=eq.${workspaceId}`, {
+        method: 'PATCH', prefer: 'return=representation',
+        // On = from now: leads that arrived before are never answered.
+        body: { auto_reply_since: body.on ? new Date().toISOString() : null, updated_at: new Date().toISOString() },
+      }) || []
+      // Off cancels what was waiting: switching on again must not send them late.
+      if (!body.on) {
+        await db(`lead_replies?workspace_id=eq.${workspaceId}&status=eq.due&sent_at=is.null`, {
+          method: 'PATCH', prefer: 'return=minimal', body: { status: 'skipped', skip_reason: 'Auto-replies were switched off before it went.', updated_at: new Date().toISOString() },
+        })
+      }
+      return { since: row?.auto_reply_since || null }
+    } catch {
+      return fail(503, 'The database is not ready for auto-replies yet (migration 20261107).')
+    }
+  },
+
+  async copy_signature({ workspaceId, body }) {
+    if (!isUuid(body.mailbox_id)) return fail(400, 'Which mailbox?')
+    const out = await copySignature(leadDeps(), { workspaceId, mailboxId: body.mailbox_id })
+    if (out.error) return fail(out.status, out.error)
+    return out
   },
 
   async set_enabled({ workspaceId, body }) {
@@ -629,7 +678,7 @@ export default async function handler(req, res) {
     try {
       const out = await intakeWebsite(leadDeps(), { key: body.key, rows: body.rows })
       if (out.error) return res.status(out.status).json({ ok: false, error: out.error })
-      return res.status(200).json({ ok: true, off: Boolean(out.off), results: out.results, mail: out.mail || null })
+      return res.status(200).json({ ok: true, off: Boolean(out.off), results: out.results, mail: out.mail || null, replies: out.replies || null })
     } catch (err) {
       return res.status(500).json({ ok: false, error: String(err.message || err).slice(0, 300) })
     }

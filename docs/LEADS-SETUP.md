@@ -418,6 +418,32 @@ a seat with **Also sees every website enquiry** (Agent settings → Sales team)
 also every website-form lead. Battle cards follow their lead. This is the
 database's rule, so the server and every list obey it.
 
+## 9. Auto-replies to qualified leads
+
+Every qualified lead gets one short acknowledgement 15–20 minutes after its
+email arrives, from the mailbox it came to (a website enquiry: from the first
+mailbox that may send), on the same thread, with that mailbox's own Outlook
+signature. A needs-review lead gets one 15–20 minutes after a person approves
+it. No reply when someone at the company already answered on the thread, for
+the same request again within 14 days, or for leads that arrived before
+auto-replies were switched on.
+
+1. **Database (once).** Run `supabase/migrations/20261107_lead_auto_reply.sql`
+   in the Supabase SQL editor. Until then the Auto-replies card on Agent
+   settings says it is waiting for a database update.
+2. **Signature.** In Outlook, start a new email from the mailbox (info@) so its
+   signature appears, and leave it in Drafts. On Agent settings → Auto-replies,
+   click **Copy signature from Outlook** beside that mailbox. Do it again
+   whenever the signature changes in Outlook. (Script:
+   `node --env-file=.env scripts/lead-qualifier/copy-signature.mjs --mailbox info@arak-sa.com`.)
+3. **Allow forwarding** must be on for the mailbox (section 8): replies are
+   sent with the same permission.
+4. **Switch on** Auto-replies on the same card. It answers only leads that
+   arrive after that moment. Switching off stops all waiting replies.
+
+What would have been sent can be read first on the Leads page, Test tab
+(`scripts/lead-qualifier/reply-test.mjs` writes it; nothing is sent).
+
 ## Changing or stopping it
 
 - **Pause:** the On/Off switch on the Lead Agent page. Rows wait, blank, and
