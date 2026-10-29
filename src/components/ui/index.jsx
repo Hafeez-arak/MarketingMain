@@ -159,7 +159,10 @@ export function Textarea({ label, hint, error, className='', rows=4, autoGrow=fa
     if (!autoGrow || !ref.current) return
     const el = ref.current
     el.style.height = 'auto'
-    el.style.height = Math.min(el.scrollHeight, maxHeight) + 'px'
+    // scrollHeight leaves out the border, and the field is border-box, so
+    // without it a box that fits its text still shows a scrollbar.
+    const border = el.offsetHeight - el.clientHeight
+    el.style.height = Math.min(el.scrollHeight + border, maxHeight) + 'px'
   }, [autoGrow, value, maxHeight])
 
   return (
