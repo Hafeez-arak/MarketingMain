@@ -50,7 +50,7 @@ export default function AutoReplyCard({ workspaceId, onError }) {
         <div className="min-w-0">
           <p className="text-sm font-semibold text-text">Auto-replies</p>
           <p className="text-[11px] text-text-tertiary mt-0.5 leading-relaxed">
-            Every qualified lead gets a short acknowledgement 15–20 minutes after its email arrives, from the mailbox it came to, with that mailbox&apos;s signature. A needs-review lead gets one after you approve it. No reply when someone here already answered, or for the same request again within 14 days.
+            Every qualified lead gets a short acknowledgement 15–20 minutes after its email arrives, from the mailbox it came to, with that mailbox&apos;s own signature (a CLB email from the CLB mailbox, with CLB&apos;s). Website enquiries are answered from the company&apos;s own website mailbox. A needs-review lead gets one after you approve it. No reply when someone here already answered, or for the same request again within 14 days.
           </p>
         </div>
         {state?.ready && (
@@ -77,7 +77,7 @@ export default function AutoReplyCard({ workspaceId, onError }) {
                         <p className="text-[11px] text-text-tertiary">
                           {!mb.can_send ? 'Read only: it cannot send replies.'
                             : mb.signature ? `Signature copied ${when(mb.signature.at)}, ${mb.signature.pictures} pictures.`
-                              : 'No signature copied yet: replies end with "Best Regards, ARAK Lighting".'}
+                              : 'No signature copied yet: its replies wait until one is copied (at most two hours).'}
                         </p>
                       </div>
                       <Button size="xs" variant="secondary" onClick={() => copy(mb)} disabled={Boolean(busy)}>
