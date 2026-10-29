@@ -50,7 +50,7 @@ export async function setSection(workspaceId, userId, section, level, grantedBy)
 
 /** The sections that can be granted, in the rail's order. Admin is never granted. */
 // Technical and Finance are parked until Musa's ERP (lib/erp.js): not offered.
-export const GRANTABLE = ['ceo', 'sales', 'crm', 'catalog', 'marketing', 'insights', 'technical', 'finance', 'hr', 'contacts', 'documents'].filter(k => !PARKED.has(k))
+export const GRANTABLE = ['ceo', 'sales', 'crm', 'catalog', 'pricing', 'marketing', 'insights', 'technical', 'finance', 'hr', 'contacts', 'documents'].filter(k => !PARKED.has(k))
 
 /**
  * The rows of the admin's Section access screen for one company: everyone

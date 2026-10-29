@@ -40,6 +40,7 @@ export const GROUPS = [
   { key: 'leads', en: 'Leads', ar: 'العملاء المحتملون' },
   { key: 'opportunities', en: 'Opportunities', ar: 'الفرص البيعية' },
   { key: 'items', en: 'Catalog items', ar: 'أصناف الكتالوج' },
+  { key: 'sheets', en: 'Pricing sheets', ar: 'كشوف التسعير' },
   { key: 'organisations', en: 'Organisations', ar: 'الجهات' },
   { key: 'people', en: 'People', ar: 'الأشخاص' },
   { key: 'employees', en: 'Employees', ar: 'الموظفون' },
@@ -73,6 +74,10 @@ export const PROVIDERS = [
   {
     key: 'catalog', section: 'catalog', rpc: 'shell_search_catalog',
     item: (r, lang) => ({ group: 'items', icon: 'box', title: r.title, detail: pick(lang, r.detail, r.detail_ar), to: `/catalog/item?id=${r.id}` }),
+  },
+  {
+    key: 'pricing', section: 'pricing', rpc: 'shell_search_pricing',
+    item: (r, lang) => ({ group: 'sheets', icon: 'calculator', title: r.title, detail: pick(lang, r.detail, r.detail_ar), to: `/pricing/sheet?id=${r.id}` }),
   },
   {
     key: 'contacts', section: 'contacts', rpc: 'shell_search_contacts',

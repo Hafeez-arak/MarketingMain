@@ -46,7 +46,7 @@ describe('old addresses', () => {
 
 describe('who sees what', () => {
   it('an admin gets every section; a member gets Marketing and Insights', () => {
-    expect(sectionsFor({ isAccessAdmin: true }).map(s => s.key)).toEqual(['ceo', 'sales', 'crm', 'catalog', 'marketing', 'insights', 'hr', 'contacts', 'documents', 'admin'])
+    expect(sectionsFor({ isAccessAdmin: true }).map(s => s.key)).toEqual(['ceo', 'sales', 'crm', 'catalog', 'pricing', 'marketing', 'insights', 'hr', 'contacts', 'documents', 'admin'])
     expect(sectionsFor({ isAccessAdmin: false }).map(s => s.key)).toEqual(['marketing', 'insights'])
   })
 })
