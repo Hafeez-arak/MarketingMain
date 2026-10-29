@@ -16,6 +16,8 @@ import { KW as CATALOG } from '../pages/catalog/words'
 import { ERROR_WORDS as CATALOG_ERRORS } from './catalog/client'
 import { RW as CRM } from '../pages/crm/words'
 import { ERROR_WORDS as CRM_ERRORS } from './crm/client'
+import { DW as DOCUMENTS } from '../pages/documents/words'
+import { ERROR_WORDS as DOCUMENTS_ERRORS } from './documents/client'
 import { leadLabels } from './leads/view'
 import { AR_LABELS as TASK_AR, STATUS_LABEL, PRIORITY_LABEL, BUCKET_LABEL } from './tasks/logic'
 import { AR_LABELS as REQUEST_AR, STATUS_LABEL as REQ_STATUS, KIND_LABEL } from './requests'
@@ -27,7 +29,7 @@ const keysOf = (o, prefix = '') => Object.entries(o).flatMap(([k, v]) =>
   (v && typeof v === 'object' && !Array.isArray(v) && !v.$$typeof ? keysOf(v, `${prefix}${k}.`) : [`${prefix}${k}`]))
 
 describe('every dictionary has Arabic for every English key', () => {
-  const dicts = { COMMON, TECHNICAL, FINANCE, TASKS, LEADS, AUTH, SALES_TARGETS, TEAM, HR, ATTENDANCE, CONTACTS, CONTACTS_ERRORS, CRM, CRM_ERRORS, CATALOG, CATALOG_ERRORS }
+  const dicts = { COMMON, TECHNICAL, FINANCE, TASKS, LEADS, AUTH, SALES_TARGETS, TEAM, HR, ATTENDANCE, CONTACTS, CONTACTS_ERRORS, CRM, CRM_ERRORS, CATALOG, CATALOG_ERRORS, DOCUMENTS, DOCUMENTS_ERRORS }
   for (const [name, d] of Object.entries(dicts)) {
     it(name, () => {
       const en = keysOf(d.en).sort()

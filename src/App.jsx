@@ -56,6 +56,11 @@ import { CatalogPage } from './pages/catalog'
 import { CatalogItem } from './pages/catalog/Item'
 import { CatalogItemForm } from './pages/catalog/ItemForm'
 import { CatalogFields } from './pages/catalog/Fields'
+import { DocumentsList } from './pages/documents/Documents'
+import { DocumentNew } from './pages/documents/DocumentNew'
+import { DocumentReview } from './pages/documents/Review'
+import { DocumentPage } from './pages/documents/Document'
+import { DocumentTypes } from './pages/documents/Types'
 import { ContactsPage } from './pages/contacts/index'
 import { ContactsOrgPage } from './pages/contacts/Org'
 import { ContactsPeoplePage } from './pages/contacts/People'
@@ -282,6 +287,11 @@ function ProtectedApp() {
             <Route path="/catalog/new"           element={<CatalogItemForm />} />
             <Route path="/catalog/edit"          element={<CatalogItemForm key="edit" />} />
             <Route path="/catalog/fields"        element={<CatalogFields />} />
+            <Route path="/documents"             element={<DocumentsList />} />
+            <Route path="/documents/new"         element={<DocumentNew />} />
+            <Route path="/documents/review"      element={<DocumentReview />} />
+            <Route path="/documents/document"    element={<DocumentPage />} />
+            <Route path="/documents/types"       element={<DocumentTypes />} />
             {/* ── Contacts ── Musa's ERP item 3, in our stack. */}
             <Route path="/contacts"              element={<ContactsPage />} />
             <Route path="/contacts/people"       element={<ContactsPeoplePage />} />

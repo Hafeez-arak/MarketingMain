@@ -12,6 +12,7 @@ import { normalizeSearch } from '../contacts/logic'
 //   catalog    items                      │ (20261127_shell_2_search.sql),
 //   contacts   organisations and people   │ run as the person so the
 //   hr         employees                  │ module's own RLS decides, and
+//   documents  documents                  │
 //   tasks      tasks                      │ asked only when the person can
 //   requests   requests                   ┘ open that module at all
 //
@@ -42,6 +43,7 @@ export const GROUPS = [
   { key: 'organisations', en: 'Organisations', ar: 'الجهات' },
   { key: 'people', en: 'People', ar: 'الأشخاص' },
   { key: 'employees', en: 'Employees', ar: 'الموظفون' },
+  { key: 'documents', en: 'Documents', ar: 'المستندات' },
   { key: 'tasks', en: 'Tasks', ar: 'المهام' },
   { key: 'requests', en: 'Requests', ar: 'الطلبات' },
 ]
@@ -84,6 +86,10 @@ export const PROVIDERS = [
   {
     key: 'hr', section: 'hr', rpc: 'shell_search_hr',
     item: (r, lang) => ({ group: 'employees', icon: 'id-card', title: pick(lang, r.title, r.title_ar), detail: pick(lang, r.detail, r.detail_ar), to: `/hr/employee?id=${r.id}` }),
+  },
+  {
+    key: 'documents', section: 'documents', rpc: 'shell_search_documents',
+    item: (r, lang) => ({ group: 'documents', icon: 'folder', title: r.title, detail: pick(lang, r.detail, r.detail_ar), to: `/documents/document?id=${r.id}` }),
   },
   {
     key: 'tasks', section: null, rpc: 'shell_search_tasks',

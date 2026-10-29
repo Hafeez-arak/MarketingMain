@@ -13,6 +13,7 @@
 //   schedule-uploads  references/<workspace>/...
 //   hr-papers         <workspace>/<employee>/...   scans of employees' papers (private)
 //   catalog-files     <workspace>/<item>/...       datasheets and pictures of catalog items (private)
+//   company-documents <workspace>/<document>/...   the Documents app's files (private)
 //
 // Not covered, on purpose: instagram-posts, instagram-reels, linkedin-posts and
 // schedule-uploads/instagram|linkedin are flat legacy folders with no company
@@ -32,6 +33,7 @@ export function companyFolders(workspaceId, sessionIds = []) {
     { bucket: 'schedule-uploads', prefix: `references/${workspaceId}` },
     { bucket: 'hr-papers',        prefix: workspaceId },
     { bucket: 'catalog-files',    prefix: workspaceId },
+    { bucket: 'company-documents', prefix: workspaceId },
   ]
 }
 

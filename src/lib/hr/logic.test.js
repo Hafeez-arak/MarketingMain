@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   riyadhToday, addDays, spanDays, monthDays, workingDays, weekday, nameOf, matchLogin, filterEmployees,
-  docState, expiringDocs, contractEndingSoon, contractActions, closeProblem, groupEmployees, leaveProblem, ledgerBalance, leaveActions,
-  offOn, errorKey, paperFileProblem, paperPath, formatBytes, describeChange,
+  expiringDocs, contractEndingSoon, contractActions, closeProblem, groupEmployees, leaveProblem, ledgerBalance, leaveActions,
+  offOn, errorKey, describeChange,
 } from './logic'
 
 const emp = (id, extra = {}) => ({ id, name_en: `E${id} (test)`, name_ar: '', status: 'active', hire_date: '2020-01-01', end_date: null, department_id: null, ...extra })
@@ -78,22 +78,18 @@ describe('names and the directory', () => {
 
 describe('papers and contracts', () => {
   const today = '2026-10-28'
-  it('marks expired, soon (60 days) and fine', () => {
-    expect(docState({ expiry_date: '2026-10-27' }, today)).toEqual({ state: 'expired', days: -1 })
-    expect(docState({ expiry_date: '2026-10-28' }, today).state).toBe('soon')
-    expect(docState({ expiry_date: '2026-12-27' }, today)).toEqual({ state: 'soon', days: 60 })
-    expect(docState({ expiry_date: '2026-12-28' }, today).state).toBe('ok')
-    expect(docState({ expiry_date: null }, today).state).toBe('none')
-  })
-  it('lists running-out papers of people still employed, soonest first', () => {
+  it('lists the papers (kept in Documents) of people still employed that expired or are within their type\'s alert days, soonest first', () => {
     const employees = [emp('a'), emp('b', { status: 'ended' })]
+    const typesById = { iqama: { alert_days: [90, 30, 7] }, passport: { alert_days: null } }
     const docs = [
-      { id: 1, employee_id: 'a', expiry_date: '2026-11-30' },
-      { id: 2, employee_id: 'a', expiry_date: '2026-10-01' },
-      { id: 3, employee_id: 'a', expiry_date: '2030-01-01' },
-      { id: 4, employee_id: 'b', expiry_date: '2026-10-01' },
+      { id: 1, employee_id: 'a', type_id: 'iqama', confirmed_at: '2026-01-01', expiry_date: '2027-01-20' },   // 84 days: inside 90
+      { id: 2, employee_id: 'a', type_id: 'iqama', confirmed_at: '2026-01-01', expiry_date: '2026-10-01' },   // expired
+      { id: 3, employee_id: 'a', type_id: 'iqama', confirmed_at: '2026-01-01', expiry_date: '2030-01-01' },   // far
+      { id: 4, employee_id: 'b', type_id: 'iqama', confirmed_at: '2026-01-01', expiry_date: '2026-10-01' },   // left the company
+      { id: 5, employee_id: 'a', type_id: 'passport', confirmed_at: '2026-01-01', expiry_date: '2026-11-01' }, // no alert days: never "expiring"
+      { id: 6, employee_id: 'a', type_id: 'iqama', confirmed_at: null, expiry_date: '2026-10-01' },            // a draft is not a paper yet
     ]
-    expect(expiringDocs(docs, employees, today).map(d => d.id)).toEqual([2, 1])
+    expect(expiringDocs(docs, employees, typesById, today).map(d => d.id)).toEqual([2, 1])
   })
   it('calls a running contract "ending soon" within 60 days of its end (past due too)', () => {
     expect(contractEndingSoon({ status: 'running', end_date: '2026-12-27' }, today)).toBe(true)
@@ -201,27 +197,6 @@ describe('refusals in words', () => {
     expect(errorKey('violates check constraint "hr_leave_allocations_reason_check"')).toBe('ALLOC_REASON')
     expect(errorKey('violates unique constraint "hr_employee_private_identity_uq"')).toBe('DUP_IDENTITY')
     expect(errorKey('violates check constraint "hr_contracts_weekly_hours"')).toBe('WEEKLY_HOURS')
-  })
-})
-
-describe('paper files', () => {
-  it('accepts scans and photos up to 10 MB only', () => {
-    expect(paperFileProblem(null)).toBe('')
-    expect(paperFileProblem({ type: 'application/pdf', size: 1000 })).toBe('')
-    expect(paperFileProblem({ type: 'image/png', size: 10 * 1024 * 1024 })).toBe('')
-    expect(paperFileProblem({ type: 'image/png', size: 10 * 1024 * 1024 + 1 })).toBe('FILE_SIZE')
-    expect(paperFileProblem({ type: 'application/zip', size: 10 })).toBe('FILE_TYPE')
-    expect(paperFileProblem({ type: 'application/pdf', size: 0 })).toBe('FILE_SIZE')
-  })
-  it('builds a path from ids only, in the company and employee folder', () => {
-    const p = paperPath('ws1', 'emp1', { type: 'image/jpeg', name: 'My Passport (1).JPG' }, 'abc')
-    expect(p).toBe('ws1/emp1/abc.jpg')
-    expect(paperPath('ws1', 'emp1', { type: 'weird/type' }, 'x')).toBe('ws1/emp1/x.bin')
-  })
-  it('writes sizes for people', () => {
-    expect(formatBytes(2048)).toBe('2 KB')
-    expect(formatBytes(5 * 1048576)).toBe('5.0 MB')
-    expect(formatBytes(10)).toBe('1 KB')
   })
 })
 

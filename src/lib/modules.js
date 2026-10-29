@@ -166,6 +166,26 @@ export const SECTIONS = [
     ],
   },
   {
+    // Musa's Documents app rewritten in our stack (2026-10-29,
+    // dev/erp-pilot/DOCUMENTS.md): the company's documents and those of its
+    // employees and suppliers (fixed assets wait for their module). His three
+    // permissions on our levels: view reads the ordinary ones (documents.view),
+    // work uploads, confirms, renews, archives and sets the types
+    // (documents.manage), manage also holds confidential documents and
+    // employees' papers (documents.confidential).
+    key: 'documents', label: 'Documents', ar: 'المستندات', icon: 'folder', base: '/documents', adminOnly: true,
+    blurb: 'Registers, certificates, licences, insurance and agreements of the company, its employees and suppliers, with expiry alerts.',
+    blurbAr: 'السجلات والشهادات والتراخيص والتأمين والاتفاقيات للشركة وموظفيها وموردينها، مع تنبيهات الانتهاء.',
+    pages: [
+      { to: '/documents', label: 'Documents', ar: 'المستندات', icon: 'folder', exact: true, translated: true },
+      { to: '/documents/types', label: 'Document types', ar: 'أنواع المستندات', icon: 'gear', min: 'work', translated: true },
+      // Reached from the lists, not the menu.
+      { to: '/documents/new', label: 'Upload document', ar: 'رفع مستند', icon: 'folder', hidden: true, min: 'work', translated: true },
+      { to: '/documents/document', label: 'Document', ar: 'المستند', icon: 'folder', hidden: true, translated: true },
+      { to: '/documents/review', label: 'Check the data', ar: 'مراجعة البيانات', icon: 'folder', hidden: true, min: 'work', translated: true },
+    ],
+  },
+  {
     key: 'admin', label: 'Admin', ar: 'الإدارة', icon: 'users', base: '/admin', adminOnly: true,
     blurb: 'Who can sign in, and which sections each person gets.',
     blurbAr: 'من يمكنه الدخول، وأي الأقسام يحصل عليها كل شخص.',

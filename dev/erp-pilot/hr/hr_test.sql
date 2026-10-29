@@ -184,28 +184,13 @@ select pg_temp.eq('papers: a linked View person reads their own only',
   pg_temp.q('staff.marketing@arak-sa.com', 'select count(*) from public.hr_documents'), '1');
 select pg_temp.eq('papers: Work (attendance) reads none',
   pg_temp.q('staff.dev@arak-sa.com', 'select count(*) from public.hr_documents where workspace_id = ''00000000-0000-0000-0000-000000000001'' and employee_id <> (select id from public.hr_employees where employee_no = ''T-003'')'), '0');
-select pg_temp.refused('papers: "other" says what it is', 'staff.admin@arak-sa.com',
-  format($s$insert into public.hr_documents (workspace_id, employee_id, doc_type) values (%L, %L, 'other') returning id$s$, :arak, pg_temp.emp('T-004')),
-  'hr_documents_other_named');
-select pg_temp.refused('papers: expiry is not before issue', 'staff.admin@arak-sa.com',
-  format($s$insert into public.hr_documents (workspace_id, employee_id, doc_type, issue_date, expiry_date) values (%L, %L, 'passport', '2026-01-01', '2025-01-01') returning id$s$, :arak, pg_temp.emp('T-004')),
-  'hr_documents_dates');
-select pg_temp.refused('papers: View cannot add one', 'staff.marketing@arak-sa.com',
-  format($s$insert into public.hr_documents (workspace_id, employee_id, doc_type) values (%L, %L, 'passport') returning id$s$, :arak, pg_temp.emp('T-002')),
-  'row-level security');
-select pg_temp.refused('papers: Work (attendance) cannot add one', 'staff.dev@arak-sa.com',
+-- Papers moved to the Documents app (20261201_documents_3_hr_move): the old
+-- table keeps its rows for history and refuses every new one. Their rules
+-- (type, dates, files, who may add) are Documents' now, checked in
+-- supabase/documents.test.js and dev/v2db/check-documents.mjs.
+select pg_temp.refused('papers: the old table takes no new paper (they live in Documents now)', 'staff.admin@arak-sa.com',
   format($s$insert into public.hr_documents (workspace_id, employee_id, doc_type) values (%L, %L, 'passport') returning id$s$, :arak, pg_temp.emp('T-004')),
-  'row-level security');
-select pg_temp.refused('papers: an employee of another company is refused', 'staff.admin@arak-sa.com',
-  format($s$insert into public.hr_documents (workspace_id, employee_id, doc_type) values (%L, %L, 'passport') returning id$s$, :arak, pg_temp.emp('G-001')),
-  'hr_documents_employee_fk');
-select pg_temp.refused('papers: a file belongs in its own company and employee folder', 'staff.admin@arak-sa.com',
-  format($s$insert into public.hr_documents (workspace_id, employee_id, doc_type, file_path, file_name, file_size, file_type) values (%L, %L, 'passport', 'elsewhere/x.pdf', 'x.pdf', 10, 'application/pdf') returning id$s$, :arak, pg_temp.emp('T-004')),
-  'hr_documents_file_place');
-select pg_temp.eq('papers: Manage adds one with its file',
-  pg_temp.q('staff.admin@arak-sa.com', format($s$insert into public.hr_documents (workspace_id, employee_id, doc_type, doc_number, file_path, file_name, file_size, file_type) values (%L, %L, 'passport', 'FILE-1', %L, 'scan.pdf', 1200, 'application/pdf') returning file_name$s$,
-    :arak, pg_temp.emp('T-004'), :arak || '/' || pg_temp.emp('T-004')::text || '/test-scan.pdf')),
-  'scan.pdf');
+  'DOCUMENT_HR_MOVED');
 -- ── Contracts: his workflow (20261129_hr_parity_3) ──
 select pg_temp.eq('contracts: View and Work read none',
   pg_temp.q('staff.dev@arak-sa.com', 'select count(*) from public.hr_contracts where employee_id <> (select id from public.hr_employees where employee_no = ''T-003'')') || '/' || pg_temp.q('staff.marketing@arak-sa.com', 'select count(*) from public.hr_contracts where employee_id <> (select id from public.hr_employees where employee_no = ''T-002'')'), '0/0');
@@ -646,7 +631,7 @@ select pg_temp.refused('personal: an employee of another company is refused', 's
 -- History.
 select pg_temp.eq('history: Manage reads the changes of a person (employee, personal file, contract)',
   pg_temp.q('staff.admin@arak-sa.com', format($s$select string_agg(distinct table_name, ',' order by table_name) from public.hr_audit where employee_id = %L$s$, pg_temp.emp('T-004'))),
-  'hr_contracts,hr_documents,hr_employee_private,hr_employees');
+  'hr_contracts,hr_employee_private,hr_employees');
 select pg_temp.eq('history: ...who and what',
   pg_temp.q('staff.admin@arak-sa.com', format($s$select (changed_by = %L)::text || ':' || action from public.hr_audit where table_name = 'hr_employees' and employee_id = %L and action = 'update' order by id desc limit 1$s$, pg_temp.uid('staff.admin@arak-sa.com'), pg_temp.emp('T-100'))),
   'true:update');
@@ -676,13 +661,12 @@ select pg_temp.refused('delete: someone with contracts, leave or a team is refus
   format($s$select public.hr_employee_delete(%L, %L)$s$, :arak, pg_temp.emp('T-003')), 'HR_EMPLOYEE_IN_USE');
 select pg_temp.eq('delete: ...the person is still there',
   (select count(*) from public.hr_employees where employee_no = 'T-003')::text, '1');
-select pg_temp.eq('delete: Manage deletes a person never used, and gets their papers'' files back to remove',
-  pg_temp.q('staff.admin@arak-sa.com', format($s$with n as (insert into public.hr_employees (workspace_id, name_en, hire_date, created_by) values (%L, 'Scratch (test)', '2026-10-01', %L) returning id),
-      d as (insert into public.hr_documents (workspace_id, employee_id, doc_type, file_path, file_name, file_size, file_type) select %L, id, 'passport', %L || '/' || id::text || '/s.pdf', 's.pdf', 5, 'application/pdf' from n returning 1)
-    select count(*) from d$s$, :arak, pg_temp.uid('staff.admin@arak-sa.com'), :arak, :arak)), '1');
-select pg_temp.eq('delete: ...the call returns the file paths',
-  pg_temp.q('staff.admin@arak-sa.com', format($s$select cardinality(public.hr_employee_delete(%L, (select id from public.hr_employees where name_en = 'Scratch (test)')))::text$s$, :arak)), '1');
-select pg_temp.eq('delete: ...and the row and its papers are gone',
+select pg_temp.eq('delete: Manage deletes a person never used',
+  pg_temp.q('staff.admin@arak-sa.com', format($s$with n as (insert into public.hr_employees (workspace_id, name_en, hire_date, created_by) values (%L, 'Scratch (test)', '2026-10-01', %L) returning id)
+    select count(*) from n$s$, :arak, pg_temp.uid('staff.admin@arak-sa.com'))), '1');
+select pg_temp.eq('delete: ...the call returns no file paths (papers live in Documents now)',
+  pg_temp.q('staff.admin@arak-sa.com', format($s$select coalesce(cardinality(public.hr_employee_delete(%L, (select id from public.hr_employees where name_en = 'Scratch (test)'))), 0)::text$s$, :arak)), '0');
+select pg_temp.eq('delete: ...and the row is gone',
   (select count(*) from public.hr_employees where name_en = 'Scratch (test)')::text, '0');
 
 -- ══ Settings ══

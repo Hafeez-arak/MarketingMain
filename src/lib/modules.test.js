@@ -46,7 +46,7 @@ describe('old addresses', () => {
 
 describe('who sees what', () => {
   it('an admin gets every section; a member gets Marketing and Insights', () => {
-    expect(sectionsFor({ isAccessAdmin: true }).map(s => s.key)).toEqual(['ceo', 'sales', 'crm', 'catalog', 'marketing', 'insights', 'hr', 'contacts', 'admin'])
+    expect(sectionsFor({ isAccessAdmin: true }).map(s => s.key)).toEqual(['ceo', 'sales', 'crm', 'catalog', 'marketing', 'insights', 'hr', 'contacts', 'documents', 'admin'])
     expect(sectionsFor({ isAccessAdmin: false }).map(s => s.key)).toEqual(['marketing', 'insights'])
   })
 })
@@ -174,5 +174,20 @@ describe('CRM (2026-10-28)', () => {
     expect(canVisit('/sales/leads', view)).toBe(false)
     expect(pageTitle('/crm/activities', 'ar')).toBe('الأنشطة المخططة')
     expect(pageTitle('/crm/lead', 'en')).toBe('Opportunity')
+  })
+
+})
+
+describe('Documents (2026-10-29)', () => {
+  it('view reads, work uploads and sets the types, nothing is open without the grant', async () => {
+    const { GRANTABLE } = await import('./sectionAccess.js')
+    expect(GRANTABLE).toContain('documents')
+    const view = { sections: { documents: 'view' } }
+    for (const p of ['/documents', '/documents/document']) expect(canVisit(p, view)).toBe(true)
+    for (const p of ['/documents/types', '/documents/new', '/documents/review']) expect(canVisit(p, view)).toBe(false)
+    for (const p of ['/documents/types', '/documents/new', '/documents/review']) expect(canVisit(p, { sections: { documents: 'work' } })).toBe(true)
+    expect(canVisit('/documents', { sections: { hr: 'manage' } })).toBe(false)
+    expect(pageTitle('/documents/types', 'ar')).toBe('أنواع المستندات')
+    expect(pageTitle('/documents/document', 'en')).toBe('Document')
   })
 })

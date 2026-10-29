@@ -18,7 +18,7 @@ const BASE = {
     attendanceTitle: 'Attendance',
     attendanceSubtitle: 'Check-ins and check-outs, by hand or from the fingerprint device.',
     documentsTitle: 'Expiring papers',
-    documentsSubtitle: d => `Papers of people still employed that have expired or expire within ${d} days, soonest first.`,
+    documentsSubtitle: () => 'Papers of people still employed that have expired or are within their type\'s alert days (set in Documents), soonest first.',
     settingsTitle: 'HR settings',
     settingsSubtitle: 'The company\'s leave types.',
 
@@ -155,7 +155,7 @@ const BASE = {
     attendanceTitle: 'الحضور',
     attendanceSubtitle: 'تسجيل الحضور والانصراف، يدويًا أو من جهاز البصمة.',
     documentsTitle: 'الوثائق المنتهية',
-    documentsSubtitle: d => `وثائق الموظفين الحاليين التي انتهت أو تنتهي خلال ${d} يومًا، الأقرب أولًا.`,
+    documentsSubtitle: () => 'وثائق الموظفين الحاليين التي انتهت أو دخلت أيام تنبيه نوعها (تُحدَّد في المستندات)، الأقرب أولًا.',
     settingsTitle: 'إعدادات الموارد البشرية',
     settingsSubtitle: 'أنواع الإجازات في الشركة.',
 
