@@ -10,6 +10,7 @@ import {
 } from '../lib/analytics/websiteAnalytics'
 import { indexHealth, normalizeInspection } from '../lib/agent/urlInspection'
 import { ga4Summary, platformArrivals, arrivalsSummary } from '../lib/agent/ga4'
+import { groupChecks } from '../lib/agent/aiAnswers'
 import fixture from './websiteFixture.json'
 import '../index.css'
 
@@ -350,6 +351,34 @@ const POINTS = [
   { text: '"Lighting consultant riyadh" showed us 180 times at around position 18 with no clicks — real demand sitting just off page one.', kind: 'opportunity' },
 ]
 
+// ── Named in AI answers ──
+// NOT a recorded payload: no check had been run when this was written, so
+// these are shaped by hand to show every state the panel has. The questions
+// are the ones suggested for Arak in docs/WEBSITE-SETUP.md.
+const AI_QUESTIONS = [
+  'Who are the best lighting design consultants in Riyadh?',
+  'Which companies install KNX lighting control in Saudi Arabia?',
+  'Where can I buy decorative lighting in Riyadh?',
+  'من أفضل شركات الإنارة في السعودية؟',
+]
+const aiRow = (run, at, question, extra) => ({
+  run_id: run, checked_at: at, engine: 'claude', question, answer: '', named: false, rank: null, cited: false,
+  competitors: [], sources: [], cost_usd: 0.07, error: '', ...extra,
+})
+const AI_ROWS = [
+  aiRow('r2', '2026-12-01T09:00:00Z', AI_QUESTIONS[0], {
+    named: true, rank: 2, cited: true, competitors: ['ICS Arabia', 'Signify'], sources: ['icsarabia.com', 'arak-sa.com', 'clutch.co'],
+    answer: 'ICS Arabia offers full lighting design services from concept to detailed engineering.\nARAK Lighting (Riyadh, since 1976) produces photometric calculations and fixture schedules.\nSignify supports system design for larger projects.',
+  }),
+  aiRow('r2', '2026-12-01T09:00:00Z', AI_QUESTIONS[1], { named: true, rank: 1, competitors: ['Signify'], sources: ['knx.org', 'arak-sa.com'] }),
+  aiRow('r2', '2026-12-01T09:00:00Z', AI_QUESTIONS[2], { competitors: ['Alrouf'], sources: ['clutch.co', 'facebook.com'] }),
+  aiRow('r2', '2026-12-01T09:00:00Z', AI_QUESTIONS[3], { error: 'The model was overloaded.', cost_usd: 0 }),
+  aiRow('r1', '2026-11-01T09:00:00Z', AI_QUESTIONS[0], { competitors: ['ICS Arabia'], sources: ['icsarabia.com', 'clutch.co'] }),
+  aiRow('r1', '2026-11-01T09:00:00Z', AI_QUESTIONS[1], { named: true, rank: 1, competitors: ['Signify'], sources: ['knx.org'] }),
+  aiRow('r1', '2026-11-01T09:00:00Z', AI_QUESTIONS[2], { named: true, rank: 2, competitors: ['Alrouf'], sources: ['clutch.co'] }),
+]
+const aiHistory = rows => ({ state: 'ok', rows, checks: groupChecks(rows), error: '' })
+
 const ON_DEMAND = {
   'Neither asked for (every real page load)': {},
   'Explanation written': { explain: { state: 'done', points: POINTS, error: '', cost: 0.0227 } },
@@ -370,6 +399,14 @@ const ON_DEMAND = {
     },
   },
   'Both answered': { explain: { state: 'done', points: POINTS, error: '', cost: 0.0227 }, index: INDEX_DONE },
+  'AI answers: two checks, compared': { ai: { history: aiHistory(AI_ROWS) } },
+  'AI answers: never run': { ai: { history: aiHistory([]) } },
+  'AI answers: running': { ai: { history: aiHistory([]), run: { state: 'loading' } } },
+  'AI answers: history loading': { ai: { history: { state: 'loading', rows: [], checks: [] } } },
+  'AI answers: table missing': {
+    ai: { history: { state: 'error', rows: [], checks: [], error: 'relation "public.ai_answer_checks" does not exist' } },
+  },
+  'AI answers: no questions set': { ai: { questions: [] } },
 }
 
 export function WebsiteHarness() {
@@ -421,6 +458,13 @@ export function WebsiteHarness() {
       targets: search.targets, queries: search.queries, previous: search.previous, pages: search.pages,
     }) : [],
     targetsConfigured: (search?.targets || []).length > 0,
+    ai: {
+      questions: AI_QUESTIONS,
+      history: aiHistory([]),
+      run: { state: 'idle' },
+      ...(ON_DEMAND[onDemand].ai || {}),
+    },
+    runAiAnswers: () => {},
 
     // The panels a person presses. `idle` is the default because it is what
     // every real page load shows.

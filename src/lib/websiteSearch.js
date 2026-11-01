@@ -1,4 +1,5 @@
 import { defaultWebhookUrl } from './n8nWebhooks'
+import { supabase } from './supabaseClient'
 
 // ─── The website's side of the dashboard ───────────────────────────────────
 // One call to /api/agent/search, which reads Google Search Console for this
@@ -133,3 +134,50 @@ export async function fetchWebsiteExplanation(workspaceId, accessToken, facts, a
     return { ok: false, points: [], error: `Could not reach the server: ${err.message}` }
   }
 }
+
+/**
+ * Ask the brand's buyer questions through an AI assistant with web search and
+ * record whether the company was named. Paid: about five to ten cents a
+ * question, on the workspace's monthly cap. See server/agentHandlers/aiAnswers.js.
+ */
+export async function runAiAnswersCheck(workspaceId, accessToken) {
+  if (!workspaceId) return { ok: false, error: 'No workspace selected.' }
+  if (!accessToken) return { ok: false, error: 'Sign in to read website analytics.' }
+  try {
+    const res = await fetch(defaultWebhookUrl('agentWebsite'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ action: 'aiAnswers', workspace_id: workspaceId, access_token: accessToken }),
+    })
+    const data = await res.json().catch(() => null)
+    if (!data) return { ok: false, error: `The server returned ${res.status} with nothing in it.` }
+    return data
+  } catch (err) {
+    return { ok: false, error: `Could not reach the server: ${err.message}` }
+  }
+}
+
+/**
+ * Past AI-answer checks, newest first. Free: a read of what earlier checks
+ * stored, so the panel shows where things stood without asking again.
+ * Filtered by workspace explicitly, not left to RLS — a member of two
+ * companies can read both.
+ */
+export async function loadAiAnswerChecks(workspaceId) {
+  if (!workspaceId) return { ok: false, rows: [], error: 'No workspace selected.' }
+  try {
+    const { data } = await supabase.from('ai_answer_checks')
+      .select('run_id,checked_at,engine,question,answer,named,rank,cited,competitors,sources,cost_usd,error')
+      .eq('workspace_id', workspaceId)
+      .order('checked_at', { ascending: false })
+      .limit(200)
+      .throwOnError()
+    return { ok: true, rows: data || [] }
+  } catch (err) {
+    return { ok: false, rows: [], error: String(err?.message || err) }
+  }
+}
+

@@ -13,7 +13,7 @@ import { Ga4Panels, BioLinkPanel } from './WebsiteGa4'
 import { useWebsiteAnalytics } from './useWebsiteAnalytics'
 import { RangePicker } from '../../components/analytics/RangePicker'
 import { isCustom, rangeLabel } from '../../lib/dateRange'
-import { ExplainPanel, ImageSearchPanel, IndexHealthPanel, TargetSearchesPanel } from './WebsiteDetail'
+import { ExplainPanel, ImageSearchPanel, IndexHealthPanel, TargetSearchesPanel, AiAnswersPanel } from './WebsiteDetail'
 
 // ─── The Website tab ───────────────────────────────────────────────────────
 //
@@ -233,7 +233,7 @@ export function WebsiteAnalytics(w) {
     pages, hosts, countries, devices, appearance, sitemaps, recommendations, ga4Summary,
     arrivals, arrivalsSummary,
     image, index, runIndexHealth, explain, runExplain, canExplain,
-    targets, targetsConfigured,
+    targets, targetsConfigured, ai, runAiAnswers,
   } = w
 
   if (loading) return <WebsiteSkeleton />
@@ -613,6 +613,9 @@ export function WebsiteAnalytics(w) {
               between them: a target that is "not seen" on a page Google has
               not indexed is an indexing job, not a copywriting one. */}
           <TargetSearchesPanel targets={targets || []} configured={!!targetsConfigured} />
+
+          {/* The same demand, asked of an AI assistant instead of Google. */}
+          <AiAnswersPanel ai={ai} onRun={runAiAnswers} />
 
           {/* ── Pages, countries, devices ── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

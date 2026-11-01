@@ -39,9 +39,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 //
 // `emailWeekly` (the Monday email drafts) was born here: it is scheduled work
 // that only n8n drives, and it has no business on Vercel.
-export const ROUTES = ['run', 'lens', 'synthesise', 'resolve', 'discover', 'chat', 'indexHealth', 'websiteExplain', 'critique', 'performance', 'reviseIdea', 'emailWeekly']
+export const ROUTES = ['run', 'lens', 'synthesise', 'resolve', 'discover', 'chat', 'indexHealth', 'websiteExplain', 'critique', 'performance', 'reviseIdea', 'emailWeekly', 'aiAnswers']
 
-const N8N_HANDLERS = new Set(['indexHealth', 'websiteExplain', 'critique', 'performance', 'reviseIdea', 'emailWeekly'])
+const N8N_HANDLERS = new Set(['indexHealth', 'websiteExplain', 'critique', 'performance', 'reviseIdea', 'emailWeekly', 'aiAnswers'])
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 

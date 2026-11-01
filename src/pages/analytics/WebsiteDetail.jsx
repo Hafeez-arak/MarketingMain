@@ -1,8 +1,9 @@
 import { useId, useState } from 'react'
-import { Card, Button, Empty, Spinner, IconBadge } from '../../components/ui/index'
+import { Card, Button, Empty, Spinner, IconBadge, Skeleton } from '../../components/ui/index'
 import { Icon } from '../../components/ui/icons'
 import { fmt, pct, plural } from './format'
 import { STATE_LABELS } from '../../lib/agent/urlInspection'
+import { questionMoves } from '../../lib/agent/aiAnswers'
 
 // ─── The three panels that say something in words ──────────────────────────
 //
@@ -543,3 +544,183 @@ export function TargetSearchesPanel({ targets = [], configured = false }) {
     </Card>
   )
 }
+
+// ─── Named in AI answers ───────────────────────────────────────────────────
+//
+// Whether an AI assistant names the company when a buyer asks it a question,
+// and who it names instead. A button, because every question is a paid model
+// call with web search; past checks are a free read and are shown on load, so
+// progress is visible without spending anything.
+
+/** Per question, about what one answer costs. Shown before the button is pressed. */
+const COST_PER_QUESTION = 0.08
+
+const MOVE = {
+  gained: { label: 'Newly named', classes: 'bg-sage-50 text-sage-700 border-sage-200' },
+  lost: { label: 'Dropped', classes: 'bg-red-50 text-red-600 border-red-200' },
+}
+
+const when = iso => new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+
+export function AiAnswersPanel({ ai, onRun }) {
+  const questions = ai?.questions || []
+  const history = ai?.history || { state: 'loading', checks: [] }
+  const run = ai?.run || { state: 'idle' }
+  const head = subtitle => (
+    <PanelHead title="Named in AI answers" icon={Icon.message} tone="sage" subtitle={subtitle} />
+  )
+
+  if (!questions.length) {
+    return (
+      <Card className="overflow-hidden">
+        {head('Whether AI assistants name us when a buyer asks')}
+        {/* How to set the questions lives in docs/WEBSITE-SETUP.md, not on screen. */}
+        <p className="px-5 py-4 text-xs text-text-tertiary">
+          No AI questions are set for this company yet. Contact your admin to set them.
+        </p>
+      </Card>
+    )
+  }
+
+  const estimate = `about $${(questions.length * COST_PER_QUESTION).toFixed(2)}`
+  const running = run.state === 'loading'
+  const button = (
+    <Button size="sm" variant="secondary" onClick={onRun} disabled={running}>
+      {running ? <><Spinner size="sm" /> Asking {questions.length} questions…</> : `Run check (${estimate})`}
+    </Button>
+  )
+
+  if (history.state === 'loading') {
+    return (
+      <Card className="overflow-hidden">
+        {head('Whether AI assistants name us when a buyer asks')}
+        <div className="p-5 space-y-3">
+          <Skeleton className="h-6 w-48" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-3/4" />
+        </div>
+      </Card>
+    )
+  }
+
+  const [latest, previous] = history.checks || []
+  const runError = run.state === 'error' ? run.error : ''
+  const capped = run.state === 'done' && run.data?.capped
+  const unsaved = run.state === 'done' && run.data && !run.data.stored
+  // A check that ran but could not be saved is still shown: it was paid for.
+  const shown = unsaved ? { checkedAt: run.data.checkedAt, rows: run.data.rows, summary: run.data.summary } : latest
+  const rows = shown ? questionMoves(shown.rows, unsaved ? (latest?.rows || []) : (previous?.rows || [])) : []
+  const s = shown?.summary
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="px-5 py-4 border-b border-border flex items-start justify-between gap-3">
+        <div className="flex items-start gap-2.5 min-w-0">
+          <IconBadge tone="sage">{Icon.message}</IconBadge>
+          <div className="min-w-0">
+            <h3 className="font-semibold text-text text-sm leading-tight">Named in AI answers</h3>
+            <p className="text-xs text-text-tertiary mt-0.5">
+              {questions.length} buyer questions, answered by an AI assistant with web search (Claude). The questions never
+              mention us.
+            </p>
+          </div>
+        </div>
+        {button}
+      </div>
+
+      {history.state === 'error' && (
+        <p className="px-5 py-2.5 text-[11px] text-red-600 bg-red-50 border-b border-red-200">
+          Past checks could not be read: {history.error}
+        </p>
+      )}
+      {runError && (
+        <p className="px-5 py-2.5 text-[11px] text-red-600 bg-red-50 border-b border-red-200">{runError}</p>
+      )}
+      {capped && (
+        <p className="px-5 py-2.5 text-[11px] text-amber-700 bg-amber-50 border-b border-amber-200">
+          This month's AI budget ran out part way through. The questions it reached are below; the rest were not asked.
+        </p>
+      )}
+      {unsaved && (
+        <p className="px-5 py-2.5 text-[11px] text-amber-700 bg-amber-50 border-b border-amber-200">
+          This check could not be saved, so the next one will not be compared with it.
+        </p>
+      )}
+
+      {!shown ? (
+        <p className="px-5 py-4 text-xs text-text-tertiary">
+          No check has been run yet. Each question is one AI answer with up to three web searches, {estimate} for the
+          whole list, charged to this month's AI budget.
+        </p>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-border">
+            <div className="p-4">
+              <p className="eyebrow mb-2">Named</p>
+              <p className="text-2xl font-bold text-text tabular-nums leading-none">{s.named} of {s.answered}</p>
+              <p className="text-[11px] text-text-tertiary mt-1.5">
+                {pct(s.namedShare)} of answers
+                {previous && !unsaved && ` · was ${previous.summary.named} of ${previous.summary.answered}`}
+              </p>
+            </div>
+            <div className="p-4">
+              <p className="eyebrow mb-2">Our site cited</p>
+              <p className="text-2xl font-bold text-text tabular-nums leading-none">{s.cited} of {s.answered}</p>
+              <p className="text-[11px] text-text-tertiary mt-1.5">A link a reader can click</p>
+            </div>
+            <div className="p-4 col-span-2">
+              <p className="eyebrow mb-2">Named instead</p>
+              <p className="text-xs text-text leading-relaxed">
+                {s.rivals.length
+                  ? s.rivals.slice(0, 5).map(r => `${r.name} (${r.count})`).join(' · ')
+                  : 'None of the tracked competitors'}
+              </p>
+              <p className="text-[11px] text-text-tertiary mt-1.5">
+                Checked {when(shown.checkedAt)} · {fmt(s.answered)} answered
+                {s.failed ? ` · ${s.failed} not answered` : ''} · ${s.cost.toFixed(2)}
+              </p>
+            </div>
+          </div>
+
+          {s.sources.length > 0 && (
+            <p className="px-5 py-2.5 text-[11px] text-text-tertiary border-t border-border bg-surface-subtle leading-relaxed">
+              <strong className="font-semibold text-text-secondary">Sources the answers used:</strong>{' '}
+              {s.sources.map(x => `${x.name} (${x.count})`).join(' · ')}. Being listed on these is how a company gets
+              into the answer.
+            </p>
+          )}
+
+          <ul className="divide-y divide-border border-t border-border">
+            {rows.map(r => (
+              <li key={r.question} className="px-5 py-2.5">
+                <details>
+                  <summary className="flex items-start justify-between gap-3 cursor-pointer list-none">
+                    <span dir="auto" className="text-xs text-text min-w-0">{r.question}</span>
+                    <span className="flex items-center gap-2 flex-shrink-0">
+                      {MOVE[r.move] && (
+                        <span className={`text-[10px] px-1.5 py-0.5 border ${MOVE[r.move].classes}`}>{MOVE[r.move].label}</span>
+                      )}
+                      <span className={`text-[11px] tabular-nums ${r.error ? 'text-text-tertiary' : r.named ? 'text-sage-700 font-semibold' : 'text-red-600'}`}>
+                        {r.error ? 'Not answered' : r.named ? `Named${r.rank ? ` · #${r.rank}` : ''}${r.cited ? ' · cited' : ''}` : 'Not named'}
+                      </span>
+                    </span>
+                  </summary>
+                  <div className="mt-2 text-[11px] text-text-secondary leading-relaxed space-y-1.5">
+                    {r.error ? <p>{r.error}</p> : <p dir="auto" className="whitespace-pre-line">{r.answer}</p>}
+                    {(r.competitors || []).length > 0 && <p>Also named: {r.competitors.join(', ')}</p>}
+                    {(r.sources || []).length > 0 && <p className="font-mono">{r.sources.join(' · ')}</p>}
+                  </div>
+                </details>
+              </li>
+            ))}
+          </ul>
+          <p className="px-5 py-2.5 text-[11px] text-text-tertiary border-t border-border bg-surface-subtle">
+            # is our place among the companies we track, in the order the answer names them. Two runs of the same
+            question can differ: read a single answer as a sample, and the share over several checks as the measure.
+          </p>
+        </>
+      )}
+    </Card>
+  )
+}
+
