@@ -3,7 +3,7 @@ import {
   daysBetween, dailySeries, rollingAverage, searchTypes, pageRows, hostSplit,
   queryRows, positionBands, queryCoverage, countryName, countryRows, deviceRows,
   appearanceRows, sitemapHealth, websiteSummary, change, asPercent, POSITION_BANDS, prettyPath,
-  imageSearch,
+  imageSearch, seoTargets, targetSearches,
 } from './websiteAnalytics.js'
 
 // The windows the app actually asks for, and the shape the property actually
@@ -526,5 +526,68 @@ describe('imageSearch', () => {
 
   it('is an empty answer, not a crash, with nothing to report', () => {
     expect(imageSearch()).toMatchObject({ impressions: 0, queries: [], pages: [] })
+  })
+})
+
+describe('seoTargets', () => {
+  it('cleans the configured list and drops what cannot be matched', () => {
+    expect(seoTargets([
+      { query: '  Lighting  Consultant Riyadh ', page: 'https://arak-sa.com/services/lighting-design' },
+      { query: 'lighting consultant riyadh', page: '/' },
+      { query: 'no page' },
+      { page: '/services' },
+      null,
+    ])).toEqual([{ query: 'lighting consultant riyadh', page: '/services/lighting-design' }])
+    expect(seoTargets(undefined)).toEqual([])
+  })
+})
+
+describe('targetSearches', () => {
+  // The real case: the query lands on the homepage because the service page
+  // was not indexed, then a second target is in the results on its own page,
+  // and a third is absent from the named queries.
+  const queries = [
+    { query: 'lighting consultant riyadh', impressions: 229, clicks: 0, position: 15.3 },
+    { query: 'smart poles', impressions: 38, clicks: 1, position: 8.2 },
+  ]
+  const previous = [{ query: 'lighting consultant riyadh', impressions: 182, clicks: 0, position: 16.7 }]
+  const pages = [
+    { query: 'lighting consultant riyadh', page: 'https://arak-sa.com/', impressions: 200 },
+    { query: 'lighting consultant riyadh', page: 'https://arak-sa.com/services', impressions: 29 },
+    { query: 'smart poles', page: 'https://arak-sa.com/ar/services/smart-poles', impressions: 38 },
+  ]
+  const targets = [
+    { query: 'lighting consultant riyadh', page: '/services/lighting-design' },
+    { query: 'smart poles', page: '/services/smart-poles' },
+    { query: 'facade lighting ksa', page: '/services/facade-lighting' },
+  ]
+  const out = targetSearches({ targets, queries, previous, pages })
+
+  it('says when Google shows a different page than the one built for the search', () => {
+    expect(out[0]).toMatchObject({ state: 'elsewhere', shownPage: '/', page: '/services/lighting-design', impressions: 229 })
+    // Up 1.4 places: positive is better.
+    expect(out[0].positionDelta).toBeCloseTo(1.4)
+  })
+
+  it('counts the Arabic twin as the right page', () => {
+    expect(out[1]).toMatchObject({ state: 'ranking', shownPage: '/services/smart-poles', positionDelta: null })
+  })
+
+  it('never prints a position for a search that is not in the named queries', () => {
+    expect(out[2]).toMatchObject({ state: 'missing', position: null, impressions: 0 })
+  })
+
+  it('is empty when nothing is configured', () => {
+    expect(targetSearches({ queries, pages })).toEqual([])
+  })
+})
+
+describe('seoTargets — the Brand Brain textarea', () => {
+  it('reads one `search | /page` per line and skips the lines that are not one', () => {
+    expect(seoTargets('lighting consultant riyadh | /services/lighting-design\n\nnot a target\nمهندس اضاءة الرياض | /ar/services/lighting-design\r\n')).toEqual([
+      { query: 'lighting consultant riyadh', page: '/services/lighting-design' },
+      // pathOf folds the /ar twin, so an Arabic target matches either language.
+      { query: 'مهندس اضاءة الرياض', page: '/services/lighting-design' },
+    ])
   })
 })

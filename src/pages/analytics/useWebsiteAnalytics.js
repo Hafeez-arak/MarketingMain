@@ -6,7 +6,7 @@ import { seoRecommendations } from '../../lib/seoAdvice'
 import {
   websiteSummary, dailySeries, searchTypes, positionBands, pageRows, hostSplit,
   queryRows, countryRows, deviceRows, appearanceRows, sitemapHealth, queryCoverage,
-  imageSearch,
+  imageSearch, targetSearches,
 } from '../../lib/analytics/websiteAnalytics'
 import { explainFacts } from '../../lib/agent/websiteExplain'
 import { ga4Summary, platformArrivals, arrivalsSummary } from '../../lib/agent/ga4'
@@ -218,6 +218,10 @@ export function useWebsiteAnalytics() {
 
     // Image search, in words rather than as one total.
     image,
+    targets: useMemo(() => (usable ? targetSearches({
+      targets: search.targets, queries: search.queries, previous: search.previous, pages: search.pages,
+    }) : []), [usable, search]),
+    targetsConfigured: (search?.targets || []).length > 0,
 
     // The two the reader asks for. Each carries its own state, because
     // "not asked for yet" and "asked for and failed" are different panels.

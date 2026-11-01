@@ -3,6 +3,7 @@ import {
   propertyPath, isoDate, normalizeReport, totalsOf, reportBody, reportPlan,
   ga4Summary, ga4Config, delta, TOTAL_METRICS, collectionState, keyEventLabel, keyEventRows, GA4_EARLIEST,
   platformOf, platformArrivals, arrivalsSummary, isTagged, isBioCampaign, siteOrigin, bioLink,
+  leadRows, leadsSummary, aiAssistantOf, aiVisits,
 } from './ga4.js'
 
 describe('propertyPath', () => {
@@ -469,5 +470,108 @@ describe('keyEventRows', () => {
     expect(rows.map(r => [r.eventName, r.keyEvents])).toEqual([['ads_conversion_Contact_Us_1', 3], ['form_submit', 1]])
     expect(rows[0].channels).toEqual([{ channel: 'Cross-network', keyEvents: 2 }, { channel: 'Organic Search', keyEvents: 1 }])
     expect(rows[1].channels[0].channel).toBe('Unassigned')
+  })
+})
+
+describe('reportPlan — leads and AI visits', () => {
+  const plan = reportPlan({ current: { start: 'a', end: 'b' }, previous: { start: 'c', end: 'd' } })
+
+  // eventCount, because a lead the site sent before anyone ticked it as a key
+  // event in GA4 is still a lead.
+  it('counts lead events by eventCount, not keyEvents, and by channel', () => {
+    const leads = plan.find(p => p.id === 'leads')
+    expect(leads.optional).toBe(true)
+    expect(leads.body.metrics.map(m => m.name)).toEqual(['eventCount'])
+    expect(leads.body.dimensions.map(d => d.name)).toEqual(['eventName', 'sessionDefaultChannelGroup'])
+  })
+
+  it('asks for source, channel and landing page for AI visits, with no keyEvents to fail on', () => {
+    const ai = plan.find(p => p.id === 'ai')
+    expect(ai.optional).toBe(true)
+    expect(ai.body.dimensions.map(d => d.name)).toEqual(['sessionSource', 'sessionDefaultChannelGroup', 'landingPage'])
+    expect(ai.body.metrics.map(m => m.name)).not.toContain('keyEvents')
+  })
+})
+
+describe('leadRows and leadsSummary', () => {
+  // The shape arak-sa.com returns: lots of non-lead events, and the Ads
+  // conversion that fires on a contact-page load, which is not a lead.
+  const rows = [
+    { eventName: 'page_view', sessionDefaultChannelGroup: 'Direct', eventCount: 900 },
+    { eventName: 'ads_conversion_Contact_Us_1', sessionDefaultChannelGroup: 'Organic Search', eventCount: 83 },
+    { eventName: 'generate_lead', sessionDefaultChannelGroup: 'Organic Search', eventCount: 2 },
+    { eventName: 'generate_lead', sessionDefaultChannelGroup: 'AI Assistant', eventCount: 1 },
+    { eventName: 'phone_click', sessionDefaultChannelGroup: 'Organic Search', eventCount: 4 },
+  ]
+
+  it('keeps only the three lead events, always all three, in a fixed order', () => {
+    const out = leadRows(rows)
+    expect(out.map(r => r.eventName)).toEqual(['generate_lead', 'phone_click', 'email_click'])
+    expect(out.map(r => r.count)).toEqual([3, 4, 0])
+    expect(out[0].channels).toEqual([
+      { channel: 'Organic Search', count: 2 }, { channel: 'AI Assistant', count: 1 },
+    ])
+  })
+
+  it('sums by channel and says whether the site sends lead events at all', () => {
+    const s = leadsSummary(leadRows(rows))
+    expect(s.total).toBe(7)
+    expect(s.tracked).toBe(true)
+    expect(s.byChannel[0]).toEqual({ channel: 'Organic Search', count: 6 })
+  })
+
+  // Today's real state: no lead events, only the contact-page conversion.
+  // "Not tracked" must be distinguishable from "a quiet month".
+  it('reports an untracked site as untracked, not as zero leads', () => {
+    const s = leadsSummary(leadRows(rows.slice(0, 2)))
+    expect(s.tracked).toBe(false)
+    expect(s.total).toBe(0)
+  })
+})
+
+describe('aiAssistantOf', () => {
+  it('names every spelling GA4 reports for the same assistant', () => {
+    expect(aiAssistantOf('chatgpt.com').id).toBe('chatgpt')
+    expect(aiAssistantOf('chat.openai.com').id).toBe('chatgpt')
+    expect(aiAssistantOf('gemini.google.com').id).toBe('gemini')
+    expect(aiAssistantOf('gemini').id).toBe('gemini')
+    expect(aiAssistantOf('www.perplexity.ai').id).toBe('perplexity')
+    expect(aiAssistantOf('copilot.microsoft.com').id).toBe('copilot')
+    expect(aiAssistantOf('claude.ai').id).toBe('claude')
+  })
+
+  it('leaves search engines and social alone', () => {
+    expect(aiAssistantOf('google')).toBeNull()
+    expect(aiAssistantOf('bing')).toBeNull()
+    expect(aiAssistantOf('instagram')).toBeNull()
+    expect(aiAssistantOf('(direct)')).toBeNull()
+  })
+
+  // GA4 knows an assistant this list has not met: still counted, by its name.
+  it('keeps an unknown source GA4 filed under the AI channel', () => {
+    const a = aiAssistantOf('newbot.ai', 'AI Assistant')
+    expect(a.label).toBe('newbot.ai')
+  })
+})
+
+describe('aiVisits', () => {
+  const rows = [
+    { sessionSource: 'chatgpt.com', sessionDefaultChannelGroup: 'AI Assistant', landingPage: '/', sessions: 60, engagedSessions: 36 },
+    { sessionSource: 'chatgpt.com', sessionDefaultChannelGroup: 'AI Assistant', landingPage: '/services/outdoor-lighting', sessions: 9, engagedSessions: 6 },
+    { sessionSource: 'gemini.google.com', sessionDefaultChannelGroup: 'AI Assistant', landingPage: '/', sessions: 3, engagedSessions: 3 },
+    { sessionSource: 'google', sessionDefaultChannelGroup: 'Organic Search', landingPage: '/', sessions: 300, engagedSessions: 200 },
+  ]
+
+  it('counts AI sessions only, by assistant and by landing page', () => {
+    const v = aiVisits(rows)
+    expect(v.sessions).toBe(72)
+    expect(v.engagedSessions).toBe(45)
+    expect(v.engagementRate).toBeCloseTo(62.5)
+    expect(v.assistants.map(a => [a.label, a.sessions])).toEqual([['ChatGPT', 69], ['Gemini', 3]])
+    expect(v.pages[0]).toEqual({ path: '/', sessions: 63, assistants: ['ChatGPT', 'Gemini'] })
+  })
+
+  it('is empty, not broken, with no rows', () => {
+    expect(aiVisits([])).toEqual({ sessions: 0, engagedSessions: 0, engagementRate: 0, assistants: [], pages: [] })
   })
 })

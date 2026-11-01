@@ -465,3 +465,81 @@ export function IndexHealthPanel({ index, onRun, canRun = true }) {
     </Card>
   )
 }
+
+// ─── Target searches ───────────────────────────────────────────────────────
+//
+// The searches this company built pages for, each read off rows the page
+// already has: is Google showing us, on WHICH page, and where. The progress
+// measure for the SEO work, because the non-brand total can rise while every
+// target still lands on the homepage.
+
+const TARGET_STATE = {
+  ranking: { label: 'Right page', classes: 'bg-sage-50 text-sage-700 border-sage-200' },
+  elsewhere: { label: 'Wrong page', classes: 'bg-amber-50 text-amber-700 border-amber-200' },
+  shown: { label: 'Page unknown', classes: 'bg-stone-100 text-stone-600 border-stone-300' },
+  missing: { label: 'Not seen', classes: 'bg-red-50 text-red-600 border-red-200' },
+}
+
+export function TargetSearchesPanel({ targets = [], configured = false }) {
+  if (!configured) {
+    return (
+      <Card className="overflow-hidden">
+        <PanelHead title="Target searches" icon={Icon.trending} tone="sage"
+          subtitle="The searches each page was built to win" />
+        {/* How to set them lives in docs/WEBSITE-SETUP.md, not on screen. */}
+        <p className="px-5 py-4 text-xs text-text-tertiary">
+          No target searches are set for this company yet. Contact your admin to set them.
+        </p>
+      </Card>
+    )
+  }
+
+  const right = targets.filter(t => t.state === 'ranking').length
+  const wrong = targets.filter(t => t.state === 'elsewhere').length
+  const missing = targets.filter(t => t.state === 'missing').length
+
+  return (
+    <Card className="overflow-hidden">
+      <PanelHead title="Target searches" icon={Icon.trending} tone="sage"
+        subtitle={`${right} of ${targets.length} on the page built for them · ${wrong} on another page · ${missing} not seen`} />
+      <ul className="divide-y divide-border">
+        {targets.map(t => {
+          const s = TARGET_STATE[t.state] || TARGET_STATE.shown
+          return (
+            <li key={t.query} className="px-5 py-2.5 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs text-text truncate">{t.query}</p>
+                <p className="text-[10px] text-text-tertiary mt-0.5 truncate font-mono">
+                  {t.state === 'elsewhere'
+                    ? `${t.shownPage} — built for ${t.page}`
+                    : t.state === 'shown'
+                      ? `page not reported — built for ${t.page}`
+                      : t.page}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <span className="text-[11px] text-text-secondary tabular-nums text-right">
+                  {t.position === null
+                    ? 'not in named queries'
+                    : `pos ${t.position.toFixed(1)} · ${fmt(t.impressions)} impr · ${plural(t.clicks, 'click')}`}
+                  {typeof t.positionDelta === 'number' && Math.abs(t.positionDelta) >= 0.5 && (
+                    <span className={`ml-1.5 font-semibold ${t.positionDelta > 0 ? 'text-sage-700' : 'text-red-600'}`}>
+                      {t.positionDelta > 0 ? '↑' : '↓'}{Math.abs(t.positionDelta).toFixed(1)}
+                    </span>
+                  )}
+                </span>
+                <span className={`text-[10px] px-1.5 py-0.5 border ${s.classes}`}>{s.label}</span>
+              </div>
+            </li>
+          )
+        })}
+      </ul>
+      {missing > 0 && (
+        <p className="px-5 py-2.5 text-[11px] text-text-tertiary border-t border-border bg-surface-subtle">
+          “Not seen” means the search is not among the queries Google names for this window. Either we were not
+          shown for it, or Google withheld it as too rare to report; the two cannot be told apart from here.
+        </p>
+      )}
+    </Card>
+  )
+}

@@ -5,6 +5,7 @@ import { createZernio, zernioKeyFor } from '../zernio/_zernio.js'
 import { zernioProfileFor, accountInsights, MAX_INSIGHT_DAYS } from './_zernioLive.js'
 import { fetchWebsiteData, fetchSitemaps } from './_searchConsole.js'
 import { fetchGa4Data } from './_ga4.js'
+import { seoTargets } from '../../src/lib/analytics/websiteAnalytics.js'
 import { normalizeRange, resolveRange, isCustom } from '../../src/lib/dateRange.js'
 
 // ─── POST /api/agent/website ───────────────────────────────────────────────
@@ -194,6 +195,9 @@ export default async function handler(req, res) {
         // cannot work that out without them.
         brandTerms,
         lines,
+        // The searches this brand built pages for — the Brand Brain textarea
+        // `seo_targets`, one `search | /page` per line — cleaned into a list.
+        targets: seoTargets(customFields.seo_targets),
         sitemaps: sitemaps.sitemaps || [],
         sitemapError: sitemaps.error || '',
       },

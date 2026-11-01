@@ -267,6 +267,13 @@ export function Ga4Panels({ ga4, summary, days, custom = false }) {
         </Card>
       )}
 
+      {/* The two numbers the SEO work is judged by, above the breakdowns:
+          did anyone get in touch, and are answer engines sending people. */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <LeadsPanel ga4={ga4} rows={summary.leadRows || []} leads={summary.leads} />
+        <AiVisitsPanel ga4={ga4} ai={summary.ai} sessions={summary.sessions} />
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card className="overflow-hidden">
           <Head title="Where visits came from"
@@ -388,6 +395,103 @@ export function Ga4Panels({ ga4, summary, days, custom = false }) {
         </Card>
       </div>
     </div>
+  )
+}
+
+// ─── Leads ─────────────────────────────────────────────────────────────────
+//
+// Enquiries, phone taps and email taps, read from the events the site sends
+// rather than from what is ticked as a key event — see LEAD_EVENTS. Three
+// states again: the report was rejected; the site sends none of these events
+// (a blind spot, not a quiet month); or real counts, zeroes included.
+
+export function LeadsPanel({ ga4, rows = [], leads }) {
+  const share = shareOf(rows, 'count')
+  return (
+    <Card className="overflow-hidden">
+      <Head title="Leads" subtitle="People who got in touch from the site, and the channel that brought them"
+        right={leads?.tracked ? <span className="text-lg font-bold text-text tabular-nums">{fmt(leads.total)}</span> : null} />
+      {!ga4.leadsAvailable ? (
+        <p className="px-5 py-4 text-xs text-text-tertiary">
+          GA4 would not report events for this window, so leads cannot be counted. This is a connection problem,
+          not a month without enquiries.
+        </p>
+      ) : !leads?.tracked ? (
+        <p className="px-5 py-4 text-xs text-text-tertiary">
+          The site does not send enquiry, phone or email events yet, so leads cannot be counted. Until it does, a
+          “Contact Us” key event counts visits to the contact page, not people who got in touch.
+        </p>
+      ) : (
+        <>
+          <ul className="divide-y divide-border">
+            {rows.map(r => (
+              <ShareRow key={r.eventName} label={r.label} share={share(r.count)} right={fmt(r.count)}
+                color="#325130"
+                sub={r.channels.length
+                  ? r.channels.map(c => `${c.channel} ${fmt(c.count)}`).join(' · ')
+                  : 'None in this window'} />
+            ))}
+          </ul>
+          {leads.byChannel.length > 0 && (
+            <p className="px-5 py-2.5 text-[11px] text-text-tertiary border-t border-border bg-surface-subtle">
+              By channel: {leads.byChannel.map(c => `${c.channel} ${fmt(c.count)}`).join(' · ')}
+            </p>
+          )}
+        </>
+      )}
+    </Card>
+  )
+}
+
+// ─── Visits from AI assistants ─────────────────────────────────────────────
+//
+// The channel the GEO work is meant to grow. Pages matter as much as the
+// count: they are which of our pages the assistants are citing.
+
+export function AiVisitsPanel({ ga4, ai, sessions = 0 }) {
+  const assistants = ai?.assistants || []
+  const share = shareOf(assistants, 'sessions')
+  return (
+    <Card className="overflow-hidden">
+      <Head title="Visits from AI assistants"
+        subtitle="ChatGPT, Gemini, Perplexity, Copilot and the rest, and which of our pages they sent people to"
+        right={ai?.sessions ? <span className="text-lg font-bold text-text tabular-nums">{fmt(ai.sessions)}</span> : null} />
+      {!ga4.aiAvailable ? (
+        <p className="px-5 py-4 text-xs text-text-tertiary">
+          GA4 would not report traffic sources for this window, so AI visits cannot be counted.
+        </p>
+      ) : !ai?.sessions ? (
+        <p className="px-5 py-4 text-xs text-text-tertiary">
+          No visits from AI assistants in this window.
+        </p>
+      ) : (
+        <>
+          <p className="px-5 pt-3 text-[11px] text-text-tertiary">
+            {pct(sessions ? (ai.sessions / sessions) * 100 : 0)} of all visits · engaged {pct(ai.engagementRate)}
+          </p>
+          <ul className="divide-y divide-border">
+            {assistants.map(a => (
+              <ShareRow key={a.id} label={a.label} share={share(a.sessions)}
+                right={plural(a.sessions, 'visit')} color="#7d98a1"
+                sub={`${fmt(a.engagedSessions)} engaged`} />
+            ))}
+          </ul>
+          <Collapsible title="Pages they landed on" subtitle="Which of our pages the assistants are citing"
+            count={ai.pages.length}>
+            <ul className="divide-y divide-border border-t border-border">
+              {ai.pages.map(p => (
+                <li key={p.path} className="px-5 py-2 flex items-center justify-between gap-3">
+                  <span className="text-xs text-text truncate font-mono">{p.path}</span>
+                  <span className="text-[11px] text-text-tertiary tabular-nums flex-shrink-0">
+                    {plural(p.sessions, 'visit')} · {p.assistants.join(', ')}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </Collapsible>
+        </>
+      )}
+    </Card>
   )
 }
 

@@ -13,7 +13,7 @@ import { Ga4Panels, BioLinkPanel } from './WebsiteGa4'
 import { useWebsiteAnalytics } from './useWebsiteAnalytics'
 import { RangePicker } from '../../components/analytics/RangePicker'
 import { isCustom, rangeLabel } from '../../lib/dateRange'
-import { ExplainPanel, ImageSearchPanel, IndexHealthPanel } from './WebsiteDetail'
+import { ExplainPanel, ImageSearchPanel, IndexHealthPanel, TargetSearchesPanel } from './WebsiteDetail'
 
 // ─── The Website tab ───────────────────────────────────────────────────────
 //
@@ -233,6 +233,7 @@ export function WebsiteAnalytics(w) {
     pages, hosts, countries, devices, appearance, sitemaps, recommendations, ga4Summary,
     arrivals, arrivalsSummary,
     image, index, runIndexHealth, explain, runExplain, canExplain,
+    targets, targetsConfigured,
   } = w
 
   if (loading) return <WebsiteSkeleton />
@@ -606,6 +607,12 @@ export function WebsiteAnalytics(w) {
               never fetched is wasted work, and a page missing from the table
               below may be missing from the index rather than from demand. */}
           <IndexHealthPanel index={index} onRun={runIndexHealth} />
+
+          {/* ── The searches each page was built for ──
+              Right after index health, because the two answer one question
+              between them: a target that is "not seen" on a page Google has
+              not indexed is an indexing job, not a copywriting one. */}
+          <TargetSearchesPanel targets={targets || []} configured={!!targetsConfigured} />
 
           {/* ── Pages, countries, devices ── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

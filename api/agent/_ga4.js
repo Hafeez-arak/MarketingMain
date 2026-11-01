@@ -20,7 +20,7 @@ import { searchWindows } from '../../src/lib/agent/searchConsole.js'
 //
 // ── WHY runReport PER REPORT AND NOT batchRunReports ──
 //
-// The Data API will take five reports in one call, and this asks for thirteen,
+// The Data API will take five reports in one call, and this asks for fifteen,
 // so two batches would be the obvious shape and half the round trips.
 //
 // It is not worth it. A batch is atomic: one report naming a metric this
@@ -33,7 +33,7 @@ import { searchWindows } from '../../src/lib/agent/searchConsole.js'
 // it turns one panel into "nothing is marked as a key event yet", which is
 // both true and useful.
 //
-// Thirteen small reports at four in flight is about two seconds. The page can
+// Fifteen small reports at four in flight is about two seconds. The page can
 // afford it; it cannot afford being blank for a reason nobody can see.
 //
 // ── The two keys this module reads ──
@@ -174,6 +174,12 @@ export async function fetchGa4Data({
     // are configured" and "the key-events report failed" look identical on
     // screen and mean completely different things.
     keyEventsAvailable: !by.get('keyEvents')?.error,
+    // The same distinction again, for the two reports the progress panels
+    // read: a rejected report is not "no leads" and not "no AI visits".
+    leads: rowsOf('leads'),
+    leadsAvailable: !by.get('leads')?.error,
+    ai: rowsOf('ai'),
+    aiAvailable: !by.get('ai')?.error,
     // Every day the tag has ever recorded a session, and the date this answer
     // was computed on. Together they say whether this window predates the
     // tag — see `collectionState`.

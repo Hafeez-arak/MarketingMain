@@ -6,7 +6,7 @@ import { seoRecommendations } from '../lib/seoAdvice'
 import {
   websiteSummary, dailySeries, searchTypes, positionBands, pageRows, hostSplit,
   queryRows, countryRows, deviceRows, appearanceRows, sitemapHealth, queryCoverage,
-  imageSearch,
+  imageSearch, targetSearches,
 } from '../lib/analytics/websiteAnalytics'
 import { indexHealth, normalizeInspection } from '../lib/agent/urlInspection'
 import { ga4Summary, platformArrivals, arrivalsSummary } from '../lib/agent/ga4'
@@ -112,6 +112,27 @@ const GA4_LIVE = {
     { eventName: 'page_view', sessionDefaultChannelGroup: 'Direct', keyEvents: 0 },
   ],
   keyEventsAvailable: true,
+  // Shaped like arak-sa.com once the site sends lead events (website PR #6):
+  // the Ads conversion is still there and must not be counted as a lead.
+  leads: [
+    { eventName: 'ads_conversion_Contact_Us_1', sessionDefaultChannelGroup: 'Organic Search', eventCount: 3 },
+    { eventName: 'generate_lead', sessionDefaultChannelGroup: 'Organic Search', eventCount: 2 },
+    { eventName: 'generate_lead', sessionDefaultChannelGroup: 'AI Assistant', eventCount: 1 },
+    { eventName: 'phone_click', sessionDefaultChannelGroup: 'Direct', eventCount: 3 },
+    { eventName: 'phone_click', sessionDefaultChannelGroup: 'Organic Search', eventCount: 1 },
+  ],
+  leadsAvailable: true,
+  // Recorded from arak-sa.com, 2026-09-27 to 11-01: ChatGPT linking service
+  // pages Google had not indexed.
+  ai: [
+    { sessionSource: 'chatgpt.com', sessionDefaultChannelGroup: 'AI Assistant', landingPage: '/', sessions: 22, engagedSessions: 13 },
+    { sessionSource: 'chatgpt.com', sessionDefaultChannelGroup: 'AI Assistant', landingPage: '/ar', sessions: 4, engagedSessions: 3 },
+    { sessionSource: 'chatgpt.com', sessionDefaultChannelGroup: 'AI Assistant', landingPage: '/services/outdoor-lighting', sessions: 3, engagedSessions: 3 },
+    { sessionSource: 'chatgpt.com', sessionDefaultChannelGroup: 'AI Assistant', landingPage: '/services/lighting-design', sessions: 2, engagedSessions: 2 },
+    { sessionSource: 'gemini.google.com', sessionDefaultChannelGroup: 'AI Assistant', landingPage: '/', sessions: 2, engagedSessions: 2 },
+    { sessionSource: 'google', sessionDefaultChannelGroup: 'Organic Search', landingPage: '/', sessions: 61, engagedSessions: 40 },
+  ],
+  aiAvailable: true,
   // The tag predates the window: one early day, then the window's own days.
   collected: [{ date: '2026-06-01', sessions: 2 }, ...dailyGa4().filter(d => d.sessions > 0)],
   collectedAvailable: true,
@@ -198,9 +219,29 @@ function dailyGa4() {
   return out
 }
 
+// arak-sa.com's own targets, as set in its brand profile. Against the
+// recorded fixture: one on the homepage, one on its page, one not named.
+const TARGETS = [
+  { query: 'lighting consultant riyadh', page: '/services/lighting-design' },
+  { query: 'lighting design saudi arabia', page: '/services/lighting-design' },
+  { query: 'smart poles', page: '/services/smart-poles' },
+  { query: 'facade lighting in saudi arabia', page: '/services/facade-lighting' },
+  { query: 'knx lighting control riyadh', page: '/services/lighting-controls' },
+]
+
 const STATES = {
   'Live — Search Console, GA4 not connected': { search: fixture.search, ga4: fixture.ga4 },
-  'Live — both connected': { search: fixture.search, ga4: GA4_LIVE, bio: BIO },
+  'Live — both connected': { search: { ...fixture.search, targets: TARGETS }, ga4: GA4_LIVE, bio: BIO },
+  'GA4 — site sends no lead events, no AI visits': {
+    search: fixture.search,
+    ga4: { ...GA4_LIVE, leads: GA4_LIVE.leads.slice(0, 1), ai: GA4_LIVE.ai.slice(-1) },
+    bio: BIO,
+  },
+  'GA4 — leads and AI reports rejected': {
+    search: { ...fixture.search, targets: TARGETS },
+    ga4: { ...GA4_LIVE, leads: [], leadsAvailable: false, ai: [], aiAvailable: false },
+    bio: BIO,
+  },
   'GA4 — tag live after this window': { search: fixture.search, ga4: GA4_BEFORE_TAG, bio: BIO },
   'GA4 — tag started inside this window': { search: fixture.search, ga4: GA4_PARTIAL, bio: BIO },
   'Bio link — tagged, both platforms': { search: fixture.search, ga4: GA4_TAGGED, bio: BIO },
@@ -375,6 +416,11 @@ export function WebsiteHarness() {
       imageQueries: search.imageQueries, imagePages: search.imagePages,
       brandTerms: search.brandTerms, lines: search.lines, types: search.types,
     }) : null,
+
+    targets: usable ? targetSearches({
+      targets: search.targets, queries: search.queries, previous: search.previous, pages: search.pages,
+    }) : [],
+    targetsConfigured: (search?.targets || []).length > 0,
 
     // The panels a person presses. `idle` is the default because it is what
     // every real page load shows.
