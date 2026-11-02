@@ -16,6 +16,14 @@
 // schedule-uploads/instagram|linkedin are flat legacy folders with no company
 // in the path, so there is no way to tell whose a file is; and lead-files is
 // private (no browser access) and empties itself after a day.
+//
+// chat-files (2026-11-02, files attached in the assistant chat) is laid out
+// <workspace>/chat/<chat>/... but is not listed here either: chats are private
+// to their owner, so a browser policy that let the person deleting a company
+// list everyone's chat files would be a leak, and one scoped to their own
+// chats stops working the moment the cascade deletes the chats. The server
+// removes them instead, once their chat is gone (chat_files_orphaned, swept
+// by api/agent/_chatFiles.js).
 
 const PAGE = 1000
 const REMOVE_CHUNK = 100

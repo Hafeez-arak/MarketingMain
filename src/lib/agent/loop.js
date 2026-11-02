@@ -117,15 +117,20 @@ export function textIn(response) {
  * person is still owed an answer. The failure text is passed through verbatim
  * so the model can tell a missing row from a broken query.
  */
+//
+// `outcome.blocks` (get_attachment, 2026-11-02) are image or document blocks
+// that ride after the JSON, so a re-opened file reaches the model as the
+// file and not as base64 text it would have to read as characters.
 export function toolResultBlock(toolUseId, outcome) {
   const ok = outcome?.ok !== false
+  const json = JSON.stringify(outcome?.result ?? {})
   return {
     type: 'tool_result',
     tool_use_id: toolUseId,
     is_error: !ok,
-    content: ok
-      ? JSON.stringify(outcome?.result ?? {})
-      : String(outcome?.error || 'The tool failed for an unknown reason.'),
+    content: !ok
+      ? String(outcome?.error || 'The tool failed for an unknown reason.')
+      : outcome?.blocks?.length ? [{ type: 'text', text: json }, ...outcome.blocks] : json,
   }
 }
 

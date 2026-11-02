@@ -104,6 +104,7 @@ export const FOLD_PROMPT = [
   '- what the person asked for and what they are working on;',
   '- every decision, preference and correction they gave ("no, smaller projects", "both languages");',
   '- names, numbers, dates, projects, companies and links that came up, exactly as written;',
+  '- the name of every file the person attached and what it was, since the assistant can re-open it by name;',
   '- what the assistant did: drafts written, requests filed, agenda items added, edits made;',
   '- anything still open or promised for later;',
   '- the language the person writes in.',

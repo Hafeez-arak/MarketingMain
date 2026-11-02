@@ -15,6 +15,7 @@ import { captureLinkedInAudiences } from './_linkedinAudience.js'
 import {
   validateAttachments, userContent, storedAttachments,
 } from '../../src/lib/agent/attachments.js'
+import { saveChatFiles } from './_chatFiles.js'
 
 // ─── POST /api/agent/chat ──────────────────────────────────────────────────
 // The assistant answering now. AGENT.md §5a.
@@ -24,7 +25,9 @@ import {
 //
 // `attachments` (2026-10-17) is up to four images or PDFs as base64, already
 // downscaled by the browser. They reach the model on this turn only; see
-// src/lib/agent/attachments.js for why they are not stored or replayed.
+// src/lib/agent/attachments.js for why they are not replayed. Since
+// 2026-11-02 the originals are kept (_chatFiles.js) so a later turn can
+// re-open one with get_attachment.
 //
 // `context` is the page's typed descriptor — a route, an entity type and an
 // id — never a scrape of the DOM and never the rendered page. The agent
@@ -39,13 +42,17 @@ function send(res, event, data) {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
 }
 
-/** Store the user's message; the thumbnails too when there are any and the column exists. */
-async function saveUserMessage(chatId, workspaceId, question, attachments) {
+/**
+ * Store the user's message; the thumbnails too when there are any and the
+ * column exists, with where each original was kept (`saved`, from
+ * saveChatFiles).
+ */
+async function saveUserMessage(chatId, workspaceId, question, attachments, saved = []) {
   const body = { chat_id: chatId, workspace_id: workspaceId, role: 'user', content: question }
   if (attachments.length) {
     try {
       await db('research_messages', {
-        method: 'POST', body: { ...body, attachments: storedAttachments(attachments) }, prefer: 'return=minimal',
+        method: 'POST', body: { ...body, attachments: storedAttachments(attachments, saved) }, prefer: 'return=minimal',
       })
       return
     } catch (err) {
@@ -229,6 +236,10 @@ export default async function handler(req, res) {
     }
     send(res, 'thread', { thread_id: chatId })
 
+    // Kept for later turns while the history and the brand load. Never
+    // throws; a file it could not keep is stored without a path.
+    const keeping = saveChatFiles(workspaceId, chatId, attachments)
+
     // ── History ──
     // Loaded from the store rather than trusted from the client. A browser
     // that posts its own history is a browser that can post anything into the
@@ -286,7 +297,7 @@ export default async function handler(req, res) {
       { role: 'user', content: userContent(preamble ? `${preamble}\n\n${question}` : question, attachments) },
     ]
 
-    await saveUserMessage(chatId, workspaceId, question, attachments)
+    await saveUserMessage(chatId, workspaceId, question, attachments, await keeping)
 
     const easy = route.tier === 'easy'
     const result = await runAgent({
@@ -315,6 +326,9 @@ export default async function handler(req, res) {
       // Leads, sales, email and the team (companyTools.js), 2026-10-18. The
       // leads and sales half follows isAdmin, exactly as the app's RLS does.
       company: true,
+      // get_attachment: files from earlier turns of this thread, re-opened
+      // only when a question needs them (attachments.js).
+      files: true,
       onText: delta => send(res, 'text', { delta }),
       onEvent: event => send(res, 'step', event),
     })

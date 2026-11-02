@@ -341,6 +341,37 @@ export const WEB_TOOLS = [
 ]
 
 /**
+ * Files the person attached earlier in this chat (2026-11-02). Chat only: the
+ * executor reads the thread from the verified session, and the research run
+ * has no thread. See src/lib/agent/attachments.js for why a file is re-opened
+ * on demand rather than re-sent every turn.
+ */
+export const FILE_TOOLS = [
+  {
+    name: 'get_attachment',
+    cost: FREE,
+    description:
+      'Re-open a file the person attached earlier in THIS conversation. Earlier files are not ' +
+      'in front of you — only a note naming them — so call this when a question needs the file ' +
+      'itself ("look at the PDF again", "what did page 3 say", "check the photo for the model ' +
+      'number") rather than what you already said about it. A PDF comes back as its extracted ' +
+      'text (long ones in parts: call again with the offset it gives you); an image comes back ' +
+      'as the image. Without a name it re-opens the only file, or lists the files when there ' +
+      'are several. A file attached to the current message is already in front of you; do not ' +
+      'call this for it.',
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        name: { type: 'string', description: 'The file name as the note gives it, e.g. "newsletter-oct.pdf". Part of the name is enough.' },
+        offset: { type: 'integer', description: 'For a long PDF: where in its text to continue from, as the previous result said.' },
+      },
+      required: [],
+    },
+  },
+]
+
+/**
  * Every tool the agent can call. Reads always; writes only where a surface
  * asks for them.
  *
@@ -353,7 +384,7 @@ export const WEB_TOOLS = [
 // PROVIDER_TOOLS is in here so findTool and isFree resolve `get_zernio_live`
 // — isFree treats an unknown name as metered, which would be the right answer
 // by accident, but findTool returning null makes the tool uncallable.
-export const ALL_TOOLS = [...READ_TOOLS, ...PROVIDER_TOOLS]
+export const ALL_TOOLS = [...READ_TOOLS, ...PROVIDER_TOOLS, ...FILE_TOOLS]
 
 //
 // `admin` adds the direct-edit belt (adminTools.js). Only the chat endpoint
@@ -364,9 +395,13 @@ export const ALL_TOOLS = [...READ_TOOLS, ...PROVIDER_TOOLS]
 //
 // `company` adds leads, sales, email and the team (companyTools.js). Only the
 // chat passes it; within it, the leads and sales half follows `admin`.
-export function toolsFor({ writes = false, web = false, admin = false, company = false } = {}) {
+//
+// `files` adds get_attachment. Only the chat passes it, since only the chat
+// has a thread to read files from.
+export function toolsFor({ writes = false, web = false, admin = false, company = false, files = false } = {}) {
   return [
     ...READ_TOOLS,
+    ...(files ? FILE_TOOLS : []),
     ...(company ? [...companyToolsFor({ admin }), ...REQUEST_TOOLS] : []),
     // Always offered. Asking our own provider how our own account is doing is
     // the plainest question this assistant gets, and our stored copy is

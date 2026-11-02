@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   READ_TOOLS, ALL_TOOLS, toolDefs, findTool, isFree, toolsExposingWorkspace, FREE,
+  FILE_TOOLS, toolsFor,
 } from './tools'
 import {
   engagementOf, performanceBy, ourPerformance, engagementPer1k,
@@ -34,6 +35,26 @@ describe('the tool belt cannot be talked across workspaces', () => {
       { name: 'c', input_schema: { properties: { org_id: {} } } },
     ]
     expect(toolsExposingWorkspace(variants).sort()).toEqual(['a', 'b', 'c'])
+  })
+})
+
+describe('get_attachment reads only the thread it is called from', () => {
+  // The thread is the session's. A chat id the model could pass would let a
+  // hallucinated or injected id open someone else's private conversation's
+  // files, so the tool takes neither a workspace nor a chat.
+  it('takes no workspace and no chat from the model', () => {
+    const [tool] = FILE_TOOLS
+    expect(toolsExposingWorkspace(FILE_TOOLS)).toEqual([])
+    expect(Object.keys(tool.input_schema.properties).sort()).toEqual(['name', 'offset'])
+    expect(tool.input_schema.additionalProperties).toBe(false)
+  })
+
+  it('is offered only where a thread exists to read from', () => {
+    const names = opts => toolsFor(opts).map(t => t.name)
+    expect(names({})).not.toContain('get_attachment')
+    expect(names({ writes: true, web: true })).not.toContain('get_attachment')
+    expect(names({ files: true })).toContain('get_attachment')
+    expect(isFree('get_attachment')).toBe(true)
   })
 })
 

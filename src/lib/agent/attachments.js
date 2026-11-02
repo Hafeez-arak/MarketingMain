@@ -16,19 +16,30 @@
 //      `image` blocks for pictures, a `document` block for a PDF, ahead of the
 //      question text.
 //   4. What is stored with the message is the name, the type and the tiny
-//      thumbnail — never the file. Later turns replay the history from the
-//      database, and they replay a one-line note in place of the file.
+//      thumbnail, plus (since 2026-11-02) where the original was kept in the
+//      private `chat-files` bucket — never the file itself. Later turns replay
+//      the history from the database, and they replay a one-line note in place
+//      of the file.
+//   5. A later question that needs the file again ("look at the PDF again")
+//      re-opens it with the get_attachment tool (api/agent/_chatFiles.js):
+//      a PDF as the text extracted once at upload, an image as the image.
 //
 // ── WHY NOT RE-SEND THE FILE EVERY TURN ──
 //
 // History is rebuilt from research_messages on every request (chat.js never
 // trusts a browser-posted history). Storing the base64 there would put
-// megabytes in a text table and re-bill every image on every later turn of a
-// 40-message window. The model has already described what it saw in its own
-// answer, which IS replayed; the note tells it to ask for the file again if it
-// needs another look. Uploading to Storage and passing a URL was the other
-// option, and it buys back follow-up looks at the price of a bucket, its
-// policies and signed-URL expiry — not worth it for how this chat is used.
+// megabytes in a text table, and re-sending the file would re-bill it on
+// every later turn of a 40-message window — a newsletter PDF is ~50k tokens a
+// time. The model has already described what it saw in its own answer, which
+// IS replayed, and that answers most follow-ups. For the ones it does not,
+// the file is a tool call away, paid for only on the turn that needs it, and
+// a PDF comes back as its text, which costs a fraction of the PDF.
+//
+// Storage layout, one folder per thread so a thread's files sit together:
+//   chat-files  <workspace>/chat/<chat>/<key>/file.<ext>
+//                                       <key>/text.txt   (PDFs only)
+// The workspace leads the path so companyFolders() (src/lib/workspaceFiles.js)
+// finds them when a company is deleted.
 
 export const ATTACH_LIMITS = {
   maxCount: 4,
@@ -113,21 +124,124 @@ export function userContent(text, attachments = []) {
   return [...blocks, { type: 'text', text }]
 }
 
-/** What is stored with the message: enough to show it, never the file. */
-export function storedAttachments(attachments = []) {
-  return (attachments || []).map(a => ({ name: a.name, media_type: a.media_type, kind: a.kind, thumb: a.thumb || '' }))
+export const CHAT_FILES_BUCKET = 'chat-files'
+
+/**
+ * Most text get_attachment returns in one call. A long PDF comes back in
+ * pages of this size and the model asks for the next with `offset`, so one
+ * re-read never costs more than a re-sent PDF would have.
+ */
+export const MAX_TEXT_CHARS = 40_000
+
+const EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'application/pdf': 'pdf' }
+
+/** The thread's folder. Everything this chat keeps lives under it. */
+export const chatFolder = (workspaceId, chatId) => `${workspaceId}/chat/${chatId}/`
+
+/**
+ * Where one original goes. `key` is random per file, chosen by the caller;
+ * the person's file name stays on the stored entry and out of the path,
+ * because Storage refuses some characters a file name can have.
+ */
+export function chatFilePath(workspaceId, chatId, key, mediaType) {
+  return `${chatFolder(workspaceId, chatId)}${key}/file.${EXT[mediaType] || 'bin'}`
 }
+
+/** The extracted text sits next to the PDF it came from. */
+export const textPathFor = path => path.replace(/\/[^/]*$/, '/text.txt')
+
+/**
+ * Is this path inside this thread's folder? A stored path is ours, not the
+ * model's, but the read checks it anyway: a path from another thread or
+ * another company must never be fetched with the service key.
+ */
+export function inChatFolder(path, workspaceId, chatId) {
+  const p = String(path || '')
+  return Boolean(workspaceId && chatId) && p.startsWith(chatFolder(workspaceId, chatId)) && !p.includes('..')
+}
+
+/**
+ * What is stored with the message: enough to show it and to find it again,
+ * never the file. `saved` is what _chatFiles.js managed to keep, by position;
+ * a file it could not keep is stored without a path and its note says so.
+ */
+export function storedAttachments(attachments = [], saved = []) {
+  return (attachments || []).map((a, i) => {
+    const entry = { name: a.name, media_type: a.media_type, kind: a.kind, thumb: a.thumb || '' }
+    const s = saved?.[i]
+    if (s?.path) {
+      entry.path = s.path
+      if (s.text_path) entry.text_path = s.text_path
+      if (s.pages) entry.pages = s.pages
+      if (Number.isFinite(s.text_chars)) entry.text_chars = s.text_chars
+    }
+    return entry
+  })
+}
+
+const label = a => `${a.name} (${a.kind === 'pdf' ? 'PDF' : 'image'})`
 
 /**
  * The line that stands in for a file on later turns.
  *
  * Says plainly that the file is NOT in front of the model any more, so it
- * neither pretends to look again nor contradicts what it said the first time.
+ * neither pretends to look again nor contradicts what it said the first time,
+ * and says how to re-open the ones that were kept.
  */
 export function attachmentNote(stored = []) {
   const list = (Array.isArray(stored) ? stored : []).filter(a => a && a.name)
   if (!list.length) return ''
-  const named = list.map(a => `${a.name} (${a.kind === 'pdf' ? 'PDF' : 'image'})`).join(', ')
-  return `[With this message the person attached: ${named}. The file is not re-sent on later turns; ` +
-    'rely on what you said about it at the time, and ask them to attach it again if you need another look.]'
+  const kept = list.filter(a => a.path)
+  const lost = list.filter(a => !a.path)
+  const parts = [`[With this message the person attached: ${list.map(label).join(', ')}. Files are not re-sent on later turns.`]
+  if (kept.length) {
+    parts.push(
+      `${kept.length === list.length ? 'They are' : `${kept.map(a => a.name).join(', ')} ${kept.length > 1 ? 'are' : 'is'}`} kept: ` +
+      'when a question needs the file itself rather than what you already said about it, re-open it with ' +
+      'get_attachment and its name.',
+    )
+  }
+  if (lost.length) {
+    parts.push(
+      `${lost.map(a => a.name).join(', ')} ${lost.length > 1 ? 'were' : 'was'} not kept; rely on what you said ` +
+      'about it at the time, and ask them to attach it again if you need another look.',
+    )
+  }
+  return `${parts.join(' ')}]`
+}
+
+/**
+ * Every kept file in a thread, newest first, from its user messages'
+ * stored attachments. Rows are research_messages with `attachments` and
+ * `created_at`.
+ */
+export function threadFiles(rows = []) {
+  const out = []
+  for (const row of rows || []) {
+    for (const a of Array.isArray(row?.attachments) ? row.attachments : []) {
+      if (a?.name && a.path) out.push({ ...a, attached_at: row.created_at || null })
+    }
+  }
+  return out.sort((x, y) => String(y.attached_at || '').localeCompare(String(x.attached_at || '')))
+}
+
+/**
+ * The file a name refers to. Exact (ignoring case) first, then a name that
+ * contains what was asked for; the newest wins a tie, because "the PDF" in a
+ * follow-up means the one just discussed. With no name and one file, that
+ * file. Otherwise { error, files } naming what there is.
+ */
+export function pickFile(files, name) {
+  const want = String(name ?? '').trim().toLowerCase()
+  const names = files.map(f => f.name)
+  if (!files.length) return { error: 'No files have been attached in this conversation, or none were kept.', files: [] }
+  if (!want) {
+    return files.length === 1 ? { file: files[0] } : { error: 'Several files are attached in this conversation; say which.', files: names }
+  }
+  const hit = files.find(f => f.name.toLowerCase() === want) ||
+    files.find(f => f.name.toLowerCase().includes(want)) ||
+    // "the pdf" / "the image": the newest of that kind.
+    (/\bpdf\b/.test(want) ? files.find(f => f.kind === 'pdf') : null) ||
+    (/\b(image|photo|picture|screenshot)\b/.test(want) ? files.find(f => f.kind === 'image') : null)
+  return hit ? { file: hit } : { error: `No attached file matches "${name}".`, files: names }
 }

@@ -15,6 +15,7 @@ import { COMPANY_EXECUTORS } from './_company.js'
 import { REQUEST_EXECUTORS } from './_requests.js'
 import { isRequestTool } from '../../src/lib/agent/requestTools.js'
 import { isCompanyTool, isCompanyAdminTool } from '../../src/lib/agent/companyTools.js'
+import { getAttachment } from './_chatFiles.js'
 
 // ─── Running a tool ────────────────────────────────────────────────────────
 // The executors behind the definitions in src/lib/agent/tools.js.
@@ -481,6 +482,23 @@ export async function runTool(workspaceId, name, args = {}, session = {}) {
       const result = await REQUEST_EXECUTORS[name](workspaceId, args || {}, session)
       if (result?.error) return { ok: false, error: result.error, free: true }
       return { ok: true, result, free: true }
+    } catch (err) {
+      return { ok: false, error: err?.message || String(err), free: true }
+    }
+  }
+
+  // ── A file attached earlier in this chat ──
+  // The thread comes from the session, which the endpoint built after proving
+  // the thread is the caller's own; `args` only names the file. No session
+  // (the research run) means no thread, and nothing to re-open.
+  if (name === 'get_attachment') {
+    if (!session?.chatId) {
+      return { ok: false, free: true, error: 'Attached files can only be re-opened from a chat.' }
+    }
+    try {
+      const out = await getAttachment(workspaceId, args || {}, session)
+      if (out?.error) return { ok: false, error: out.error, free: true }
+      return { ok: true, result: out.result, blocks: out.blocks, free: true }
     } catch (err) {
       return { ok: false, error: err?.message || String(err), free: true }
     }
