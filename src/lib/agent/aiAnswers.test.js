@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   aiQuestions, answerPrompt, firstMention, hostOf, scoreAnswer, checkSummary, groupChecks,
-  questionMoves, answerSources, MAX_QUESTIONS,
+  questionMoves, answerSources, competitorAliases, MAX_QUESTIONS,
 } from './aiAnswers.js'
 
 const BRAND = ['arak', 'أراك', 'اراك']
@@ -122,5 +122,29 @@ describe('answerSources', () => {
   it('falls back to what was searched, and says so, when nothing is cited', () => {
     expect(answerSources({ content: [searched, { type: 'text', text: 'x' }] }))
       .toEqual({ urls: ['https://a.example', 'https://arak-sa.com/'], fromSearch: true })
+  })
+})
+
+describe('competitorAliases', () => {
+  // The names the first baseline's answers actually used (2026-11-02).
+  const named = (text, tracked) => scoreAnswer({ text, competitors: [tracked], brandTerms: BRAND }).competitors.length === 1
+
+  it('finds rivals by the name an answer actually uses', () => {
+    expect(named('Nassli Smart Building delivered KNX at Mövenpick.', 'Nassli Group')).toBe(true)
+    expect(named('Al-Babtain Power & Telecom makes poles.', 'Rayon Lighting Group (AlBabtain)')).toBe(true)
+    expect(named('Revenue lists Alfanar and Al Babtain.', 'Rayon Lighting Group (AlBabtain)')).toBe(true)
+    expect(named('Nouran Concept Lighting, a consultancy.', 'Nouran Lighting')).toBe(true)
+    expect(named('Al Nasser Lighting, long-standing.', 'Al Nasser Group')).toBe(true)
+    expect(named('National Lighting Company (NLC), three decades.', 'National Lighting Company (NLC)')).toBe(true)
+    expect(named('HUDA Lighting has a Riyadh branch.', 'Huda Lighting')).toBe(true)
+    expect(named('Armada Co. Ltd. did the compound.', 'Armada')).toBe(true)
+  })
+
+  // A four-letter core alone matches too much: "Tera" is not "Tera Systems".
+  it('does not reduce a name to a short common word', () => {
+    expect(competitorAliases('Tera Systems')).not.toContain('Tera')
+    expect(competitorAliases('SAS Systems Engineering')).not.toContain('SAS')
+    expect(competitorAliases('Huda Lighting')).not.toContain('Huda')
+    expect(named('The Huda family villa in Riyadh', 'Huda Lighting')).toBe(false)
   })
 })

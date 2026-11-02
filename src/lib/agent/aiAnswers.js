@@ -88,6 +88,45 @@ function earliest(text, names = []) {
   return at
 }
 
+// Words that describe what a company is rather than which one it is. An answer
+// says "Nassli Smart Building" or "Nassli", never the tracked "Nassli Group".
+const GENERIC = new Set([
+  'group', 'lighting', 'company', 'co', 'co.', 'ltd', 'ltd.', 'llc', 'systems', 'system', 'engineering',
+  'technologies', 'technology', 'electricals', 'electrical', 'electric', 'solutions', 'trading', 'est', 'est.',
+  'the', 'factory', 'industries', 'industry', 'international', 'ksa', 'saudi', 'arabia',
+])
+
+/**
+ * The names an answer might use for one tracked competitor.
+ *
+ * Found by the first baseline (2026-11-02): answers wrote "Nassli Smart
+ * Building", "Al-Babtain", "Nouran Concept Lighting" and "HUDA Lighting" for
+ * rivals tracked as "Nassli Group", "Rayon Lighting Group (AlBabtain)",
+ * "Nouran Lighting" and "Huda Lighting". Matching the full tracked name missed
+ * most of them. So each name also yields:
+ *   · whatever is in brackets ("AlBabtain", "NLC"), and the name without it;
+ *   · its core, with the generic words stripped ("Nassli", "Al Nasser");
+ *   · "Al" fused or hyphenated either way ("AlBabtain", "Al Babtain", "Al-Babtain").
+ * A core shorter than five letters on its own ("Tera", "SAS", "Huda") is NOT
+ * used: as a bare word it matches too much that is not the company.
+ */
+export function competitorAliases(name) {
+  const full = str(name)
+  if (!full) return []
+  const out = new Set([full])
+  const bracket = /\(([^)]+)\)/.exec(full)?.[1]
+  const plain = full.replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim()
+  if (plain) out.add(plain)
+  if (bracket) out.add(str(bracket))
+  const core = plain.split(' ').filter(w => !GENERIC.has(w.toLowerCase())).join(' ')
+  if (core && core !== plain && (core.includes(' ') || core.length >= 5)) out.add(core)
+  for (const a of [...out]) {
+    const fused = /^al[- ]?([A-Z\u0600-\u06FF].*)$/i.exec(a)
+    if (fused) for (const sep of ['', ' ', '-']) out.add(`Al${sep}${fused[1]}`)
+  }
+  return [...out].filter(a => a.length >= 3)
+}
+
 /** `https://www.arak-sa.com/x` → `arak-sa.com`. */
 export function hostOf(url) {
   try {
@@ -112,7 +151,7 @@ export function scoreAnswer({ text = '', sources = [], brandTerms = [], site = '
   const ourAt = earliest(text, brandTerms)
   const named = ourAt >= 0
   const rivals = competitors
-    .map(name => ({ name, at: firstMention(text, name) }))
+    .map(name => ({ name, at: earliest(text, competitorAliases(name)) }))
     .filter(r => r.at >= 0)
     .sort((a, b) => a.at - b.at)
   const ourHost = hostOf(site.startsWith('http') ? site : `https://${str(site).replace(/^sc-domain:/, '')}`)
