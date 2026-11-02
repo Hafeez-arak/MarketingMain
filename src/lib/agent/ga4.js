@@ -244,6 +244,33 @@ export function reportPlan({ current, previous } = {}) {
       }),
     },
     {
+      // ── Leads, counted whether or not anyone marked them ──
+      // eventCount, not keyEvents. A site that sends `generate_lead` before
+      // somebody ticks it as a key event in GA4 still had those enquiries, and
+      // the `keyEvents` report above would show none of them. Same two
+      // dimensions as that report so a lead is always named with its channel.
+      id: 'leads',
+      optional: true,
+      body: reportBody({
+        ...current, dimensions: ['eventName', 'sessionDefaultChannelGroup'], metrics: ['eventCount'],
+        orderBy: 'eventCount', limit: 200,
+      }),
+    },
+    {
+      // ── Visits from AI assistants ──
+      // Source AND channel, because neither alone is enough: GA4's "AI
+      // Assistant" channel is new and does not know every assistant, and a
+      // source string like `chatgpt.com` is only recognisable by name. The
+      // landing page is what says which of our pages the assistant is citing.
+      // Small sites only ever produce a few hundred rows of this.
+      id: 'ai',
+      optional: true,
+      body: reportBody({
+        ...current, dimensions: ['sessionSource', 'sessionDefaultChannelGroup', 'landingPage'],
+        metrics: ['sessions', 'engagedSessions'], orderBy: 'sessions', limit: 1000,
+      }),
+    },
+    {
       // ── When the tag started ──
       // Every day the property has ever recorded a session, from the earliest
       // date the Data API accepts. Not the window: its whole job is to find
@@ -382,6 +409,141 @@ export function keyEventRows(rows = []) {
   return [...by.values()].sort((a, b) => b.keyEvents - a.keyEvents)
 }
 
+// ─── Leads: the three things a visitor does when they mean it ──────────────
+//
+// A key event is whatever somebody ticked in GA4, and on arak-sa.com the only
+// one ticked is a Google Ads conversion that fires when /contact LOADS — 207
+// of them in its first five weeks, which is page visits, not enquiries. These
+// three are the actions themselves, sent by the site: the form accepted, a
+// phone number tapped, an email address tapped. They are counted from
+// eventCount, so they show up the day the site starts sending them rather
+// than the day somebody remembers to mark them in GA4.
+
+export const LEAD_EVENTS = [
+  { eventName: 'generate_lead', label: 'Enquiries sent' },
+  { eventName: 'phone_click', label: 'Phone taps' },
+  { eventName: 'email_click', label: 'Email taps' },
+]
+
+/**
+ * One row per lead event, each with the channels that produced it, always all
+ * three in the same order. A missing event is a zero row rather than a missing
+ * row, because "no phone taps" is an answer and a two-row list is a question.
+ */
+export function leadRows(rows = []) {
+  const by = new Map(LEAD_EVENTS.map(e => [e.eventName, { ...e, count: 0, channels: [] }]))
+  for (const r of rows) {
+    const row = by.get(str(r.eventName))
+    const n = num(r.eventCount)
+    if (!row || n <= 0) continue
+    row.count += n
+    row.channels.push({ channel: str(r.sessionDefaultChannelGroup) || 'Unassigned', count: n })
+  }
+  for (const row of by.values()) row.channels.sort((a, b) => b.count - a.count)
+  return [...by.values()]
+}
+
+/** Lead totals, and the same three summed per channel. */
+export function leadsSummary(rows = []) {
+  const channels = new Map()
+  for (const r of rows) {
+    for (const c of r.channels) channels.set(c.channel, (channels.get(c.channel) || 0) + c.count)
+  }
+  return {
+    total: rows.reduce((n, r) => n + r.count, 0),
+    // Whether the site sends these at all. Zero leads from a site that sends
+    // the events is a quiet month; zero from one that does not is a blind spot,
+    // and the panel must not word the two alike.
+    tracked: rows.some(r => r.count > 0),
+    byChannel: [...channels].map(([channel, count]) => ({ channel, count })).sort((a, b) => b.count - a.count),
+  }
+}
+
+// ─── AI assistants: the answer engines that send people to the site ────────
+//
+// ChatGPT sent arak-sa.com 86 visits in its first five weeks of measurement,
+// about one for every four from Google organic, and the pages it linked were
+// service pages Google had not indexed — it reads Bing. That is a channel, and
+// it is the one the GEO work exists to grow, so it gets counted by name.
+//
+// Matched the way `platformOf` matches social sources: `exact` for hosts with
+// no readable name in them, `tokens` against the source split on punctuation,
+// so `chatgpt.com`, `chat.openai.com` and a bare `chatgpt` utm_source all land
+// on the same row.
+
+export const AI_ASSISTANTS = [
+  { id: 'chatgpt', label: 'ChatGPT', tokens: ['chatgpt', 'openai'], exact: [] },
+  { id: 'gemini', label: 'Gemini', tokens: ['gemini', 'bard'], exact: [] },
+  { id: 'perplexity', label: 'Perplexity', tokens: ['perplexity'], exact: [] },
+  { id: 'copilot', label: 'Copilot', tokens: ['copilot'], exact: [] },
+  { id: 'claude', label: 'Claude', tokens: ['claude'], exact: [] },
+  { id: 'deepseek', label: 'DeepSeek', tokens: ['deepseek'], exact: [] },
+  { id: 'grok', label: 'Grok', tokens: ['grok'], exact: [] },
+  { id: 'meta', label: 'Meta AI', tokens: [], exact: ['meta.ai', 'www.meta.ai'] },
+  { id: 'mistral', label: 'Mistral', tokens: ['mistral'], exact: [] },
+  { id: 'you', label: 'You.com', tokens: [], exact: ['you.com'] },
+]
+
+/** GA4's name for the channel, since 2025. */
+export const AI_CHANNEL = 'AI Assistant'
+
+/**
+ * Which assistant a session came from, or null.
+ *
+ * A source GA4 filed under the AI channel but that matches nothing above is
+ * still an assistant — just one this list has not met — and is named by its
+ * own source rather than dropped.
+ */
+export function aiAssistantOf(source, channel = '') {
+  const s = str(source).toLowerCase()
+  const parts = s.split(/[^a-z0-9]+/).filter(Boolean)
+  for (const a of AI_ASSISTANTS) {
+    if (a.exact.includes(s)) return a
+    if (a.tokens.some(t => parts.includes(t))) return a
+  }
+  if (str(channel) === AI_CHANNEL) return { id: `other:${s}`, label: s || 'Other assistant', tokens: [], exact: [] }
+  return null
+}
+
+/**
+ * AI visits, by assistant and by the page they landed on.
+ *
+ * Takes the `ai` report's rows (sessionSource × sessionDefaultChannelGroup ×
+ * landingPage). Pages are the answer to "which of our pages do assistants
+ * cite", which is the GEO question; assistants are the answer to "which ones
+ * matter", which is where to spend effort.
+ */
+export function aiVisits(rows = [], { pageLimit = 10 } = {}) {
+  const assistants = new Map()
+  const pages = new Map()
+  let sessions = 0
+  let engaged = 0
+  for (const r of rows) {
+    const a = aiAssistantOf(r.sessionSource, r.sessionDefaultChannelGroup)
+    if (!a) continue
+    const n = num(r.sessions)
+    const e = num(r.engagedSessions)
+    sessions += n
+    engaged += e
+    const row = assistants.get(a.id) || { id: a.id, label: a.label, sessions: 0, engagedSessions: 0 }
+    row.sessions += n
+    row.engagedSessions += e
+    assistants.set(a.id, row)
+    const path = str(r.landingPage) || '(not set)'
+    const page = pages.get(path) || { path, sessions: 0, assistants: [] }
+    page.sessions += n
+    if (!page.assistants.includes(a.label)) page.assistants.push(a.label)
+    pages.set(path, page)
+  }
+  return {
+    sessions,
+    engagedSessions: engaged,
+    engagementRate: sessions ? (engaged / sessions) * 100 : 0,
+    assistants: [...assistants.values()].sort((a, b) => b.sessions - a.sessions),
+    pages: [...pages.values()].sort((a, b) => b.sessions - a.sessions).slice(0, pageLimit),
+  }
+}
+
 /**
  * The GA4 summary the page's tiles show.
  *
@@ -394,12 +556,16 @@ export function keyEventRows(rows = []) {
  */
 export function ga4Summary({
   totals = {}, previousTotals = {}, collected = [], collectedAvailable = false, windows = {}, asOf = '',
-  keyEvents = [],
+  keyEvents = [], leads = [], ai = [],
 } = {}) {
   const hasPrevious = num(previousTotals.sessions) > 0
+  const leadList = leadRows(leads)
   return {
     collection: collectionState({ collected, collectedAvailable, windows, today: asOf }),
     keyEventRows: keyEventRows(keyEvents),
+    leadRows: leadList,
+    leads: leadsSummary(leadList),
+    ai: aiVisits(ai),
     sessions: num(totals.sessions),
     users: num(totals.totalUsers),
     newUsers: num(totals.newUsers),

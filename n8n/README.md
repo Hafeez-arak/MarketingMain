@@ -31,7 +31,7 @@ Every platform publishes and syncs through the `Zernio *` workflows. The three M
 
 ## Website Agent gateway — deploy it with the agent container
 
-`Arak Lighting – Website Agent` moves only the two newly added, on-demand Website checks (`indexHealth` and `websiteExplain`) off Vercel and through the existing private `agent` container. The prior deployment already used all 12 Hobby-plan functions; adding these two made Vercel reject it. The workflow accepts only these two actions — it is not a generic proxy.
+`Arak Lighting – Website Agent` moves the on-demand Website checks (`indexHealth`, `websiteExplain` and, since 2026-11-01, `aiAnswers`) off Vercel and through the existing private `agent` container. The prior deployment already used all 12 Hobby-plan functions; adding these two made Vercel reject it. The workflow accepts only these three actions — it is not a generic proxy.
 
 After pulling this change on the n8n box, rebuild the agent image and import the workflow:
 

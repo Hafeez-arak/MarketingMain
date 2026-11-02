@@ -10,7 +10,7 @@ import { planFold, FOLD_PROMPT, foldInput, cleanSummary } from '../../src/lib/ag
 // files decide; this one reads, calls and writes.
 //
 // research_chats.summary / summary_through arrive in a hand-applied migration
-// (supabase/migrations/20261108_chat_thread_summary.sql). Until it is applied
+// (supabase/migrations/20261109_chat_thread_summary.sql). Until it is applied
 // every read here falls back to the plain thread, and a fold quietly does
 // nothing — the chat must not go down in the window between this deploy and
 // that migration.

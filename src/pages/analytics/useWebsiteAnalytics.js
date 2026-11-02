@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../../store/auth'
-import { fetchWebsiteAnalytics, fetchIndexHealth, fetchWebsiteExplanation } from '../../lib/websiteSearch'
+import {
+  fetchWebsiteAnalytics, fetchIndexHealth, fetchWebsiteExplanation, runAiAnswersCheck, loadAiAnswerChecks,
+} from '../../lib/websiteSearch'
+import { groupChecks } from '../../lib/agent/aiAnswers'
 import { resolveRange } from '../../lib/dateRange'
 import { seoRecommendations } from '../../lib/seoAdvice'
 import {
   websiteSummary, dailySeries, searchTypes, positionBands, pageRows, hostSplit,
   queryRows, countryRows, deviceRows, appearanceRows, sitemapHealth, queryCoverage,
-  imageSearch,
+  imageSearch, targetSearches,
 } from '../../lib/analytics/websiteAnalytics'
 import { explainFacts } from '../../lib/agent/websiteExplain'
 import { ga4Summary, platformArrivals, arrivalsSummary } from '../../lib/agent/ga4'
@@ -92,6 +95,35 @@ export function useWebsiteAnalytics() {
   // loading flag before its first await, and writing state from an effect BODY
   // is a cascading render React flags.
   useEffect(() => { queueMicrotask(() => load()) }, [load])
+
+  // ── Named in AI answers ──
+  // History is a free read and loads with the tab; a new check is paid and
+  // runs only on the button. Both are stamped with the workspace they belong
+  // to and checked on render, so switching company never shows the last
+  // company's answers for a frame.
+  const [aiHistory, setAiHistory] = useState({ forWorkspace: '', state: 'loading', rows: [], error: '' })
+  const [aiRun, setAiRun] = useState({ forWorkspace: '', state: 'idle', data: null, error: '' })
+  const loadAiHistory = useCallback(async () => {
+    if (!activeWorkspaceId) return
+    const ws = activeWorkspaceId
+    const res = await loadAiAnswerChecks(ws)
+    setAiHistory({ forWorkspace: ws, state: res.ok ? 'ok' : 'error', rows: res.rows || [], error: res.error || '' })
+  }, [activeWorkspaceId])
+  useEffect(() => { queueMicrotask(() => loadAiHistory()) }, [loadAiHistory])
+
+  const runAiAnswers = useCallback(async () => {
+    if (!activeWorkspaceId || !accessToken) return
+    const ws = activeWorkspaceId
+    setAiRun({ forWorkspace: ws, state: 'loading', data: null, error: '' })
+    const res = await runAiAnswersCheck(ws, accessToken)
+    setAiRun({
+      forWorkspace: ws,
+      state: res?.ok ? 'done' : 'error',
+      data: res || null,
+      error: res?.ok ? '' : (res?.error || 'The check did not finish.'),
+    })
+    if (res?.ok) loadAiHistory()
+  }, [activeWorkspaceId, accessToken, loadAiHistory])
 
 
 
@@ -218,6 +250,19 @@ export function useWebsiteAnalytics() {
 
     // Image search, in words rather than as one total.
     image,
+    targets: useMemo(() => (usable ? targetSearches({
+      targets: search.targets, queries: search.queries, previous: search.previous, pages: search.pages,
+    }) : []), [usable, search]),
+    targetsConfigured: (search?.targets || []).length > 0,
+
+    ai: {
+      questions: search?.aiQuestions || [],
+      history: aiHistory.forWorkspace === activeWorkspaceId
+        ? { ...aiHistory, checks: groupChecks(aiHistory.rows) }
+        : { state: 'loading', rows: [], checks: [], error: '' },
+      run: aiRun.forWorkspace === activeWorkspaceId ? aiRun : { state: 'idle', data: null, error: '' },
+    },
+    runAiAnswers,
 
     // The two the reader asks for. Each carries its own state, because
     // "not asked for yet" and "asked for and failed" are different panels.

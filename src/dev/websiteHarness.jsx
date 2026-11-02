@@ -6,10 +6,11 @@ import { seoRecommendations } from '../lib/seoAdvice'
 import {
   websiteSummary, dailySeries, searchTypes, positionBands, pageRows, hostSplit,
   queryRows, countryRows, deviceRows, appearanceRows, sitemapHealth, queryCoverage,
-  imageSearch,
+  imageSearch, targetSearches,
 } from '../lib/analytics/websiteAnalytics'
 import { indexHealth, normalizeInspection } from '../lib/agent/urlInspection'
 import { ga4Summary, platformArrivals, arrivalsSummary } from '../lib/agent/ga4'
+import { groupChecks } from '../lib/agent/aiAnswers'
 import fixture from './websiteFixture.json'
 import '../index.css'
 
@@ -112,6 +113,27 @@ const GA4_LIVE = {
     { eventName: 'page_view', sessionDefaultChannelGroup: 'Direct', keyEvents: 0 },
   ],
   keyEventsAvailable: true,
+  // Shaped like arak-sa.com once the site sends lead events (website PR #6):
+  // the Ads conversion is still there and must not be counted as a lead.
+  leads: [
+    { eventName: 'ads_conversion_Contact_Us_1', sessionDefaultChannelGroup: 'Organic Search', eventCount: 3 },
+    { eventName: 'generate_lead', sessionDefaultChannelGroup: 'Organic Search', eventCount: 2 },
+    { eventName: 'generate_lead', sessionDefaultChannelGroup: 'AI Assistant', eventCount: 1 },
+    { eventName: 'phone_click', sessionDefaultChannelGroup: 'Direct', eventCount: 3 },
+    { eventName: 'phone_click', sessionDefaultChannelGroup: 'Organic Search', eventCount: 1 },
+  ],
+  leadsAvailable: true,
+  // Recorded from arak-sa.com, 2026-09-27 to 11-01: ChatGPT linking service
+  // pages Google had not indexed.
+  ai: [
+    { sessionSource: 'chatgpt.com', sessionDefaultChannelGroup: 'AI Assistant', landingPage: '/', sessions: 22, engagedSessions: 13 },
+    { sessionSource: 'chatgpt.com', sessionDefaultChannelGroup: 'AI Assistant', landingPage: '/ar', sessions: 4, engagedSessions: 3 },
+    { sessionSource: 'chatgpt.com', sessionDefaultChannelGroup: 'AI Assistant', landingPage: '/services/outdoor-lighting', sessions: 3, engagedSessions: 3 },
+    { sessionSource: 'chatgpt.com', sessionDefaultChannelGroup: 'AI Assistant', landingPage: '/services/lighting-design', sessions: 2, engagedSessions: 2 },
+    { sessionSource: 'gemini.google.com', sessionDefaultChannelGroup: 'AI Assistant', landingPage: '/', sessions: 2, engagedSessions: 2 },
+    { sessionSource: 'google', sessionDefaultChannelGroup: 'Organic Search', landingPage: '/', sessions: 61, engagedSessions: 40 },
+  ],
+  aiAvailable: true,
   // The tag predates the window: one early day, then the window's own days.
   collected: [{ date: '2026-06-01', sessions: 2 }, ...dailyGa4().filter(d => d.sessions > 0)],
   collectedAvailable: true,
@@ -198,9 +220,29 @@ function dailyGa4() {
   return out
 }
 
+// arak-sa.com's own targets, as set in its brand profile. Against the
+// recorded fixture: one on the homepage, one on its page, one not named.
+const TARGETS = [
+  { query: 'lighting consultant riyadh', page: '/services/lighting-design' },
+  { query: 'lighting design saudi arabia', page: '/services/lighting-design' },
+  { query: 'smart poles', page: '/services/smart-poles' },
+  { query: 'facade lighting in saudi arabia', page: '/services/facade-lighting' },
+  { query: 'knx lighting control riyadh', page: '/services/lighting-controls' },
+]
+
 const STATES = {
   'Live — Search Console, GA4 not connected': { search: fixture.search, ga4: fixture.ga4 },
-  'Live — both connected': { search: fixture.search, ga4: GA4_LIVE, bio: BIO },
+  'Live — both connected': { search: { ...fixture.search, targets: TARGETS }, ga4: GA4_LIVE, bio: BIO },
+  'GA4 — site sends no lead events, no AI visits': {
+    search: fixture.search,
+    ga4: { ...GA4_LIVE, leads: GA4_LIVE.leads.slice(0, 1), ai: GA4_LIVE.ai.slice(-1) },
+    bio: BIO,
+  },
+  'GA4 — leads and AI reports rejected': {
+    search: { ...fixture.search, targets: TARGETS },
+    ga4: { ...GA4_LIVE, leads: [], leadsAvailable: false, ai: [], aiAvailable: false },
+    bio: BIO,
+  },
   'GA4 — tag live after this window': { search: fixture.search, ga4: GA4_BEFORE_TAG, bio: BIO },
   'GA4 — tag started inside this window': { search: fixture.search, ga4: GA4_PARTIAL, bio: BIO },
   'Bio link — tagged, both platforms': { search: fixture.search, ga4: GA4_TAGGED, bio: BIO },
@@ -309,6 +351,34 @@ const POINTS = [
   { text: '"Lighting consultant riyadh" showed us 180 times at around position 18 with no clicks — real demand sitting just off page one.', kind: 'opportunity' },
 ]
 
+// ── Named in AI answers ──
+// NOT a recorded payload: no check had been run when this was written, so
+// these are shaped by hand to show every state the panel has. The questions
+// are the ones suggested for Arak in docs/WEBSITE-SETUP.md.
+const AI_QUESTIONS = [
+  'Who are the best lighting design consultants in Riyadh?',
+  'Which companies install KNX lighting control in Saudi Arabia?',
+  'Where can I buy decorative lighting in Riyadh?',
+  'من أفضل شركات الإنارة في السعودية؟',
+]
+const aiRow = (run, at, question, extra) => ({
+  run_id: run, checked_at: at, engine: 'claude', question, answer: '', named: false, rank: null, cited: false,
+  competitors: [], sources: [], cost_usd: 0.07, error: '', ...extra,
+})
+const AI_ROWS = [
+  aiRow('r2', '2026-12-01T09:00:00Z', AI_QUESTIONS[0], {
+    named: true, rank: 2, cited: true, competitors: ['ICS Arabia', 'Signify'], sources: ['icsarabia.com', 'arak-sa.com', 'clutch.co'],
+    answer: 'ICS Arabia offers full lighting design services from concept to detailed engineering.\nARAK Lighting (Riyadh, since 1976) produces photometric calculations and fixture schedules.\nSignify supports system design for larger projects.',
+  }),
+  aiRow('r2', '2026-12-01T09:00:00Z', AI_QUESTIONS[1], { named: true, rank: 1, competitors: ['Signify'], sources: ['knx.org', 'arak-sa.com'] }),
+  aiRow('r2', '2026-12-01T09:00:00Z', AI_QUESTIONS[2], { competitors: ['Alrouf'], sources: ['clutch.co', 'facebook.com'] }),
+  aiRow('r2', '2026-12-01T09:00:00Z', AI_QUESTIONS[3], { error: 'The model was overloaded.', cost_usd: 0 }),
+  aiRow('r1', '2026-11-01T09:00:00Z', AI_QUESTIONS[0], { competitors: ['ICS Arabia'], sources: ['icsarabia.com', 'clutch.co'] }),
+  aiRow('r1', '2026-11-01T09:00:00Z', AI_QUESTIONS[1], { named: true, rank: 1, competitors: ['Signify'], sources: ['knx.org'] }),
+  aiRow('r1', '2026-11-01T09:00:00Z', AI_QUESTIONS[2], { named: true, rank: 2, competitors: ['Alrouf'], sources: ['clutch.co'] }),
+]
+const aiHistory = rows => ({ state: 'ok', rows, checks: groupChecks(rows), error: '' })
+
 const ON_DEMAND = {
   'Neither asked for (every real page load)': {},
   'Explanation written': { explain: { state: 'done', points: POINTS, error: '', cost: 0.0227 } },
@@ -329,6 +399,14 @@ const ON_DEMAND = {
     },
   },
   'Both answered': { explain: { state: 'done', points: POINTS, error: '', cost: 0.0227 }, index: INDEX_DONE },
+  'AI answers: two checks, compared': { ai: { history: aiHistory(AI_ROWS) } },
+  'AI answers: never run': { ai: { history: aiHistory([]) } },
+  'AI answers: running': { ai: { history: aiHistory([]), run: { state: 'loading' } } },
+  'AI answers: history loading': { ai: { history: { state: 'loading', rows: [], checks: [] } } },
+  'AI answers: table missing': {
+    ai: { history: { state: 'error', rows: [], checks: [], error: 'relation "public.ai_answer_checks" does not exist' } },
+  },
+  'AI answers: no questions set': { ai: { questions: [] } },
 }
 
 export function WebsiteHarness() {
@@ -375,6 +453,18 @@ export function WebsiteHarness() {
       imageQueries: search.imageQueries, imagePages: search.imagePages,
       brandTerms: search.brandTerms, lines: search.lines, types: search.types,
     }) : null,
+
+    targets: usable ? targetSearches({
+      targets: search.targets, queries: search.queries, previous: search.previous, pages: search.pages,
+    }) : [],
+    targetsConfigured: (search?.targets || []).length > 0,
+    ai: {
+      questions: AI_QUESTIONS,
+      history: aiHistory([]),
+      run: { state: 'idle' },
+      ...(ON_DEMAND[onDemand].ai || {}),
+    },
+    runAiAnswers: () => {},
 
     // The panels a person presses. `idle` is the default because it is what
     // every real page load shows.
