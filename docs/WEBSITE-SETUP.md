@@ -55,6 +55,91 @@ Who arrived, from where, what they read, and whether they got in touch.
 4. **Admin → Property settings**: copy the **Property ID** (digits only, not
    the `G-` id) into the Google Analytics Property ID field.
 
+## Target searches
+
+The **Target searches** panel shows, for each search a page was built to win,
+whether Google shows us for it, on which page, and at what position. "Wrong
+page" means Google is showing a different page (usually the homepage) than the
+one built for the search.
+
+It reads a **Brand Brain → Knowledge Centre** field with the key
+`seo_targets`, type **Multi-line text**, with "include in prompt" off (the
+list is for this panel, not for writing posts). One target per line, the
+search and the page separated by `|`:
+
+```
+lighting consultant riyadh | /services/lighting-design
+facade lighting ksa | /services/facade-lighting
+مهندس اضاءة الرياض | /ar/services/lighting-design
+```
+
+Searches are matched exactly, in lower case. The Arabic and English versions of
+a page count as the same page. A company without the field sees "No target
+searches are set".
+
+## Named in AI answers
+
+The **Named in AI answers** panel asks a list of buyer questions through an AI
+assistant with web search (Claude, for now) and records whether the company was
+named, whether its website was cited, and which tracked competitors were named
+instead. The questions never mention the company, so the answer is what a buyer
+who has never heard of it would read.
+
+It reads a **Brand Brain → Knowledge Centre** field with the key
+`ai_questions`, type **Multi-line text**, "include in prompt" off. One question
+per line, at most 20.
+
+**It costs money, on a button only.** Each question is one AI answer with up
+to three web searches, about $0.08, charged to the workspace's monthly AI cap.
+Twenty questions cost about $1.60. Nothing runs on page load or on a schedule.
+Past checks are stored in `ai_answer_checks` (migration
+`20261108_ai_answer_checks.sql`, applied by hand) and shown for free, each
+compared with the one before.
+
+Competitors come from the research agent's tracked rivals (Research page),
+and the company's own names come from `brand_terms`.
+
+Suggested for Arak (15 questions, about $1.20 a check). They come from the
+searches in Search Console and the business lines:
+
+```
+Who are the best lighting design consultants in Riyadh?
+Which company should I hire for lighting design in Saudi Arabia?
+Which companies install KNX lighting control systems in Riyadh?
+Who supplies smart street light poles in Saudi Arabia?
+Which companies do facade lighting in Saudi Arabia?
+Where can I buy decorative and architectural lighting in Riyadh?
+Who installs KNX home automation for villas in Riyadh?
+Which companies provide hotel guest room management systems in Saudi Arabia?
+Who are the leading lighting companies in Saudi Arabia?
+Which lighting suppliers work with consultants on large projects in Riyadh?
+من أفضل شركات الإنارة في السعودية؟
+من أفضل مكاتب تصميم الإضاءة في الرياض؟
+أين أشتري إنارة ديكور في الرياض؟
+ما الشركات التي تركّب أنظمة التحكم بالإضاءة KNX في السعودية؟
+من يورّد أعمدة الإنارة الذكية في المملكة؟
+```
+
+To deploy it: rebuild the `agent` container (new handler) and re-import
+`n8n/workflows/Arak Lighting – Website Agent.json` (it now allows `aiAnswers`).
+
+## Bing Webmaster Tools
+
+ChatGPT's search reads Bing's index, not Google's, and ChatGPT already sends
+arak-sa.com a visit for every four Google sends. Pages Google has not indexed
+still reach ChatGPT through Bing, so Bing is worth the ten minutes.
+
+1. Go to <https://www.bing.com/webmasters> and sign in with the Microsoft
+   account the company uses.
+2. Choose **Import from Google Search Console**. It copies the verified site
+   and its sitemap, with no DNS change.
+3. If the import is not offered, add the site and verify it with the DNS
+   record Bing gives you, then submit `https://<site>/sitemap.xml` under
+   **Sitemaps**.
+
+The app does not read Bing yet. The Website tab's **Visits from AI assistants**
+panel is where the effect shows.
+
 ## What the tab shows meanwhile
 
 Each half reports on its own. A half with nothing configured shows setup

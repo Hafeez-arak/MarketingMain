@@ -105,6 +105,11 @@ export const JOBS = {
   // the job is genuinely lossy — deciding what the agent never sees again is
   // not where to buy a quality cliff. See the Haiku note at the top.
   remember:    'claude-sonnet-5-5',
+  // Answering a buyer's question with web search, to see whether the company
+  // is named (server/agentHandlers/aiAnswers.js). Sonnet on purpose: it is a
+  // stand-in for an ordinary assistant's answer, not a judgement anyone acts
+  // on directly, and a list of twenty costs a dollar or two on a button.
+  ai_check:    'claude-sonnet-5-5',
 }
 
 /**

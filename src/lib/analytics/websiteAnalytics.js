@@ -657,3 +657,98 @@ export function websiteSummary(data = {}) {
     nonBrandDelta: change(totals(nonBrand).impressions, totals(prevSplit.nonBrand).impressions, previous.length > 0),
   }
 }
+
+// ─── Target searches: is the page we built winning the search we built it for ─
+//
+// The non-brand tile says whether demand is growing; it cannot say whether the
+// WORK is working. On arak-sa.com "lighting consultant riyadh" took 496
+// impressions and no clicks in nine weeks, and every one of them landed on the
+// homepage — because /services/lighting-design was not in Google's index. The
+// fix is a page; the proof the fix worked is that query moving off the
+// homepage and onto that page, and then up. That is a per-query fact, so the
+// brand names its targets (`customFields.seo_targets`, a list of
+// `{ query, page }`) and this reads each one off rows the page already has.
+
+const normQuery = q => str(q).toLowerCase().replace(/\s+/g, ' ')
+
+/**
+ * The configured targets, cleaned. Anything without both a query and a page
+ * is dropped rather than guessed at; duplicates keep the first.
+ *
+ * Takes either a list of `{ query, page }` or the Brand Brain textarea's
+ * text, one target per line as `search | /page` — the form a person can
+ * actually edit, since a Brand Brain field holds a string.
+ */
+export function seoTargets(raw) {
+  const list = Array.isArray(raw)
+    ? raw
+    : str(raw).split(/\r?\n/).map(line => {
+      const [query, page] = line.split('|')
+      return { query, page }
+    })
+  const seen = new Set()
+  const out = []
+  for (const t of list) {
+    const query = normQuery(t?.query)
+    const page = pathOf(str(t?.page))
+    if (!query || !str(t?.page) || seen.has(query)) continue
+    seen.add(query)
+    out.push({ query, page })
+  }
+  return out
+}
+
+/**
+ * One row per target.
+ *
+ * `state` has four values, and the first is the one that matters most
+ * (`shown` is the fourth: in the results, but the query×page report did not
+ * carry it, so which page is unknown):
+ *   · `missing`  — not among the named queries this window. Either Google did
+ *                  not show us, or it withheld the query as rare. The two are
+ *                  indistinguishable from here, and the row says so rather
+ *                  than printing a zero position.
+ *   · `elsewhere`— shown, but Google picked a different page than the one we
+ *                  built for it. This is the cannibalisation case.
+ *   · `ranking`  — shown, on the intended page (either language twin).
+ *
+ * `shownPage` is the page with the most impressions for the query, which is
+ * the same rule `attachPages` uses for the query table, so the two never name
+ * different pages for one search.
+ */
+export function targetSearches({ targets = [], queries = [], previous = [], pages = [] } = {}) {
+  const list = seoTargets(targets)
+  if (!list.length) return []
+  const index = rows => {
+    const by = new Map()
+    for (const r of rows) by.set(normQuery(r.query), r)
+    return by
+  }
+  const now = index(queries)
+  const was = index(previous)
+  const shown = new Map()
+  for (const r of pages) {
+    const q = normQuery(r.query)
+    const cur = shown.get(q)
+    if (!cur || num(r.impressions) > num(cur.impressions)) shown.set(q, r)
+  }
+  return list.map(({ query, page }) => {
+    const r = now.get(query)
+    const p = was.get(query)
+    const shownPage = r ? prettyPath(pathOf(shown.get(query)?.page || '')) : ''
+    const position = r ? num(r.position) : null
+    const previousPosition = p ? num(p.position) : null
+    return {
+      query,
+      page: prettyPath(page),
+      shownPage,
+      impressions: r ? num(r.impressions) : 0,
+      clicks: r ? num(r.clicks) : 0,
+      position,
+      previousPosition,
+      // Positive is better, flipped once here, the same rule as positionDelta.
+      positionDelta: position !== null && previousPosition !== null ? previousPosition - position : null,
+      state: !r ? 'missing' : !shownPage ? 'shown' : shownPage === prettyPath(page) ? 'ranking' : 'elsewhere',
+    }
+  })
+}

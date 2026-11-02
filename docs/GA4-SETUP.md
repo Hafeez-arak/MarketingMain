@@ -98,18 +98,43 @@ values are set by writing the JSON directly. Either:
 
 ### 5. Mark what actually matters
 
-Sessions alone cannot tell you whether the website is working. In GA4 →
-**Admin** → **Events**, mark as **key events** the things a lead does:
+Sessions alone cannot tell you whether the website is working. The site sends
+three lead events (website PR #6, `key-events` branch):
 
-- the contact form submitting
-- a tap on the phone number or WhatsApp link
-- a catalogue or datasheet download
+| Event | What happened |
+|---|---|
+| `generate_lead` | the enquiry form was accepted |
+| `phone_click` | a `tel:` link was tapped |
+| `email_click` | a `mailto:` link was tapped |
 
-The Website tab has a **Key events** panel that is waiting for these. Until
-something is marked, it says so — "a website with no measured outcome cannot be
-judged" — rather than showing a quiet zero.
+The Website tab's **Leads** panel counts these from the moment the site sends
+them, whether or not they are marked. Marking them still matters, because GA4's
+own reports and Google Ads only use key events: in GA4 → **Admin** → **Events**
+(or **Key events** → **New key event**, which accepts a name before the event
+has ever fired), mark all three.
 
----
+`ads_conversion_Contact_Us_1` is a Google Ads conversion that fires when
+`/contact` **loads**. It counts contact-page visits, not enquiries. Leave it for
+Google Ads if Ads uses it, but do not read it as leads.
+
+### 6. Keep staff and bots out of the numbers
+
+Most of the site's Direct traffic is not customers: in its first five weeks
+GA4 recorded 190 sessions from Singapore with 6 engaged, plus data-centre
+traffic from Dublin, Amsterdam, Ashburn and Frankfurt, and the team itself
+browsing from the Riyadh office.
+
+1. GA4 → **Admin** → **Data streams** → the web stream → **Configure tag
+   settings** → **Show more** → **Define internal traffic**. Add a rule with the
+   office's public IP address (search "what is my ip" from the office network).
+2. GA4 → **Admin** → **Data settings** → **Data filters**. The **Internal
+   Traffic** filter is created in *Testing*. Check it for a few days, then set
+   it to **Active**. Filters only apply from that day on; they do not rewrite
+   the past.
+
+GA4 already drops known bots and cannot be told to drop a city, so the
+data-centre traffic stays. Read **engaged** sessions rather than all sessions
+when judging a channel.
 
 ## What appears once each step is done
 
@@ -117,7 +142,7 @@ judged" — rather than showing a quiet zero.
 |---|---|
 | Step 2 (tag live) | Nothing yet — GA4 is collecting, but the app still cannot read it |
 | Steps 3 + 4 | Sessions, visitors, new visitors, engagement rate, average visit, pages per visit; visits per day; traffic sources; pages read; landing pages; countries; devices |
-| Step 5 | Key events, split by the channel that produced them |
+| Step 5 | Key events, split by the channel that produced them. (Leads and Visits from AI assistants need no setup.) |
 
 ## What GA4 will *not* do
 
