@@ -9,7 +9,7 @@ const KEY = '11111111-2222-3333-4444-555555555555'
 function fakeDb({ enabled = true, cap = null, spent = 0, leads = [] } = {}) {
   const state = {
     leads: leads.map((l, i) => ({ id: `00000000-0000-0000-0000-00000000000${i}`, ...l })),
-    usage: spent ? [{ cost_usd: spent, created_at: new Date().toISOString() }] : [],
+    usage: spent ? [{ cost_usd: spent, created_at: '2026-10-06T08:00:00Z' }] : [],
     settings: { workspace_id: WS, enabled, intake_key: KEY, last_intake_at: null },
     calls: [],
   }

@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { modelFor, MODELS } from '../../src/lib/agent/models.js'
+import { modelFor, MODELS, supportsFallbacks } from '../../src/lib/agent/models.js'
 import { usageRow, normaliseUsage } from '../../src/lib/agent/cost.js'
 import { buildRequest } from '../../src/lib/agent/prompt.js'
 import { spentInMonth, capDecision, monthKey } from '../../src/lib/agent/budget.js'
@@ -28,6 +28,10 @@ const KEY = process.env.ANTHROPIC_API_KEY || ''
 // Anthropic recommends for that category, inside the same call. Recommended
 // for every caller of these models (2026-10-13). The answering model is
 // `response.model`, which is what the ledger prices.
+//
+// Haiku 5.5 has no server-side fallback, so it is not asked for one. Its
+// declines come back as `declined: true` and the chat loop re-asks on Sonnet
+// (api/agent/_loop.js).
 const FALLBACK = { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' }
 const client = KEY ? new Anthropic({ apiKey: KEY }) : null
 
@@ -150,7 +154,8 @@ export async function callModel({
       // Streamed even when the caller does not consume events: a long tool-loop
       // turn with a large max_tokens can otherwise exceed the SDK's HTTP timeout,
       // and a timeout here bills for the generation and returns nothing.
-      const stream = client.beta.messages.stream({ ...turnParams, ...FALLBACK }, { signal: abort.signal })
+      const extra = supportsFallbacks(model) ? FALLBACK : {}
+      const stream = client.beta.messages.stream({ ...turnParams, ...extra }, { signal: abort.signal })
 
       // The chat surface passes onText so the browser can type the answer out as
       // it arrives. Everything else ignores it and waits for the final message —
@@ -302,8 +307,10 @@ export async function callModel({
   // A refusal is an HTTP 200 with nothing usable in it. `stop_details` is
   // populated only for this stop_reason, so it is read only here.
   if (!error && outcome.refused) {
+    // `declined` tells a safety decline apart from the cap, which also says
+    // `refused`: a decline is worth re-asking on another model, the cap is not.
     return {
-      ok: false, refused: true, stopReason, usage, cost: totalCost, budget: decision,
+      ok: false, refused: true, declined: true, stopReason, usage, cost: totalCost, budget: decision,
       error: refusalMessage(response?.stop_details),
     }
   }
