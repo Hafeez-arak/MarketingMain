@@ -75,5 +75,9 @@ describe('the fold call', () => {
   it('throws away an empty summary and caps a runaway one', () => {
     expect(cleanSummary('   ')).toBe('')
     expect(cleanSummary('y'.repeat(SUMMARY_MAX_CHARS + 500))).toHaveLength(SUMMARY_MAX_CHARS)
+    const lines = Array.from({ length: 400 }, (_, i) => `- point ${i} ${'z'.repeat(40)}`).join('\n')
+    const cut = cleanSummary(lines)
+    expect(cut.length).toBeLessThanOrEqual(SUMMARY_MAX_CHARS)
+    expect(cut.endsWith('z')).toBe(true)
   })
 })

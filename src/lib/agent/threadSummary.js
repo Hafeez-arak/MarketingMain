@@ -26,8 +26,10 @@ export const KEEP_MESSAGES = 6
 // summary. A fold that failed must not turn into a request past Haiku's
 // 100,000-token rate step.
 export const HISTORY_TOKEN_CEILING = 40_000
-// A summary longer than this has stopped being one.
-export const SUMMARY_MAX_CHARS = 6_000
+// A summary longer than this has stopped being one. Cut at a line break, never
+// mid-sentence — but the replay showed the cut lands on the NEWEST facts, so
+// the prompt asks for the newest first and the cap sits well above its length.
+export const SUMMARY_MAX_CHARS = 10_000
 
 /** Rough tokens for a string. Mixed Arabic and English runs nearer 3.5 chars a token than 4. */
 export function approxTokens(text) {
@@ -106,8 +108,10 @@ export const FOLD_PROMPT = [
   '- anything still open or promised for later;',
   '- the language the person writes in.',
   '',
-  'Drop greetings, repetition and anything the later messages replaced. Never invent. Write it',
-  'in English, quoting Arabic names and phrases as they were written. Stay under 600 words.',
+  'Drop greetings, repetition and anything the later messages replaced. Do not restate facts',
+  'about the company itself (its brands, history, projects); the assistant already has those.',
+  'Never invent. Put the most recent and still-open points first. Write it in English, quoting',
+  'Arabic names and phrases as they were written. Stay under 450 words.',
 ].join('\n')
 
 /** The fold call's one user message: the old summary, then the messages being folded in. */
@@ -126,5 +130,7 @@ export function foldInput({ summary = '', fold = [] } = {}) {
 /** The new summary out of the fold call's text, or '' when it is unusable. */
 export function cleanSummary(text) {
   const s = String(text || '').trim()
-  return s ? s.slice(0, SUMMARY_MAX_CHARS) : ''
+  if (s.length <= SUMMARY_MAX_CHARS) return s
+  const cut = s.lastIndexOf('\n', SUMMARY_MAX_CHARS)
+  return s.slice(0, cut > SUMMARY_MAX_CHARS / 2 ? cut : SUMMARY_MAX_CHARS).trim()
 }
