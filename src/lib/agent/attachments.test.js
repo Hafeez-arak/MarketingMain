@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   ATTACH_LIMITS, validateAttachments, userContent, storedAttachments, attachmentNote, kindOf,
+  chatFilePath, textPathFor, inChatFolder, threadFiles, pickFile,
 } from './attachments'
 import { attachmentPayload } from '../agentChat'
 
@@ -113,5 +114,57 @@ describe('attachmentPayload — the browser side of the request', () => {
   it('what it builds passes the server check', () => {
     const payload = attachmentPayload([{ id: 'a1', name: 'n.jpg', media_type: 'image/jpeg', data: b64(12), thumb: '' }])
     expect(validateAttachments(payload).ok).toBe(true)
+  })
+})
+
+describe('kept files (2026-11-02)', () => {
+  it('records where each original was kept, by position, and stays thumbnail-only when it was not', () => {
+    const { attachments } = validateAttachments([pdf(), img()])
+    const stored = storedAttachments(attachments, [
+      { path: 'ws/chat/c/k/file.pdf', text_path: 'ws/chat/c/k/text.txt', pages: 4, text_chars: 9000 },
+      {},
+    ])
+    expect(stored[0]).toMatchObject({ name: 'brief.pdf', path: 'ws/chat/c/k/file.pdf', text_path: 'ws/chat/c/k/text.txt', pages: 4, text_chars: 9000 })
+    expect(stored[1]).toEqual({ name: 'site.jpg', media_type: 'image/jpeg', kind: 'image', thumb: 'data:image/jpeg;base64,QUJD' })
+    expect(JSON.stringify(stored)).not.toContain(b64(400))
+  })
+
+  it('the note tells the model which files it can re-open, and which it cannot', () => {
+    const kept = attachmentNote([{ name: 'brief.pdf', kind: 'pdf', path: 'p' }])
+    expect(kept).toMatch(/They are kept/)
+    expect(kept).toMatch(/get_attachment/)
+    expect(kept).not.toMatch(/attach it again/)
+
+    const mixed = attachmentNote([{ name: 'brief.pdf', kind: 'pdf', path: 'p' }, { name: 'old.jpg', kind: 'image' }])
+    expect(mixed).toMatch(/brief\.pdf is kept/)
+    expect(mixed).toMatch(/old\.jpg was not kept/)
+
+    // Messages from before files were kept read as they always did.
+    expect(attachmentNote([{ name: 'old.jpg', kind: 'image' }])).not.toMatch(/get_attachment/)
+  })
+
+  it('paths live in the thread folder, and the folder check refuses anything else', () => {
+    const path = chatFilePath('ws-1', 'c-1', 'k', 'application/pdf')
+    expect(path).toBe('ws-1/chat/c-1/k/file.pdf')
+    expect(textPathFor(path)).toBe('ws-1/chat/c-1/k/text.txt')
+    expect(inChatFolder(path, 'ws-1', 'c-1')).toBe(true)
+    expect(inChatFolder(path, 'ws-1', 'c-2')).toBe(false)
+    expect(inChatFolder(path, 'ws-2', 'c-1')).toBe(false)
+    expect(inChatFolder('ws-1/chat/c-1/../c-2/k/file.pdf', 'ws-1', 'c-1')).toBe(false)
+    expect(inChatFolder(path, 'ws-1', '')).toBe(false)
+  })
+
+  it('finds a file by exact name, part of it, or "the pdf" — newest first', () => {
+    const files = threadFiles([
+      { created_at: '2026-11-01T09:00:00Z', attachments: [{ name: 'Oct newsletter.pdf', kind: 'pdf', path: 'a' }] },
+      { created_at: '2026-11-02T09:00:00Z', attachments: [{ name: 'Nov newsletter.pdf', kind: 'pdf', path: 'b' }, { name: 'thumb-only.jpg', kind: 'image' }] },
+    ])
+    expect(files.map(f => f.name)).toEqual(['Nov newsletter.pdf', 'Oct newsletter.pdf'])
+    expect(pickFile(files, 'oct newsletter.pdf').file.path).toBe('a')
+    expect(pickFile(files, 'newsletter').file.path).toBe('b')
+    expect(pickFile(files, 'the PDF').file.path).toBe('b')
+    expect(pickFile(files, '').error).toMatch(/Several/)
+    expect(pickFile(files, 'photo').error).toMatch(/No attached file/)
+    expect(pickFile([], 'x').error).toMatch(/No files/)
   })
 })
