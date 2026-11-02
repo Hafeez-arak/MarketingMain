@@ -7,9 +7,13 @@ import { ADMIN_EDITS_PROMPT } from '../../src/lib/agent/adminTools.js'
 import { COMPANY_PROMPT } from '../../src/lib/agent/companyTools.js'
 import { REQUESTS_PROMPT } from '../../src/lib/agent/requestTools.js'
 import { writeCeoBrief } from './_ceoBrief.js'
+import { loadThread, lastAnswerModel, classifyQuestion, foldThread, answerCount } from './_thread.js'
+import { chooseTier } from '../../src/lib/agent/chatRoute.js'
+import { modelHistory, approxTokens } from '../../src/lib/agent/threadSummary.js'
+import { waitUntil } from '@vercel/functions'
 import { captureLinkedInAudiences } from './_linkedinAudience.js'
 import {
-  validateAttachments, userContent, storedAttachments, attachmentNote,
+  validateAttachments, userContent, storedAttachments,
 } from '../../src/lib/agent/attachments.js'
 
 // ─── POST /api/agent/chat ──────────────────────────────────────────────────
@@ -33,30 +37,6 @@ import {
 /** One SSE frame. Named so every write goes through the same shape. */
 function send(res, event, data) {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
-}
-
-/**
- * The thread's history, as the model will see it.
- *
- * A user turn that carried files replays as a note naming them, never the
- * files. Read with a fallback without `attachments`, because that column
- * arrives in a hand-applied migration (20261020_agent_admin_edits.sql) and a
- * select naming a missing column fails the whole request — the chat must not
- * go down in the window between this deploy and that migration.
- */
-async function loadHistory(chatId, workspaceId) {
-  const base = `research_messages?chat_id=eq.${encodeURIComponent(chatId)}` +
-    `&workspace_id=eq.${encodeURIComponent(workspaceId)}&order=created_at.asc&limit=40`
-  let rows
-  try {
-    rows = await db(`${base}&select=role,content,attachments`)
-  } catch {
-    rows = await db(`${base}&select=role,content`)
-  }
-  return (rows || []).map(m => {
-    const note = m.role === 'user' ? attachmentNote(m.attachments) : ''
-    return { role: m.role, content: note ? `${note}\n\n${m.content}` : m.content }
-  })
 }
 
 /** Store the user's message; the thumbnails too when there are any and the column exists. */
@@ -254,7 +234,26 @@ export default async function handler(req, res) {
     // that posts its own history is a browser that can post anything into the
     // model's context, and that is a trust boundary which gets harder to close
     // the longer it stands.
-    const history = await loadHistory(chatId, workspaceId)
+    //
+    // Since 2026-11-02 a long thread arrives as its running summary plus the
+    // messages after it (threadSummary.js). The person's screen still shows
+    // every message; only what the model is sent is shorter.
+    const [thread, last] = await Promise.all([
+      loadThread(chatId, workspaceId),
+      lastAnswerModel(chatId, workspaceId),
+    ])
+    const history = modelHistory({ rows: thread.messages, summary: thread.summary })
+    const lastAnswer = [...thread.messages].reverse().find(m => m.role === 'assistant')?.content || ''
+
+    // ── Which model answers ── (chatRoute.js)
+    // Started alongside the brand context so the sorting call, when one is
+    // needed, costs no extra wait. Tools and system run ~15k tokens before
+    // the history and the question.
+    const promptTokens = 15_000 + approxTokens(history.map(m => m.content).join('\n')) + approxTokens(question)
+    const routing = chooseTier({
+      question, attachments, promptTokens, last,
+      classify: () => classifyQuestion(workspaceId, chatId, { question, lastAnswer }),
+    })
 
     // `brand` now carries the agent's memory digest — what it has already
     // proposed, what this team has told it, what it established. It sits in
@@ -262,7 +261,10 @@ export default async function handler(req, res) {
     //
     // `recallTail` is the volatile half: notes newer than the last compaction.
     // It goes on the user turn below, never here.
-    const { brand, recallTail } = await loadBrandContext(workspaceId, 'chat')
+    const [{ brand, recallTail }, route] = await Promise.all([
+      loadBrandContext(workspaceId, 'chat'),
+      routing,
+    ])
 
     // The cache guard. Prompt caching fails silently — a prefix that stops
     // being byte-identical still answers correctly, at roughly ten times the
@@ -286,8 +288,12 @@ export default async function handler(req, res) {
 
     await saveUserMessage(chatId, workspaceId, question, attachments)
 
+    const easy = route.tier === 'easy'
     const result = await runAgent({
-      workspaceId, job: 'chat', surface: 'chat', chatId,
+      workspaceId, job: route.job, surface: 'chat', chatId,
+      // Haiku thinks less on a lookup; a decline there is re-asked on Sonnet.
+      effort: easy ? 'low' : null,
+      onDecline: easy ? 'chat' : null,
       identity, brand, messages,
       // Built here from the token, and the only way a tool learns who is
       // asking. isAdmin decides both which tools are offered and whether
@@ -338,15 +344,6 @@ export default async function handler(req, res) {
         prefer: 'return=minimal',
       })
 
-      // ── Learn from the conversation ──
-      // Every sixth turn, not every turn: a model call per message would
-      // roughly double the cost of chat to record something on maybe one turn
-      // in ten. The person already has their answer streamed by now, so this
-      // costs them no waiting, and it can never fail the response — a memory
-      // that did not get written is a smaller problem than an answer that did
-      // not arrive.
-      const turnCount = (history.filter(m => m.role === 'assistant').length) + 1
-      await rememberChat(workspaceId, chatId, { turnCount }).catch(() => {})
     }
 
     send(res, 'done', {
@@ -359,7 +356,29 @@ export default async function handler(req, res) {
       // So the drawer can say "can edit" honestly — read from the same value
       // that gated the tools, not guessed by the browser.
       can_edit: isAdmin,
+      // Which tier answered and why. Not shown anywhere; it is here so a
+      // question that went to the wrong model can be traced from the browser.
+      tier: route.tier,
+      route: route.reason,
     })
+
+    // ── After the answer: learn, and keep the thread short ──
+    // Both run once `done` is sent, so the person never waits on them, and
+    // neither can fail the response. waitUntil keeps the function alive for
+    // them on Vercel after the response ends; on the box's long-lived server
+    // it has no context and the promise simply runs on.
+    if (result.ok) {
+      // Every sixth turn, not every turn: a model call per message would
+      // roughly double the cost of chat to record something on maybe one turn
+      // in ten. A memory that did not get written is a smaller problem than an
+      // answer that did not arrive.
+      const after = Promise.allSettled([
+        // The answer just stored is already counted.
+        answerCount(chatId, workspaceId).then(turnCount => rememberChat(workspaceId, chatId, { turnCount })),
+        foldThread(workspaceId, chatId),
+      ])
+      try { waitUntil(after) } catch { /* no request context: it runs on regardless */ }
+    }
   } catch (err) {
     // The browser opened a spinner and only the server can close it. Every
     // terminal path writes a terminal event — a crash that writes nothing

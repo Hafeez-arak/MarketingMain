@@ -48,9 +48,14 @@ export function normaliseUsage(usage = {}) {
  * @returns {number|null}
  */
 export function costOf(model, usage) {
-  const price = priceOf(model)
-  if (!price) return null
+  const card = priceOf(model)
+  if (!card) return null
   const u = usage || {}
+  // A model with two rate cards bills the whole request on the long one once
+  // the prompt — fresh, cached and newly cached input together — passes the
+  // line. Not just the tokens past it: every line of the request.
+  const prompt = (u.tokens_in || 0) + (u.tokens_cache_read || 0) + (u.tokens_cache_write || 0)
+  const price = card.long && prompt > card.long.above ? card.long : card
   const per = 1_000_000
   return (
     ((u.tokens_in          || 0) * price.input      +

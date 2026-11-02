@@ -34,8 +34,18 @@ export async function runAgent({
   workspaceId, job = 'chat', surface = 'chat', stage = '', runId = null, chatId = null,
   identity, brand, messages = [], tools = null, writes = false, web = false, company = false,
   session = {}, onText = null, onEvent = null,
+  // Overrides the surface's effort. The chat's easy tier runs Haiku at `low`.
+  effort = null,
+  // The job to re-ask on when this one's model declines (HTTP 200,
+  // stop_reason "refusal"). Haiku has no server-side fallback, so the chat's
+  // easy tier passes 'chat' here and a decline is answered on Sonnet instead
+  // of reaching the person as an error.
+  onDecline = null,
 }) {
-  const budget = loopBudget(surface)
+  const surfaceBudget = loopBudget(surface)
+  const budget = effort ? { ...surfaceBudget, effort } : surfaceBudget
+  // Back to the surface's own effort if the question moves up to Sonnet.
+  let turnEffort = budget.effort
   // Writes are opt-in. A tool the model can see is a tool it will eventually
   // reach for, and an assistant that files a proposal every time it has an
   // opinion is one whose review queue nobody opens.
@@ -64,7 +74,7 @@ export async function runAgent({
       const last = await callModel({
         workspaceId, job, surface, stage, runId, chatId,
         identity, brand, tools: [], messages: convo,
-        maxTokens: budget.maxTokens, effort: budget.effort, onText,
+        maxTokens: budget.maxTokens, effort: turnEffort, onText,
       })
       cost += last.cost || 0
       return {
@@ -80,12 +90,27 @@ export async function runAgent({
     turns += 1
     emit({ type: 'turn', turn: turns })
 
-    const out = await callModel({
+    let out = await callModel({
       workspaceId, job, surface, stage, runId, chatId,
       identity, brand, tools: defs, messages: convo,
-      maxTokens: budget.maxTokens, effort: budget.effort, onText,
+      maxTokens: budget.maxTokens, effort: turnEffort, onText,
     })
     cost += out.cost || 0
+
+    // A decline on the cheap model: the rest of this question moves up, once.
+    // The thinking blocks Haiku left in `convo` are readable by Sonnet, and a
+    // declined turn produced no text worth keeping.
+    if (out.declined && onDecline && job !== onDecline) {
+      emit({ type: 'escalate', from: job, to: onDecline })
+      job = onDecline
+      turnEffort = surfaceBudget.effort
+      out = await callModel({
+        workspaceId, job, surface, stage, runId, chatId,
+        identity, brand, tools: defs, messages: convo,
+        maxTokens: budget.maxTokens, effort: turnEffort, onText,
+      })
+      cost += out.cost || 0
+    }
 
     // A refusal is the budget cap talking, and it is the one case where the
     // reason must reach the person verbatim: "the agent did nothing" and "this
@@ -108,7 +133,7 @@ export async function runAgent({
       // The model answered. This is the normal exit.
       return {
         ok: true, text: textIn(out.response), error: '', refused: false,
-        toolCalls: usedTools, turns, cost, allowedUrls, stoppedBy: 'answered',
+        toolCalls: usedTools, turns, cost, allowedUrls, stoppedBy: 'answered', job,
       }
     }
 
@@ -117,18 +142,32 @@ export async function runAgent({
     // match its tool_result blocks against.
     convo.push({ role: 'assistant', content: out.response.content })
 
-    const results = []
-    for (const use of uses) {
-      toolCalls += 1
-      emit({ type: 'tool', name: use.name, input: use.input })
+    // Every tool the model asked for this turn, run at the same time rather
+    // than one after another: "how is Instagram doing" asks for posts,
+    // analytics and the live account at once, and the person was waiting for
+    // each in turn. Results go back in the order they were asked for, all in
+    // one user message — splitting them teaches the model to stop asking in
+    // parallel.
+    for (const use of uses) emit({ type: 'tool', name: use.name, input: use.input })
+    toolCalls += uses.length
+    const outcomes = await Promise.all(uses.map(async use => {
       // workspaceId comes from the closure — the verified session — and the
       // model's input is only ever read for filters. AGENT.md §2.
-      const outcome = await runTool(workspaceId, use.name, use.input, session)
+      let outcome
+      try {
+        outcome = await runTool(workspaceId, use.name, use.input, session)
+      } catch (err) {
+        outcome = { ok: false, error: err?.message || String(err) }
+      }
+      emit({ type: 'tool_done', name: use.name, ok: outcome.ok })
+      return outcome
+    }))
+    const results = uses.map((use, i) => {
+      const outcome = outcomes[i]
       usedTools.push({ name: use.name, input: use.input, ok: outcome.ok, error: outcome.error || '' })
       if (outcome.ok) urlsFrom(outcome.result, allowedUrls)
-      results.push(toolResultBlock(use.id, outcome))
-      emit({ type: 'tool_done', name: use.name, ok: outcome.ok })
-    }
+      return toolResultBlock(use.id, outcome)
+    })
     convo.push({ role: 'user', content: results })
   }
 }

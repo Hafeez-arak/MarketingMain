@@ -24,7 +24,9 @@
  * gets room because it is asynchronous and nobody is watching it.
  */
 export const BUDGETS = {
-  chat:   { maxTurns: 6,  maxToolCalls: 10, maxTokens: 4_000,  effort: 'medium' },
+  // 8,000 since 2026-11-02: thinking shares the ceiling, and Sonnet writing
+  // three bilingual posts was cut off mid-sentence at 4,000 in the replay.
+  chat:   { maxTurns: 6,  maxToolCalls: 10, maxTokens: 8_000,  effort: 'medium' },
   // Reviewing a draft reads a handful of things — the draft, the active rules,
   // our numbers for that format — and then answers. Same shape as chat.
   review: { maxTurns: 6,  maxToolCalls: 10, maxTokens: 4_000,  effort: 'high' },

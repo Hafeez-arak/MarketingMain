@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { MODELS, JOBS, modelFor, priceOf, DEFAULT_MODEL } from './models'
+import { MODELS, JOBS, modelFor, priceOf, DEFAULT_MODEL, supportsFallbacks } from './models'
 import { normaliseUsage, costOf, usageRow, cacheHitRate } from './cost'
 
 // A real Anthropic usage block: cached tokens are reported SEPARATELY from
@@ -20,17 +20,30 @@ describe('the model registry is the only place a model is named', () => {
     }
   })
 
-  it('runs on two models and no more — Haiku was ruled out deliberately', () => {
+  it('routes to the three 5.5 models and no others', () => {
     // The 5.0 price cards stay so older ledger rows still read back; only the
     // 5.5 models are routed to.
-    expect(new Set(Object.values(JOBS))).toEqual(new Set(['claude-opus-5-5', 'claude-sonnet-5-5']))
+    expect(new Set(Object.values(JOBS))).toEqual(new Set(['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5']))
     expect(Object.keys(MODELS)).toEqual(expect.arrayContaining(['claude-opus-5', 'claude-sonnet-5']))
   })
 
-  it('puts the calls a person acts on through Opus', () => {
+  it('puts the run outputs a person acts on through Opus', () => {
     expect(modelFor('synthesise')).toBe('claude-opus-5-5')
-    expect(modelFor('chat')).toBe('claude-opus-5-5')
     expect(modelFor('review')).toBe('claude-opus-5-5')
+  })
+
+  it('answers the chat on Sonnet and Haiku, never Opus (owner, 2026-11-02)', () => {
+    expect(modelFor('chat')).toBe('claude-sonnet-5-5')
+    expect(modelFor('chat_easy')).toBe('claude-haiku-5-5')
+    expect(modelFor('chat_route')).toBe('claude-haiku-5-5')
+    expect(modelFor('chat_compact')).toBe('claude-haiku-5-5')
+    expect(modelFor('ceo_brief')).toBe('claude-sonnet-5-5')
+  })
+
+  it('asks for the refusal fallback only where the model has one', () => {
+    expect(supportsFallbacks('claude-haiku-5-5')).toBe(false)
+    expect(supportsFallbacks('claude-sonnet-5-5')).toBe(true)
+    expect(supportsFallbacks('claude-opus-5-5')).toBe(true)
   })
 
   it('puts the long middle of a run through Sonnet', () => {
@@ -66,6 +79,17 @@ describe('cost', () => {
       input_tokens: 21_000, output_tokens: 500,
     }))
     expect(cold / warm).toBeGreaterThan(4)
+  })
+
+  it('bills Haiku on its short card up to 100k prompt tokens', () => {
+    const u = { tokens_in: 1_000, tokens_cache_read: 20_000, tokens_cache_write: 10_000, tokens_out: 1_000 }
+    // 1k × 0.10 + 20k × 0.01 + 10k × 0.125 + 1k × 0.50, per million
+    expect(costOf('claude-haiku-5-5', u)).toBeCloseTo((100 + 200 + 1_250 + 500) / 1e6, 10)
+  })
+
+  it('bills the WHOLE Haiku request on the long card once the prompt passes 100k', () => {
+    const u = { tokens_in: 1_000, tokens_cache_read: 90_000, tokens_cache_write: 10_000, tokens_out: 1_000 }
+    expect(costOf('claude-haiku-5-5', u)).toBeCloseTo((500 + 4_500 + 6_250 + 2_500) / 1e6, 10)
   })
 
   it('returns null for a model it has no price for, never zero', () => {

@@ -117,8 +117,8 @@ describe('the model contract', () => {
     expect(CEO_BRIEF_IDENTITY).toMatch(/only numbers that appear in the facts/)
     expect(ceoBriefPrompt({ window: { from: '2026-10-11T00:00:00Z', to: '2026-10-18T00:00:00Z' }, x: 1 })).toMatch(/2026-10-11 to 2026-10-18[\s\S]*"x":1/)
   })
-  it('the brief is written by Opus, and the chat answers in the language it is asked in', () => {
-    expect(JOBS.ceo_brief).toBe('claude-opus-5-5')
+  it('the brief is written by Sonnet, and the chat answers in the language it is asked in', () => {
+    expect(JOBS.ceo_brief).toBe('claude-sonnet-5-5')
     expect(COMPANY_PROMPT).toMatch(/Answer in the language the person writes in/)
     expect(volatileFragment(COMPANY_PROMPT)).toBeNull()
   })
