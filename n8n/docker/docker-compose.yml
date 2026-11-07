@@ -139,6 +139,32 @@ services:
       - AGENT_LENS_BUDGET_MS=420000
       - AGENT_SYNTHESISE_BUDGET_MS=540000
 
+  # ── Resource logger ───────────────────────────────────────────────────────
+  # One row per container per minute: average and peak CPU and memory (see
+  # metrics/sample.awk). Read it with:
+  #     docker exec arak-marketing-metrics report 30
+  # Rows live in their own volume, so a redeploy or rebuild keeps the history.
+  #
+  # The docker socket is only for `docker inspect` (name -> id). Mounting it
+  # :ro does not make the API read-only, so this container could drive Docker;
+  # nothing else in it is reachable from outside, and it has no ports.
+  metrics:
+    build: ./metrics
+    image: arak-marketing-metrics:latest
+    container_name: arak-marketing-metrics
+    restart: unless-stopped
+    mem_limit: 64m
+    environment:
+      - METRICS_CONTAINERS=arak-marketing-n8n arak-marketing-agent arak-marketing-metrics
+      # Riyadh, written as a POSIX offset: the image has no tz database.
+      - TZ=<+03>-3
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /sys/fs/cgroup:/host/cgroup:ro
+      - arak_marketing_metrics:/data
+
 volumes:
   arak_marketing_n8n_data:
     name: arak_marketing_n8n_data
+  arak_marketing_metrics:
+    name: arak_marketing_metrics

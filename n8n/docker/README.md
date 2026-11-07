@@ -310,3 +310,18 @@ curl -s localhost:5690/healthz   # {"ok":true}
 **Time budgets** are set on the service (`AGENT_LENS_BUDGET_MS` etc.), well past Vercel's 300s,
 because nothing here cuts a request off. Keep n8n's lens/synthesise HTTP timeouts (10 min)
 above them.
+
+## Resource use (the `metrics` container)
+
+`arak-marketing-metrics` logs CPU and memory for n8n, the agent and itself, plus the whole WSL
+VM, once a minute: average and peak for each minute (`metrics/sample.awk`). The rows live in the
+`arak_marketing_metrics` volume, so restarts and redeploys keep the history. The logger itself
+uses about 1 MiB of memory and close to no CPU.
+
+```bash
+docker exec arak-marketing-metrics report 30          # average and peak over the last 30 days
+docker exec arak-marketing-metrics cat /data/2026-10.csv > usage-2026-10.csv   # raw rows, for Excel
+```
+
+CPU is % of one core, as in `docker stats`; this machine has 20. Peak CPU is the busiest
+5 seconds. Gaps in "minutes" are the machine asleep or off.
