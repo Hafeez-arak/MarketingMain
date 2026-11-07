@@ -1,7 +1,28 @@
-import { buildLeadCard, normaliseLeadCard, afterCallFields, senderDomain, objectionsFromCards } from '../../src/lib/sales/leadCard.js'
+import { buildLeadCard, normaliseLeadCard, afterCallFields, senderDomain, objectionsFromCards, signalsFor } from '../../src/lib/sales/leadCard.js'
 import { trackFields } from '../../src/lib/leads/pipeline.js'
 import { pushCardAfterSave } from './_crmCard.js'
 import { inPilot, nextFollowUps, turnaroundDays, sizeBands } from '../../src/lib/sales/cardFollowUp.js'
+import { playbookKeys, matchPlaybook } from '../../src/lib/sales/playbook.js'
+
+export const PLAYBOOK_COLUMNS = 'id,position,title,category,stage,trigger,statement,objective,response,follow_up,evidence,source,next_step,avoid,signals,owner_label,status,reviewed_at,updated_at'
+
+/**
+ * The playbook cards that fit one lead (battle cards Part 2, 2026-11-07):
+ * the lead's signals, read from the same records its card is built from,
+ * plus its sender, stage, decision and whether the quote went out.
+ */
+export async function leadPlaybook(deps, workspaceId, leadId, { limit = 3 } = {}) {
+  if (!isUuid(leadId)) return []
+  const [[lead], cards, [row]] = await Promise.all([
+    deps.db(`leads?id=eq.${leadId}&workspace_id=eq.${workspaceId}&select=${LEAD_COLUMNS}`).then((r) => r || []).catch(() => []),
+    deps.db(`playbook_cards?workspace_id=eq.${workspaceId}&select=${PLAYBOOK_COLUMNS}&order=position`).then((r) => r || []).catch(() => []),
+    deps.db(`lead_cards?lead_id=eq.${leadId}&workspace_id=eq.${workspaceId}&select=decision,quote_sent_on`).then((r) => r || []).catch(() => []),
+  ])
+  if (!lead || !cards.length) return []
+  const { signals } = signalsFor(lead, await context(deps, workspaceId, lead))
+  const keys = playbookKeys(signals, { senderType: lead.sender_type, stage: lead.stage, decision: row?.decision, quoteSent: Boolean(row?.quote_sent_on) })
+  return matchPlaybook(cards, keys, { limit })
+}
 
 // ─── Battle cards for leads someone is working ─────────────────────────────
 // A lead gets its card when it is assigned (the owner, 2026-10-19; it was

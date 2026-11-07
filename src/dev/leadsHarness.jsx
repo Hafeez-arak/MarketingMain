@@ -5,6 +5,7 @@ import { AuthContext } from '../store/auth'
 import LeadAgent from '../pages/leads/index'
 import SalesApp from '../pages/leads/SalesApp'
 import SalesResearch from '../pages/leads/SalesResearch'
+import SalesPlaybook from '../pages/leads/SalesPlaybook'
 import '../index.css'
 
 // ─── Dev-only Lead Agent harness ───────────────────────────────────────────
@@ -17,7 +18,7 @@ import '../index.css'
 
 const as = new URLSearchParams(window.location.search).get('as') || 'admin'
 const asSales = as === 'sales' || as === 'sales_admin'
-const page = new URLSearchParams(window.location.search).get('page') === 'research' ? '/research' : '/leads'
+const page = { research: '/research', playbook: '/playbook' }[new URLSearchParams(window.location.search).get('page')] || '/leads'
 
 const session = { user: { id: asSales ? 'u1' : 'admin', email: asSales ? 'sales@example.com' : 'admin@example.com' }, access_token: 'dev' }
 const auth = {
@@ -35,6 +36,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           <Routes>
             <Route path="/leads" element={<SalesApp />} />
             <Route path="/research" element={<SalesResearch />} />
+            <Route path="/playbook" element={<SalesPlaybook />} />
             <Route path="*" element={<Navigate to="/leads" replace />} />
           </Routes>
         )

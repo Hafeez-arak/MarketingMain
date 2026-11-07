@@ -3,12 +3,22 @@
 // page loads. Made-up enquiries only (this repo is public). ?mode=hang keeps
 // every request pending (the loading state); ?mode=fail rejects them.
 
-import { buildLeadCard, normaliseLeadCard, afterCallFields } from '../lib/sales/leadCard'
+import { buildLeadCard, normaliseLeadCard, afterCallFields, signalsFor } from '../lib/sales/leadCard'
 import { manualLead, trackFields } from '../lib/leads/pipeline'
 import { nextFollowUps } from '../lib/sales/cardFollowUp'
+import { playbookKeys, matchPlaybook, playbookCardFields } from '../lib/sales/playbook'
 import runsFixture from './runsFixture.json'
 
 export const WS = '00000000-0000-0000-0000-0000000000dd'
+
+// The playbook (2026-11-07): made-up cards in the owner's template.
+const PLAYBOOK = [
+  { id: 'pb1', position: 1, title: 'Is the main contract awarded?', category: 'discovery', stage: 'RFQ received', trigger: 'Any project RFQ where we do not know if the sender has won the main contract.', statement: '"Please send your best price for the attached BOQ."', objective: 'Know before estimating whether this is a live job or a price check, and when the award is due.', response: '"Happy to. Is the main contract awarded to you, or is this for your bid? If it is for the bid, I will send a budget price quickly and a full estimate once you are awarded."', follow_up: '"When is the award expected, and who holds the lighting package after award?"', evidence: 'Example: tender quotes sent before the award rarely become orders.', source: 'Example report', next_step: 'Bidding: budget price in 2 days and a to-do on the award date. Awarded: full estimate with a promised date.', avoid: ['Putting a bidding BOQ ahead of awarded jobs.', 'Forgetting to call on the award date.'], signals: ['tender', 'bidding', 'project'], owner_label: 'Admin', status: 'draft', reviewed_at: null },
+  { id: 'pb2', position: 2, title: '"Your price is too high"', category: 'objection', stage: 'Quotation / Negotiation', trigger: 'The client says our price is high or asks for the best discount.', statement: '"Your price is higher than the others."', objective: 'Find out what we are compared with before answering the number.', response: '"Understood. Is that against another offer, or against the budget? If you share the target, I will show which items move it."', follow_up: '"Is the brand fixed, or can an approved equal be submitted?"', evidence: 'Example: cutting the same brand rarely closes a gap to a local maker.', source: 'Example report', next_step: 'A second option in the same quote, and a dated review.', avoid: ['Discounting before knowing their target.', 'Re-pricing in many small rounds.'], signals: ['price_pressure'], owner_label: 'Admin', status: 'approved', reviewed_at: '2026-11-05T09:00:00Z' },
+  { id: 'pb3', position: 3, title: 'Contractor (PM / procurement)', category: 'persona', stage: 'Any', trigger: 'Most enquiries: MEP and main contractors.', statement: '"We need the best price and fast delivery."', objective: 'Be the easiest supplier to work with.', response: '"You will have the price by [date], the submittal pack with it, and delivery dates our suppliers confirm."', follow_up: '"Who signs off the material, and what is your site programme?"', evidence: 'Example: contractors place most of our orders.', source: '', next_step: 'Quote date and submittal date as to-dos.', avoid: ['Making the contractor chase us.'], signals: ['sender_contractor'], owner_label: 'Admin', status: 'draft', reviewed_at: null },
+  { id: 'pb4', position: 4, title: 'Quote sent, no answer (day 3 / 10 / 30)', category: 'closing', stage: 'Quotation', trigger: 'After a quotation, if nothing comes back.', statement: '(silence)', objective: 'Get a decision or a reason.', response: 'Day 3: "Did the offer reach the right person?"\nDay 10: "Where does it stand?"\nDay 30: "Should we keep this open?"', follow_up: '"Who else is quoting, and when is the decision?"', evidence: 'Example: most unanswered quotes had no follow-up.', source: '', next_step: 'Log each follow-up; close at day 30 with a reason.', avoid: ['A mass "any update?" email.'], signals: ['quote_sent'], owner_label: 'Admin', status: 'draft', reviewed_at: null },
+]
+const playbook = PLAYBOOK.map((c) => ({ ...c }))
 
 // What the research watches, made up: the sales Research page lists it.
 const AGENDA = [
@@ -260,6 +270,28 @@ window.fetch = async (input, init = {}) => {
     return json({ ok: true, lead: l, crm: 'queued' })
   }
   // Battle cards: built by the real builder from made-up records.
+  // The playbook's library (2026-11-07), edited by the real field rules.
+  if (url.includes('/api/leads/playbook_save')) {
+    const body = JSON.parse(init.body || '{}')
+    const f = playbookCardFields(body)
+    if (f.error) return json({ ok: false, error: f.error }, 400)
+    let card = playbook.find((c) => c.id === body.id)
+    if (card) Object.assign(card, f.values, { owner_label: body.owner_label ?? card.owner_label, status: 'draft' })
+    else { card = { id: `pb${Date.now()}`, position: playbook.length + 1, ...f.values, owner_label: body.owner_label || '', status: 'draft', reviewed_at: null }; playbook.push(card) }
+    return json({ ok: true, card })
+  }
+  if (url.includes('/api/leads/playbook_review')) {
+    const body = JSON.parse(init.body || '{}')
+    const card = playbook.find((c) => c.id === body.id)
+    Object.assign(card, body.approved === false ? { status: 'draft' } : { status: 'approved', reviewed_at: new Date().toISOString() })
+    return json({ ok: true, card })
+  }
+  if (url.includes('/api/leads/playbook_delete')) {
+    const body = JSON.parse(init.body || '{}')
+    playbook.splice(playbook.findIndex((c) => c.id === body.id), 1)
+    return json({ ok: true, deleted: body.id })
+  }
+  if (url.includes('/api/leads/playbook')) return json({ ok: true, cards: playbook, can_edit: as !== 'sales' })
   if (url.includes('/api/leads/card_save')) {
     const body = JSON.parse(init.body || '{}')
     const row = cards[body.lead_id]
@@ -319,6 +351,9 @@ window.fetch = async (input, init = {}) => {
       pilot: true, preview: false, quote_days: 14,
       size_odds: [{ max: 100000, rate: 40 }, { max: 500000, rate: 20 }, { max: 2000000, rate: 12 }, { max: null, rate: 3 }],
       close: { stage: l.stage || '', lost_reason: l.lost_reason || '', lost_to: l.lost_to || '', crm_lost_reason: '', in_odoo: l.crm_status === 'sent' },
+      playbook: matchPlaybook(playbook, playbookKeys(signalsFor(l, CARD_CONTEXT).signals, {
+        senderType: l.sender_type, stage: l.stage, decision: cards[lead_id].decision, quoteSent: Boolean(cards[lead_id].quote_sent_on),
+      })),
     }
     return json({ ok: true, card: cards[lead_id], watchlist: WATCHLIST, extras })
   }

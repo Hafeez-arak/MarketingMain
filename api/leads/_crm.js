@@ -19,8 +19,9 @@ import {
 import { riyadhTime } from './_export.js'
 import { normalizeUrl, defaultDb, discoverDb, testConnection, createLead, findUserId, customerHistory } from './_odoo.js'
 import { pushCard } from './_crmCard.js'
-import { openCard } from './_card.js'
+import { openCard, leadPlaybook } from './_card.js'
 import { briefHtml } from '../../src/lib/sales/odooCard.js'
+import { playbookHtml } from '../../src/lib/sales/playbook.js'
 import { matchAccount } from '../../src/lib/sales/leadCard.js'
 
 const isUuid = (v) => /^[0-9a-f-]{36}$/i.test(String(v || ''))
@@ -35,7 +36,7 @@ export const STUCK_MS = 5 * 60_000
  * message and the agent's questions go in the description, which also
  * carries our reference so the same lead is never created twice.
  */
-export function odooLeadValues(lead, { approvedBy = '', card = null, history = null, now = new Date() } = {}) {
+export function odooLeadValues(lead, { approvedBy = '', card = null, history = null, playbook = [], now = new Date() } = {}) {
   const phones = phonesOf(lead)
   const v2 = (lead.criteria_version || 1) >= 2
   const what = lead.summary || lead.subject || 'Enquiry'
@@ -47,6 +48,8 @@ export function odooLeadValues(lead, { approvedBy = '', card = null, history = n
   // brief already, so they are not repeated.
   const description = card ? [
     briefHtml(card, lead, history, now),
+    // The playbook cards that fit this lead (2026-11-07): what to say, ask and avoid.
+    playbookHtml(playbook),
     para('Came in', [channelLabel(lead), lead.mailbox, lead.source === 'email' && lead.folder ? FOLDER_LABEL[lead.folder] || lead.folder : '', riyadhTime(lead.received_at || lead.created_at)].filter(Boolean).join(' · ')),
     phones.length ? para(phones.length > 1 ? 'Numbers' : 'Number', phones.join(', ')) : '',
     message ? `<p><b>Their message:</b></p><blockquote>${esc(message).replace(/\n/g, '<br>')}</blockquote>` : '',
@@ -254,7 +257,8 @@ async function pushOne(deps, conn, lead, marks = {}) {
     // Their history with us, read from Odoo, for "who they are" on the card.
     // Unreadable is not a reason to hold the lead back.
     const history = cardRow ? await leadHistory(deps, conn, { ...lead, ...claimed }).catch(() => null) : null
-    const values = { ...odooLeadValues({ ...lead, ...claimed }, { approvedBy: by, card: cardRow?.card || null, history, now: deps.now() }), user_id: owner, ...(conn.team_id ? { team_id: conn.team_id } : {}) }
+    const playbook = cardRow ? await leadPlaybook(deps, claimed.workspace_id || lead.workspace_id || conn.workspace_id, lead.id).catch(() => []) : []
+    const values = { ...odooLeadValues({ ...lead, ...claimed }, { approvedBy: by, card: cardRow?.card || null, history, playbook, now: deps.now() }), user_id: owner, ...(conn.team_id ? { team_id: conn.team_id } : {}) }
     const out = await createLead(deps.fetch, odooCfg(conn), values, lead.id, { pipeline: true, phase: projectOf({ ...lead, ...claimed }) })
     const [row] = await deps.db(`leads?id=eq.${lead.id}`, {
       method: 'PATCH', prefer: 'return=representation',

@@ -5,6 +5,7 @@ import { when } from '../../lib/leads/view'
 import { FACTS, DECISIONS, CARD_KINDS, cardChips, normaliseLeadCard, matchCompetitors } from '../../lib/sales/leadCard'
 import { quoteClock, dealOdds, normaliseFollowUps, followUpPlan, followUpState, dayMonth, FOLLOW_UP_ASK } from '../../lib/sales/cardFollowUp'
 import { riyadhToday, LOST_REASON_LABEL } from '../../lib/leads/pipeline'
+import { CategoryTag, PlaybookCardView } from './Playbook'
 
 // ─── A lead's battle card ──────────────────────────────────────────────────
 // The owner's design (2026-10-12), laid out again on 2026-10-18 the way the
@@ -234,7 +235,7 @@ export default function BattleCard({ lead, workspaceId, onLeadChange }) {
             ))}
           </ol>
         </div>
-        {card.pushback.length > 0 && (
+        {card.pushback.length > 0 && !extras.playbook?.length && (
           <div className="border border-border bg-white">
             <p className="px-4 py-2.5 border-b border-border text-xs font-semibold text-text">If they push back</p>
             <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -252,6 +253,31 @@ export default function BattleCard({ lead, workspaceId, onLeadChange }) {
                   </div>
                 </div>
               )))}
+            </div>
+          </div>
+        )}
+        {/* The playbook's cards that fit this lead (2026-11-07): what to say, then the full card. */}
+        {extras.playbook?.length > 0 && (
+          <div className="border border-border bg-white">
+            <p className="px-4 py-2.5 border-b border-border text-xs font-semibold text-text">
+              Playbook cards for this lead
+              <span className="font-normal text-text-tertiary"> · picked from what the enquiry says</span>
+            </p>
+            <div className="divide-y divide-border">
+              {extras.playbook.map((p) => (
+                <details key={p.id} className="group px-4 py-3">
+                  <summary className="cursor-pointer list-none space-y-1">
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      <CategoryTag category={p.category} />
+                      {p.status !== 'approved' && <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 bg-orange-100 text-orange-800">Draft</span>}
+                      <span className="font-semibold text-text" dir="auto">{p.title}</span>
+                    </span>
+                    <span className="block text-text-secondary leading-relaxed" dir="auto"><b className="text-text">Say:</b> {p.response}</span>
+                    <span className="block text-[11px] font-semibold text-amber-800 group-open:hidden">Open the full card ▾</span>
+                  </summary>
+                  <PlaybookCardView card={p} />
+                </details>
+              ))}
             </div>
           </div>
         )}

@@ -450,13 +450,21 @@ export function leadSignals(lead = {}, { account = null, earlier = [], brand = n
  *   context.keyProjects   the Brand Brain's key projects, one per line
  *   context.competitorBrands   competitor_brands ({ competitor, brand, relationship })
  */
-export function buildLeadCard(lead = {}, context = {}) {
+/**
+ * A lead's signals from the same context the card is built from, with what
+ * they were read from. Shared by the card and the playbook's matching.
+ */
+export function signalsFor(lead = {}, context = {}) {
   const suppliers = list(context.suppliers).map(str).filter(Boolean)
   const earlier = list(context.earlier).filter((e) => e && e.received_at)
   const account = matchAccount(lead, list(context.accounts))
   const brand = brandRule(lead, suppliers)
   const vendors = vendorBodies(context.companyFacts)
-  const signals = leadSignals(lead, { account, earlier, brand, vendors })
+  return { signals: leadSignals(lead, { account, earlier, brand, vendors }), account, earlier, brand, vendors }
+}
+
+export function buildLeadCard(lead = {}, context = {}) {
+  const { signals, account, earlier, brand, vendors } = signalsFor(lead, context)
   const fromCards = list(context.objections)
   const playbook = normalisePlaybook(fromCards.length ? { ...(context.playbook || {}), objections: fromCards } : context.playbook)
   const d = lead.details || {}
