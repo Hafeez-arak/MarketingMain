@@ -3,6 +3,8 @@ import { Button, Skeleton, Spinner } from '../../components/ui/index'
 import { leadsApi } from '../../lib/leads/client'
 import { when } from '../../lib/leads/view'
 import { FACTS, DECISIONS, CARD_KINDS, cardChips, normaliseLeadCard, matchCompetitors } from '../../lib/sales/leadCard'
+import { quoteClock, dealOdds, normaliseFollowUps, followUpPlan, followUpState, dayMonth, FOLLOW_UP_ASK } from '../../lib/sales/cardFollowUp'
+import { riyadhToday, LOST_REASON_LABEL } from '../../lib/leads/pipeline'
 
 // ─── A lead's battle card ──────────────────────────────────────────────────
 // The owner's design (2026-10-12), laid out again on 2026-10-18 the way the
@@ -27,7 +29,20 @@ const afterOf = (row, lead) => ({
   next_step: lead?.next_step || '', follow_up: lead?.follow_up || '',
 })
 
-const FIT_BANDS = { strong: 'Strong fit', possible: 'Possible fit', weak: 'Weak fit', '': 'No fit shown' }
+// Steps 4 and 5 (2026-11-07): the quote's sent date and its three follow-ups.
+const followOf = (row) => ({
+  quote_sent_on: row?.quote_sent_on || '',
+  follow_ups: normaliseFollowUps(row?.follow_ups).map((f) => ({ day: f.day, date: f.date, done: Boolean(f.done_at), note: f.note || '' })),
+})
+
+const CLOCK_TONE = {
+  late: 'bg-red-50 text-red-700 border-red-200',
+  tight: 'bg-red-50 text-red-700 border-red-200',
+  ok: 'bg-surface-subtle text-text border-border',
+  sent: 'bg-sage-50 text-sage-700 border-sage-200',
+}
+
+const FIT_BANDS ={ strong: 'Strong fit', possible: 'Possible fit', weak: 'Weak fit', '': 'No fit shown' }
 
 const input = 'w-full border border-border bg-white text-text text-xs px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-amber-400'
 const shown = 'text-xs text-text bg-surface-subtle border border-border px-3 py-2 leading-relaxed whitespace-pre-line min-h-[2rem]'
@@ -73,6 +88,8 @@ export default function BattleCard({ lead, workspaceId, onLeadChange }) {
   const [saving, setSaving] = useState(false)
   const [note, setNote] = useState('')
   const [rivals, setRivals] = useState([]) // the competitor watchlist, for who else is quoting
+  const [extras, setExtras] = useState({})  // the clock's and odds' numbers, the pilot, the close
+  const [follow, setFollow] = useState(() => followOf(null))
 
   useEffect(() => {
     // One card per opened row: the row's lead never changes under it.
@@ -84,7 +101,9 @@ export default function BattleCard({ lead, workspaceId, onLeadChange }) {
       setCard(normaliseLeadCard(r.card.card))
       setAfter(afterOf(r.card, lead))
       setBase(afterOf(r.card, lead))
+      setFollow(followOf(r.card))
       setRivals(Array.isArray(r.watchlist) ? r.watchlist : [])
+      setExtras(r.extras || {})
     })
     return () => { live = false }
   }, [lead.id, workspaceId]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -93,7 +112,20 @@ export default function BattleCard({ lead, workspaceId, onLeadChange }) {
   if (!row || !card) return <div className="p-4 space-y-2">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-8 w-full" />)}</div>
 
   const savedCard = normaliseLeadCard(row.card)
-  const dirty = JSON.stringify({ card, after }) !== JSON.stringify({ card: savedCard, after: base })
+  const live = Boolean(extras.pilot)        // steps 4 and 5 work on this lead
+  const shownFollow = live || extras.preview // an admin sees them, read only
+  const dirty = JSON.stringify({ card, after, follow: live ? follow : null }) !== JSON.stringify({ card: savedCard, after: base, follow: live ? followOf(row) : null })
+  const today = riyadhToday()
+  const clock = quoteClock({
+    quoteDue: after.quote_due, urgency: lead.details?.urgency, receivedAt: lead.received_at || lead.created_at,
+    sentOn: follow.quote_sent_on, turnaround: extras.quote_days || 0, today,
+  })
+  const odds = dealOdds(after.target_price, { size_odds: extras.size_odds })
+  // The follow-ups as they would be: saved ones, or the plan for a newly typed date.
+  const plannedFollow = follow.quote_sent_on && follow.quote_sent_on !== (row.quote_sent_on || '')
+    ? followUpPlan(follow.quote_sent_on).map((p) => ({ ...p, done: false, note: '' }))
+    : follow.follow_ups
+  const setFu = (day, k) => (e) => setFollow((f) => ({ ...f, follow_ups: f.follow_ups.map((x) => (x.day === day ? { ...x, [k]: k === 'done' ? e.target.checked : e.target.value } : x)) }))
 
   const setFact = (k) => (e) => setCard((c) => ({ ...c, facts: { ...c.facts, [k]: e.target.value } }))
   const setAsk = (i, k) => (e) => setCard((c) => ({ ...c, ask: c.ask.map((a, j) => (j === i ? { ...a, [k]: e.target.value } : a)) }))
@@ -102,7 +134,12 @@ export default function BattleCard({ lead, workspaceId, onLeadChange }) {
 
   async function save() {
     setSaving(true); setNote('')
-    const r = await leadsApi('card_save', workspaceId, { lead_id: lead.id, card, ...after })
+    const sentChanged = follow.quote_sent_on !== (row.quote_sent_on || '')
+    const r = await leadsApi('card_save', workspaceId, {
+      lead_id: lead.id, card, ...after,
+      // Ticks and notes go with the saved dates; a new date re-plans them.
+      ...(live ? { quote_sent_on: follow.quote_sent_on, follow_ups: sentChanged ? [] : follow.follow_ups } : {}),
+    })
     setSaving(false)
     if (r.error) return setNote(r.error)
     const nextLead = r.lead || { ...lead, next_step: after.next_step, follow_up: after.follow_up || null }
@@ -110,13 +147,14 @@ export default function BattleCard({ lead, workspaceId, onLeadChange }) {
     setCard(normaliseLeadCard(r.card.card))
     setAfter(afterOf(r.card, nextLead))
     setBase(afterOf(r.card, nextLead))
+    setFollow(followOf(r.card))
     if (r.lead) onLeadChange?.(r.lead)
     setEditing(false)
     // In Odoo already: the change went there too, or says why not (2026-10-20).
     setNote(!r.odoo ? 'Saved.' : r.odoo.ok ? 'Saved, and sent to Odoo.' : `Saved here. Odoo did not take it yet (${r.odoo.error}); it is tried again at the next read.`)
   }
   function cancel() {
-    setCard(savedCard); setAfter(base); setEditing(false); setNote('')
+    setCard(savedCard); setAfter(base); setFollow(followOf(row)); setEditing(false); setNote('')
   }
 
   const list = (items, key, hint, empty) => (editing ? (
@@ -171,6 +209,11 @@ export default function BattleCard({ lead, workspaceId, onLeadChange }) {
           <Field label="Our history with them" wide>{list(card.history, 'history', 'Our history with them', 'Nothing on record.')}</Field>
           <Field label="Proof to name" wide>{list(card.references, 'references', 'Proof to name', 'No project of ours in this segment yet.')}</Field>
         </Box>
+        {clock && (
+          <p className={`border px-3 py-2 leading-relaxed ${CLOCK_TONE[clock.tone]}`}>
+            <span className="font-semibold">Quote clock: </span>{clock.text}
+          </p>
+        )}
       </section>
 
       {/* ── 2 On the call ── */}
@@ -229,6 +272,7 @@ export default function BattleCard({ lead, workspaceId, onLeadChange }) {
           </Field>
           <Field label="Target price">
             <input aria-label="Target price" placeholder='SAR, or "not shared"' value={after.target_price} onChange={setAfterField('target_price')} maxLength={200} className={input} />
+            {odds && <p className={`mt-1.5 leading-snug ${odds.low ? 'text-red-700' : 'text-text-secondary'}`}>{odds.text}</p>}
           </Field>
           <Field label="Who decides">
             <input aria-label="Who decides" placeholder="Name and role" value={after.decides} onChange={setAfterField('decides')} maxLength={300} className={input} />
@@ -253,6 +297,73 @@ export default function BattleCard({ lead, workspaceId, onLeadChange }) {
           </Field>
         </Box>
       </section>
+
+      {shownFollow && (
+        <>
+          {/* ── 4 After the quote is sent ── */}
+          <section className="space-y-3">
+            <Step n={4} label="After the quote is sent" who="the date; the reminders follow at day 3, 10 and 30" />
+            {extras.preview && (
+              <p className="text-[11px] text-text-tertiary">Preview: steps 4 and 5 work on the leads of the pilot salespeople. Here they are read only.</p>
+            )}
+            <Box>
+              <Field label="Quote sent on">
+                <input type="date" aria-label="Quote sent on" value={follow.quote_sent_on} disabled={!live}
+                  onChange={(e) => setFollow((f) => ({ ...f, quote_sent_on: e.target.value }))} className={input} />
+              </Field>
+              <Field label="Follow-ups" wide>
+                {plannedFollow.length ? (
+                  <ul className="space-y-2">
+                    {plannedFollow.map((f) => {
+                      const state = followUpState({ date: f.date, done_at: f.done ? 'yes' : null }, today)
+                      const unsaved = follow.quote_sent_on !== (row.quote_sent_on || '')
+                      return (
+                        <li key={f.day} className="grid grid-cols-[1.25rem_1fr] gap-x-2 gap-y-1">
+                          <input type="checkbox" aria-label={`Day ${f.day} follow-up done`} checked={f.done} disabled={!live || unsaved} onChange={setFu(f.day, 'done')} className="mt-0.5" />
+                          <p className="leading-snug">
+                            <span className="font-semibold">Day {f.day} · {dayMonth(f.date)}</span>
+                            {state === 'late' && <span className="ml-1.5 text-red-700 font-semibold">overdue</span>}
+                            {state === 'today' && <span className="ml-1.5 text-amber-800 font-semibold">today</span>}
+                            <span className="block text-text-secondary">{FOLLOW_UP_ASK[f.day]}</span>
+                          </p>
+                          <input value={f.note} onChange={setFu(f.day, 'note')} disabled={!live || unsaved} maxLength={300} placeholder="What they said"
+                            aria-label={`What they said at day ${f.day}`} className={`${input} col-start-2 bg-surface-subtle`} dir="auto" />
+                        </li>
+                      )
+                    })}
+                  </ul>
+                ) : (
+                  <p className={shown}><span className="text-text-tertiary italic">Set the date the quote was sent: the three reminders are made from it{extras.close?.in_odoo ? ', as to-dos in Odoo' : ''}.</span></p>
+                )}
+              </Field>
+            </Box>
+          </section>
+
+          {/* ── 5 Close the deal ── */}
+          <section className="space-y-3">
+            <Step n={5} label="Close the deal" who="won or lost, and the real reason" />
+            <Box>
+              <Field label="Result" wide>
+                {extras.close?.stage === 'won' || extras.close?.stage === 'lost' ? (
+                  <p className={`${shown} ${extras.close.stage === 'won' ? 'text-sage-700' : 'text-red-700'} font-semibold`}>
+                    {extras.close.stage === 'won' ? 'Won' : `Lost · ${LOST_REASON_LABEL[extras.close.lost_reason] || 'reason not given'}`}
+                    {extras.close.crm_lost_reason ? <span className="font-normal text-text-secondary"> (Odoo: {extras.close.crm_lost_reason})</span> : null}
+                    {extras.close.lost_to ? <span className="font-normal text-text-secondary"> · went to {extras.close.lost_to}</span> : null}
+                  </p>
+                ) : (
+                  <p className={shown}>
+                    <span className="text-text-tertiary italic">
+                      {extras.close?.in_odoo
+                        ? 'Still open. Close it in Odoo with Won or Lost and the real reason, the same day; it shows here after the next read (07:50 or 13:00).'
+                        : 'Still open. Close it in the Pipeline with Won or Lost and the real reason, the same day.'}
+                    </span>
+                  </p>
+                )}
+              </Field>
+            </Box>
+          </section>
+        </>
+      )}
 
       {/* ── Save ── */}
       <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-border">

@@ -7,7 +7,7 @@ import { intakeWebsite, tryIt, QUALIFIER_MODEL } from './_intake.js'
 import { checkMail, emailFile, currentOutlookLink, emailAttachments, attachmentFile } from './_mail.js'
 import { exportLeads, applySheetDecisions } from './_export.js'
 import { approveLead, crmStatus, saveCrm, sendWaiting, disconnectCrm } from './_crm.js'
-import { openCard, saveCard, watchlist } from './_card.js'
+import { openCard, saveCard, watchlist, cardExtras } from './_card.js'
 import { crmTeams, setCrmTeam, pullCards } from './_crmCard.js'
 import { assignLead, teamList, teamSave, teamCheckOdoo } from './_assign.js'
 import { addLead, trackLead, deleteLead } from './_pipeline.js'
@@ -498,18 +498,25 @@ const actions = {
   },
 
   /** An approved lead's battle card, built the first time it is opened. */
-  async card({ workspaceId, body }) {
+  async card({ workspaceId, body, token }) {
     const deps = leadDeps()
     const out = await openCard(deps, { workspaceId, leadId: body.lead_id })
     if (out.error) return fail(out.status, out.error)
-    return { card: out.card, watchlist: await watchlist(deps, workspaceId) }
+    const [list, extras] = await Promise.all([
+      watchlist(deps, workspaceId),
+      cardExtras(deps, workspaceId, body.lead_id, { admin: await isAdmin(token) }),
+    ])
+    return { card: out.card, watchlist: list, extras }
   },
 
   /** The team's edits to a card, the things recorded after the call, and the next step. */
   async card_save({ workspaceId, body, user }) {
-    const out = await saveCard(leadDeps(), { workspaceId, leadId: body.lead_id, user, body })
+    const deps = leadDeps()
+    const out = await saveCard(deps, { workspaceId, leadId: body.lead_id, user, body })
     if (out.error) return fail(out.status, out.error)
-    return { card: out.card, lead: out.lead }
+    // The follow-ups as Odoo left them (each with its to-do), when it was written.
+    const [after] = out.odoo?.ok ? await deps.db(`lead_cards?lead_id=eq.${body.lead_id}&workspace_id=eq.${workspaceId}&select=quote_sent_on,follow_ups`).catch(() => []) || [] : []
+    return { card: after ? { ...out.card, ...after } : out.card, lead: out.lead, odoo: out.odoo || null }
   },
 
   /**

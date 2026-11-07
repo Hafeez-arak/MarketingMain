@@ -207,13 +207,20 @@ export async function createTeam(fetchFn, cfg, name, memberIds = []) {
   return call(fetchFn, cfg, uid, 'crm.team', 'create', [{ name, use_leads: true, use_opportunities: true, member_ids: [[6, 0, memberIds.map(Number)]] }])
 }
 
-/** { odooLeadId: { props: [{ name, value, … }], teamId } } for these leads, archived ones too. */
+/**
+ * { odooLeadId: { props: [{ name, value, … }], teamId, userId, close } } for these
+ * leads, archived ones too. `close` is what Won / Lost leaves on the deal
+ * ({ active, probability, lost_reason_id }; see outcomeFrom in src/lib/sales/cardFollowUp.js).
+ */
 export async function readLeadProps(fetchFn, cfg, ids) {
   if (!ids.length) return {}
   const uid = await login(fetchFn, cfg)
-  const rows = await call(fetchFn, cfg, uid, 'crm.lead', 'read', [ids.map(Number)], { fields: ['lead_properties', 'team_id', 'user_id'], context: { active_test: false } })
+  const rows = await call(fetchFn, cfg, uid, 'crm.lead', 'read', [ids.map(Number)], {
+    fields: ['lead_properties', 'team_id', 'user_id', 'active', 'probability', 'lost_reason_id'], context: { active_test: false },
+  })
   return Object.fromEntries(rows.map((r) => [String(r.id), {
     props: r.lead_properties || [], teamId: Array.isArray(r.team_id) ? r.team_id[0] : null, userId: Array.isArray(r.user_id) ? r.user_id[0] : null,
+    close: { active: r.active, probability: r.probability, lost_reason_id: r.lost_reason_id || false },
   }]))
 }
 

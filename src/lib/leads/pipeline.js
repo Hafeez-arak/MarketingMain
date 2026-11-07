@@ -35,6 +35,8 @@ export const LOST_REASON_LABEL = {
   lead_time: 'Lead time or stock',
   no_reply: 'They stopped replying',
   cancelled: 'Project cancelled or on hold',
+  arak_late: 'We were too slow / not ready',
+  declined: 'We declined to quote',
   other: 'Other',
 }
 
