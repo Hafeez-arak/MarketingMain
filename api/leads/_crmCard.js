@@ -25,12 +25,49 @@ import {
 } from './_odoo.js'
 import { crmConnection, odooCfg } from './_crm.js'
 import { openCard } from './_card.js'
+import { normaliseFollowUps, followUpSummary, outcomeFrom, dayMonth } from '../../src/lib/sales/cardFollowUp.js'
 
 const isUuid = (v) => /^[0-9a-f-]{36}$/i.test(String(v || ''))
 const errText = (err) => String(err?.message || err).slice(0, 400)
 
-const CARD_SYNC_COLUMNS = 'lead_id,card,decision,quote_due,target_price,decides,competitors,crm_props,crm_sync_error,crm_activity_id'
-const LEAD_SYNC_COLUMNS = 'id,crm_id,crm_status,next_step,follow_up'
+const CARD_SYNC_COLUMNS = 'lead_id,card,decision,quote_due,target_price,decides,competitors,crm_props,crm_sync_error,crm_activity_id,quote_sent_on,follow_ups'
+const LEAD_SYNC_COLUMNS = 'id,crm_id,crm_status,next_step,follow_up,stage,lost_reason,crm_lost_reason'
+
+// ─── The quote's follow-ups as Odoo to-dos (Part 1, 2026-11-07) ────────────
+// Each follow-up (day 3, 10, 30 after "quote sent on") is one to-do for the
+// deal's salesperson. What was last written to Odoo is kept in the snapshot
+// (crm_props.fu), so a save sends only what changed: a new one is created, a
+// moved one rescheduled, a ticked one marked done there, and those left when
+// the sent date is cleared are closed. Done (or deleted) in Odoo comes back
+// as ticked here, at the next read. The snapshot holds them in the stored
+// shape (normaliseFollowUps), so both sides compare the same way.
+
+/** What of a follow-up Odoo needs to match: its day, date, done or not. */
+const fuKey = (list) => normaliseFollowUps(list).map((f) => ({ day: f.day, date: f.date, done: Boolean(f.done_at), id: f.activity_id || null }))
+
+/** Write the follow-ups to Odoo. Returns the list with each to-do's id. */
+async function syncFollowUps(deps, cfg, { crmId, list, synced, ownerId }) {
+  const was = new Map(fuKey(synced).map((f) => [f.day, f]))
+  const out = []
+  for (const f of normaliseFollowUps(list)) {
+    const before = was.get(f.day)
+    let id = f.activity_id
+    if (f.done_at) {
+      if (id && !before?.done) await doneActivity(deps.fetch, cfg, id, `Done on the Arak leads platform${f.note ? `: ${f.note}` : ''}.`).catch(() => null)
+    } else if (!id) {
+      id = await createActivity(deps.fetch, cfg, crmId, { summary: followUpSummary(f.day), date: f.date, userId: ownerId })
+    } else if (before?.date !== f.date || before?.done) {
+      await writeActivity(deps.fetch, cfg, id, { summary: followUpSummary(f.day), date: f.date, userId: ownerId })
+    }
+    out.push({ ...f, activity_id: id || null })
+    was.delete(f.day)
+  }
+  // The sent date was cleared (or moved off a day): close what is still open there.
+  for (const gone of was.values()) {
+    if (gone.id && !gone.done) await doneActivity(deps.fetch, cfg, gone.id, 'Quote date cleared on the Arak leads platform.').catch(() => null)
+  }
+  return out
+}
 
 /** "Ammar Ahmed" (or the address) for the history note. */
 async function personName(deps, userId) {
@@ -150,9 +187,11 @@ export async function pushCard(deps, { conn, workspaceId, leadId, by = '', title
     const names = changedProps(snapshot, ours)
     const act = activityOf(lead)
     const actChanged = !sameActivity(snapshot.act || null, act)
+    const fu = normaliseFollowUps(row.follow_ups)
+    const fuChanged = JSON.stringify(fuKey(fu)) !== JSON.stringify(fuKey(snapshot.fu || []))
     // The first push always leaves its line in the history, even with
     // nothing filled yet; later saves only when something changed.
-    if (!names.length && !actChanged && !title) {
+    if (!names.length && !actChanged && !fuChanged && !title) {
       if (row.crm_sync_error) await deps.db(`lead_cards?lead_id=eq.${leadId}`, { method: 'PATCH', prefer: 'return=minimal', body: { crm_sync_error: '' } })
       return { ok: true, changed: [] }
     }
@@ -167,14 +206,26 @@ export async function pushCard(deps, { conn, workspaceId, leadId, by = '', title
     }
     let activityId = row.crm_activity_id || null
     if (actChanged) activityId = await syncActivity(deps, cfg, { crmId: lead.crm_id, activityId, act, ownerId: now?.userId })
+    let followUps = fu
+    if (fuChanged) followUps = await syncFollowUps(deps, cfg, { crmId: lead.crm_id, list: fu, synced: snapshot.fu || [], ownerId: now?.userId })
 
-    const note = title ? `<p>${String(title).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))}</p>` : changeNote(names, ours, by, actChanged ? act : undefined)
-    await postNote(deps.fetch, cfg, lead.crm_id, note).catch(() => null)
+    const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+    const notes = []
+    if (title) notes.push(`<p>${esc(title)}</p>`)
+    else if (names.length || actChanged) notes.push(changeNote(names, ours, by, actChanged ? act : undefined))
+    // A new or moved sent date says so once; ticks and notes do not.
+    if (fuChanged && row.quote_sent_on && row.quote_sent_on !== snapshot.sent_on) {
+      notes.push(`<p>Quote sent on ${esc(dayMonth(row.quote_sent_on))}${by ? ` (recorded by ${esc(by)})` : ''}. Follow-ups set for ${esc(followUps.map((f) => `day ${f.day} (${dayMonth(f.date)})`).join(', '))}.</p>`)
+    }
+    if (notes.length) await postNote(deps.fetch, cfg, lead.crm_id, notes.join('')).catch(() => null)
     await deps.db(`lead_cards?lead_id=eq.${leadId}`, {
       method: 'PATCH', prefer: 'return=minimal',
-      body: { crm_props: { ...onlyOurs(merged), act }, crm_activity_id: activityId, crm_synced_at: deps.now().toISOString(), crm_sync_error: '' },
+      body: {
+        crm_props: { ...onlyOurs(merged), act, fu: normaliseFollowUps(followUps), sent_on: row.quote_sent_on || null },
+        crm_activity_id: activityId, follow_ups: followUps, crm_synced_at: deps.now().toISOString(), crm_sync_error: '',
+      },
     })
-    return { ok: true, changed: [...names, ...(actChanged ? ['next_step'] : [])], activity: activityId }
+    return { ok: true, changed: [...names, ...(actChanged ? ['next_step'] : []), ...(fuChanged ? ['follow_ups'] : [])], activity: activityId }
   } catch (err) {
     await deps.db(`lead_cards?lead_id=eq.${leadId}`, { method: 'PATCH', prefer: 'return=minimal', body: { crm_sync_error: errText(err) } }).catch(() => null)
     return { ok: false, error: errText(err) }
@@ -214,15 +265,48 @@ export async function pullCards(deps, workspaceId, { conn = null } = {}) {
   const cfg = odooCfg(conn)
   let read = 0
   let updated = 0
+  let closed = 0
+  let ticked = 0
   for (let i = 0; i < leads.length; i += 100) {
     const batch = leads.slice(i, i + 100)
     const got = await readLeadProps(deps.fetch, cfg, batch.map((l) => l.crm_id))
-    const actIds = batch.map((l) => cardOf.get(l.id)?.crm_activity_id).filter(Boolean)
+    const fuOpen = (row) => normaliseFollowUps(row?.follow_ups).filter((f) => f.activity_id && !f.done_at)
+    const actIds = batch.flatMap((l) => [cardOf.get(l.id)?.crm_activity_id, ...fuOpen(cardOf.get(l.id)).map((f) => f.activity_id)]).filter(Boolean)
     const acts = await readActivities(deps.fetch, cfg, actIds)
     for (const lead of batch) {
       const row = cardOf.get(lead.id)
       const odoo = got[String(lead.crm_id)]
-      if (!row || !odoo) continue
+      if (!odoo) continue
+      const now = deps.now().toISOString()
+
+      // Won or Lost in Odoo (its master, the owner's rule): the Pipeline follows,
+      // with Odoo's reason in our words and in its own.
+      const close = outcomeFrom(odoo.close)
+      if (close && (lead.stage !== close.stage || (close.stage === 'lost' && (lead.crm_lost_reason || '') !== close.reasonName))) {
+        await deps.db(`leads?id=eq.${lead.id}`, {
+          method: 'PATCH', prefer: 'return=minimal',
+          body: {
+            stage: close.stage, stage_at: now, stage_by: null,
+            lost_reason: close.stage === 'lost' ? close.reason : '', crm_lost_reason: close.reasonName, updated_at: now,
+          },
+        })
+        closed++
+      }
+      if (!row) continue
+
+      // A follow-up's to-do gone from Odoo was done (or deleted) there: ticked here.
+      const gone = fuOpen(row).filter((f) => !acts[String(f.activity_id)])
+      if (gone.length) {
+        const ids = new Set(gone.map((f) => f.activity_id))
+        const list = normaliseFollowUps(row.follow_ups).map((f) => (ids.has(f.activity_id) ? { ...f, done_at: now } : f))
+        const snap = snapshotOf(row)
+        const fu = normaliseFollowUps(snap.fu).map((f) => (ids.has(f.activity_id) ? { ...f, done_at: now } : f))
+        row.follow_ups = list
+        row.crm_props = { ...snap, fu }
+        await deps.db(`lead_cards?lead_id=eq.${lead.id}`, { method: 'PATCH', prefer: 'return=minimal', body: { follow_ups: list, crm_props: row.crm_props, crm_pulled_at: now } })
+        ticked += gone.length
+      }
+
       const theirs = propsFromRead(odoo.props)
       if (!Object.keys(theirs).length) continue // that team has no card fields
       read++
@@ -232,7 +316,6 @@ export async function pullCards(deps, workspaceId, { conn = null } = {}) {
       const theirAct = row.crm_activity_id ? acts[String(row.crm_activity_id)] || null : snapshot.act || null
       const actChanged = !sameActivity(snapshot.act || null, theirAct)
       if (!names.length && !actChanged) continue
-      const now = deps.now().toISOString()
       // Only what changed in Odoo: a change made here that has not reached
       // Odoo yet (its write failed again above) stays, and goes next time.
       const fromOdoo = Object.fromEntries(names.map((k) => [k, theirs[k]]))
@@ -253,7 +336,7 @@ export async function pullCards(deps, workspaceId, { conn = null } = {}) {
       updated++
     }
   }
-  return { read, updated, failed }
+  return { read, updated, failed, closed, ticked }
 }
 
 /**

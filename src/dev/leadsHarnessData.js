@@ -5,6 +5,7 @@
 
 import { buildLeadCard, normaliseLeadCard, afterCallFields } from '../lib/sales/leadCard'
 import { manualLead, trackFields } from '../lib/leads/pipeline'
+import { nextFollowUps } from '../lib/sales/cardFollowUp'
 import runsFixture from './runsFixture.json'
 
 export const WS = '00000000-0000-0000-0000-0000000000dd'
@@ -267,7 +268,12 @@ window.fetch = async (input, init = {}) => {
     if (after.error) return json({ ok: false, error: after.error }, 400)
     const track = trackFields({ next_step: body.next_step, follow_up: body.follow_up })
     if (track.error) return json({ ok: false, error: track.error }, 400)
-    Object.assign(row, { card: normaliseLeadCard(body.card), ...after.values, updated_at: new Date().toISOString() })
+    // Step 4's follow-ups, planned by the real code (the harness's salesperson is on the pilot).
+    const follow = body.quote_sent_on === undefined ? {} : {
+      quote_sent_on: body.quote_sent_on || null,
+      follow_ups: nextFollowUps(row.follow_ups, { sentOn: body.quote_sent_on || '', sentBefore: row.quote_sent_on || '', sent: body.follow_ups }),
+    }
+    Object.assign(row, { card: normaliseLeadCard(body.card), ...after.values, ...follow, updated_at: new Date().toISOString() })
     const l = leads.find((x) => x.id === body.lead_id)
     Object.assign(l, track.values)
     return json({ ok: true, card: row, lead: l })
@@ -308,7 +314,13 @@ window.fetch = async (input, init = {}) => {
       const now = new Date().toISOString()
       cards[lead_id] = { lead_id, card: buildLeadCard(l, CARD_CONTEXT), decision: '', quote_due: null, target_price: '', decides: '', built_at: now, updated_at: now }
     }
-    return json({ ok: true, card: cards[lead_id], watchlist: WATCHLIST })
+    // Made-up numbers (the real ones are company data, never in this repository).
+    const extras = {
+      pilot: true, preview: false, quote_days: 14,
+      size_odds: [{ max: 100000, rate: 40 }, { max: 500000, rate: 20 }, { max: 2000000, rate: 12 }, { max: null, rate: 3 }],
+      close: { stage: l.stage || '', lost_reason: l.lost_reason || '', lost_to: l.lost_to || '', crm_lost_reason: '', in_odoo: l.crm_status === 'sent' },
+    }
+    return json({ ok: true, card: cards[lead_id], watchlist: WATCHLIST, extras })
   }
   if (url.includes('/api/leads/attachment_file')) {
     const { attachment_id } = JSON.parse(init.body || '{}')

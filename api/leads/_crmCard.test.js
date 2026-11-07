@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { ensureTeamFields, pushCard, pullCards, maybePullCards, setCrmTeam, crmTeams } from './_crmCard.js'
 import { approveLead } from './_crm.js'
-import { saveCard } from './_card.js'
+import { saveCard, cardExtras } from './_card.js'
 import { PROPS, propsFromRead } from '../../src/lib/sales/odooCard.js'
 import { readLeadProps } from './_odoo.js'
 
@@ -43,7 +43,13 @@ function fakeOdoo({ salesAdmin = true } = {}) {
       o.leads[id] = { id, ...a[0], props: {} }
       return ok(id)
     }
-    if (model === 'crm.lead' && m === 'read') return ok(a[0].map((id) => o.leads[id]).filter(Boolean).map((l) => ({ id: l.id, team_id: [l.team_id, 't'], user_id: [l.user_id || 21, 'Owner'], lead_properties: shown(l) })))
+    if (model === 'crm.lead' && m === 'read') {
+      return ok(a[0].map((id) => o.leads[id]).filter(Boolean).map((l) => ({
+        id: l.id, team_id: [l.team_id, 't'], user_id: [l.user_id || 21, 'Owner'], lead_properties: shown(l),
+        // What Won / Lost leaves on a deal: won = active at 100%, lost = archived at 0% with a reason.
+        active: l.active ?? true, probability: l.probability ?? 10, lost_reason_id: l.lost_reason_id || false,
+      })))
+    }
     if (model === 'ir.model' && m === 'search') return ok([77])
     if (model === 'mail.activity.type' && m === 'search') return ok([4])
     if (model === 'mail.activity' && m === 'create') { const id = o.nextAct++; o.activities[id] = { id, ...a[0] }; return ok(id) }
@@ -130,7 +136,7 @@ const theCard = {
   ask: [{ q: 'Is the main contract awarded?', a: '' }], pushback: [],
 }
 
-function world({ salesAdmin = true, teamId = TEAM, sent = false } = {}) {
+function world({ salesAdmin = true, teamId = TEAM, sent = false, pilot = [] } = {}) {
   const odoo = fakeOdoo({ salesAdmin })
   const tables = {
     lead_crm: [{ workspace_id: WS, url: 'https://erp.example.com', db: 'erp', login: 'agent', api_key: 'sealed:key', odoo_uid: 7, team_id: teamId, team_name: 'Test team', last_pull_at: null, last_pull_error: '' }],
@@ -138,7 +144,9 @@ function world({ salesAdmin = true, teamId = TEAM, sent = false } = {}) {
       id: L1, workspace_id: WS, source: 'email', company: 'Example Dev', name: 'Khalid', email: 'k@example-dev.sa', summary: 'Facade lighting', subject: 'RFQ',
       verdict: 'qualified', human_verdict: null, criteria_version: 2, assigned_to: OMAR, approved_at: null, approved_by: null,
       crm_status: sent ? 'sent' : null, crm_id: sent ? '900' : '', crm_test: false, crm_url: '', crm_error: '', next_step: '', follow_up: null, updated_at: '2026-10-20T08:00:00Z',
+      stage: sent ? 'quotation' : null, lost_reason: '', lost_to: '', crm_lost_reason: '',
     }],
+    sales_icp: [{ workspace_id: WS, battle_cards: { pilot, lead: { quote_days: 15 } } }],
     lead_cards: [{ lead_id: L1, workspace_id: WS, card: structuredClone(theCard), decision: '', quote_due: null, target_price: '', decides: '', competitors: '', crm_props: null, crm_sync_error: '', updated_at: '2026-10-20T08:00:00Z' }],
     user_access: [{ user_id: ARIF.id, email: 'arif@example.com', full_name: 'Arif' }, { user_id: OMAR, email: 'omar@example.com', full_name: 'Omar' }],
     sales_seats: [{ user_id: OMAR, workspace_id: WS, odoo_login: '', odoo_user_id: 21 }],
@@ -281,13 +289,13 @@ describe('reading back from Odoo (Odoo is the master)', () => {
   it('takes what the salesperson filled in Odoo into our card', async () => {
     Object.assign(w.odoo.leads[900].props, { la_decision: 'park', la_call_notes: '1) Not yet, award in March | spoke to the PM' })
     const out = await pullCards(w.deps, WS)
-    expect(out).toEqual({ read: 1, updated: 1, failed: 0 })
+    expect(out).toEqual({ read: 1, updated: 1, failed: 0, closed: 0, ticked: 0 })
     const row = w.tables.lead_cards[0]
     expect(row.decision).toBe('park')
     expect(row.card.ask).toEqual([{ q: 'Is the main contract awarded?', a: 'Not yet, award in March' }, { q: 'Call note', a: 'spoke to the PM' }])
     expect(row.card.facts.who).toBe('Contractor, verified')
     // Nothing changed since: the next read changes nothing.
-    expect(await pullCards(w.deps, WS)).toEqual({ read: 1, updated: 0, failed: 0 })
+    expect(await pullCards(w.deps, WS)).toEqual({ read: 1, updated: 0, failed: 0, closed: 0, ticked: 0 })
   })
 
   it('a to-do rescheduled in Odoo moves our follow-up; marked done there, our next step clears', async () => {
@@ -319,5 +327,101 @@ describe('reading back from Odoo (Odoo is the master)', () => {
   it('with no team chosen, nothing is read', async () => {
     w.tables.lead_crm[0].team_id = null
     expect(await maybePullCards(w.deps, { workspaceId: WS })).toBeNull()
+  })
+})
+
+describe('after the quote: three follow-ups as Odoo to-dos (Part 1, 2026-11-07)', () => {
+  let w
+  const save = (body) => saveCard(w.deps, { workspaceId: WS, leadId: L1, user: { id: OMAR }, body: { card: theCard, ...body } })
+  const open = () => Object.values(w.odoo.activities).sort((a, b) => a.id - b.id)
+  beforeEach(async () => {
+    w = world({ sent: true, pilot: ['Omar@example.com'] })
+    await ensureTeamFields(w.deps, { ...w.tables.lead_crm[0], apiKey: 'key', ready: true })
+    await pushCard(w.deps, { workspaceId: WS, leadId: L1 })
+    w.odoo.notes = []
+  })
+
+  it('is off for a salesperson not on the pilot: refused, and nothing reaches Odoo', async () => {
+    w.tables.sales_icp[0].battle_cards.pilot = []
+    const out = await save({ quote_sent_on: '2026-10-20' })
+    expect(out.status).toBe(403)
+    expect(open()).toEqual([])
+    expect(w.tables.lead_cards[0].quote_sent_on).toBeUndefined()
+  })
+
+  it('a sent date makes three to-dos for the salesperson, off the weekend, and says so once in the history', async () => {
+    const out = await save({ quote_sent_on: '2026-10-20' })
+    expect(out.odoo).toMatchObject({ ok: true, changed: ['follow_ups'] })
+    expect(open().map((a) => [a.date_deadline, a.user_id, a.res_id])).toEqual([
+      ['2026-10-25', 21, 900], // day 3 is a Friday: Sunday
+      ['2026-11-01', 21, 900], // day 10 is a Friday too
+      ['2026-11-19', 21, 900],
+    ])
+    expect(open()[0].summary).toMatch(/^Quote follow-up, day 3: /)
+    expect(w.odoo.notes.map((n) => n.body)).toEqual(['<p>Quote sent on 20 Oct (recorded by Omar). Follow-ups set for day 3 (25 Oct), day 10 (1 Nov), day 30 (19 Nov).</p>'])
+    expect(w.tables.lead_cards[0].follow_ups.map((f) => f.activity_id)).toEqual(open().map((a) => a.id))
+  })
+
+  it('a moved date moves the same to-dos; a tick closes one with what they said; a cleared date closes the rest', async () => {
+    await save({ quote_sent_on: '2026-10-20' })
+    const ids = open().map((a) => a.id)
+    await save({ quote_sent_on: '2026-10-21', follow_ups: [] })
+    expect(open().map((a) => [a.id, a.date_deadline])).toEqual([[ids[0], '2026-10-25'], [ids[1], '2026-11-01'], [ids[2], '2026-11-22']]) // 20 Nov is a Friday
+    const ticks = w.tables.lead_cards[0].follow_ups.map((f) => ({ day: f.day, done: f.day === 3, note: f.day === 3 ? 'Comparing offers' : '' }))
+    await save({ quote_sent_on: '2026-10-21', follow_ups: ticks })
+    expect(open().map((a) => a.id)).toEqual([ids[1], ids[2]])
+    expect(w.tables.lead_cards[0].follow_ups[0]).toMatchObject({ day: 3, note: 'Comparing offers' })
+    expect(w.tables.lead_cards[0].follow_ups[0].done_at).toBeTruthy()
+    await save({ quote_sent_on: '' })
+    expect(open()).toEqual([])
+    expect(w.tables.lead_cards[0].follow_ups).toEqual([])
+  })
+
+  it('a to-do done in Odoo comes back ticked, and is not closed twice', async () => {
+    await save({ quote_sent_on: '2026-10-20' })
+    const [first] = open()
+    delete w.odoo.activities[first.id]
+    const out = await pullCards(w.deps, WS)
+    expect(out.ticked).toBe(1)
+    expect(w.tables.lead_cards[0].follow_ups[0].done_at).toBeTruthy()
+    const writes = w.odoo.writes.length
+    const again = await save({ quote_sent_on: '2026-10-20', follow_ups: w.tables.lead_cards[0].follow_ups.map((f) => ({ day: f.day, done: Boolean(f.done_at), note: f.note })) })
+    expect(again.odoo).toEqual({ ok: true, changed: [] })
+    expect(w.odoo.writes.length).toBe(writes)
+  })
+})
+
+describe('the close comes from Odoo (Part 1, 2026-11-07)', () => {
+  let w
+  beforeEach(async () => {
+    w = world({ sent: true })
+    await ensureTeamFields(w.deps, { ...w.tables.lead_crm[0], apiKey: 'key', ready: true })
+    await pushCard(w.deps, { workspaceId: WS, leadId: L1 })
+  })
+
+  it('Lost in Odoo moves the lead to Lost, with Odoo\'s reason in our words and its own', async () => {
+    Object.assign(w.odoo.leads[900], { active: false, probability: 0, lost_reason_id: [6, 'Quotation sent late from our side'] })
+    const out = await pullCards(w.deps, WS)
+    expect(out.closed).toBe(1)
+    expect(w.tables.leads[0]).toMatchObject({ stage: 'lost', lost_reason: 'arak_late', crm_lost_reason: 'Quotation sent late from our side' })
+    expect((await pullCards(w.deps, WS)).closed).toBe(0) // nothing new
+  })
+
+  it('Won in Odoo moves it to Won; a deal still open there changes nothing here', async () => {
+    expect((await pullCards(w.deps, WS)).closed).toBe(0)
+    expect(w.tables.leads[0].stage).toBe('quotation')
+    Object.assign(w.odoo.leads[900], { probability: 100 })
+    await pullCards(w.deps, WS)
+    expect(w.tables.leads[0]).toMatchObject({ stage: 'won', lost_reason: '' })
+  })
+})
+
+describe('what the card is told beyond itself', () => {
+  it('the pilot works on its people\'s leads; an admin previews it elsewhere', async () => {
+    const w = world({ sent: true, pilot: ['omar@example.com'] })
+    expect(await cardExtras(w.deps, WS, L1)).toMatchObject({ pilot: true, preview: false, quote_days: 15, close: { stage: 'quotation', in_odoo: true } })
+    w.tables.sales_icp[0].battle_cards.pilot = ['arif@example.com']
+    expect(await cardExtras(w.deps, WS, L1)).toMatchObject({ pilot: false, preview: false })
+    expect(await cardExtras(w.deps, WS, L1, { admin: true })).toMatchObject({ pilot: false, preview: true })
   })
 })

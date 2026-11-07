@@ -1,6 +1,7 @@
 import { buildLeadCard, normaliseLeadCard, afterCallFields, senderDomain, objectionsFromCards } from '../../src/lib/sales/leadCard.js'
 import { trackFields } from '../../src/lib/leads/pipeline.js'
 import { pushCardAfterSave } from './_crmCard.js'
+import { inPilot, nextFollowUps, turnaroundDays, sizeBands } from '../../src/lib/sales/cardFollowUp.js'
 
 // ─── Battle cards for leads someone is working ─────────────────────────────
 // A lead gets its card when it is assigned (the owner, 2026-10-19; it was
@@ -14,7 +15,35 @@ import { pushCardAfterSave } from './_crmCard.js'
 
 const isUuid = (v) => /^[0-9a-f-]{36}$/i.test(String(v || ''))
 
-const CARD_COLUMNS = 'lead_id,card,decision,quote_due,target_price,decides,competitors,built_at,updated_at,updated_by,crm_synced_at,crm_pulled_at,crm_sync_error'
+const CARD_COLUMNS = 'lead_id,card,decision,quote_due,target_price,decides,competitors,quote_sent_on,follow_ups,built_at,updated_at,updated_by,crm_synced_at,crm_pulled_at,crm_sync_error'
+const isDate = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) && !Number.isNaN(new Date(`${v}T00:00:00Z`).getTime())
+
+/**
+ * What the card needs beyond itself (Part 1, 2026-11-07): the company's quote
+ * turnaround and win rates by size (for the clock and the odds), and whether
+ * steps 4 and 5 are live for this lead: its salesperson is on the pilot list.
+ * An admin sees them on any lead, read only, to preview.
+ */
+export async function cardExtras(deps, workspaceId, leadId, { admin = false } = {}) {
+  const [[icp], [lead]] = await Promise.all([
+    deps.db(`sales_icp?workspace_id=eq.${workspaceId}&select=battle_cards`).then((r) => r || []).catch(() => []),
+    deps.db(`leads?id=eq.${leadId}&workspace_id=eq.${workspaceId}&select=assigned_to,stage,lost_reason,lost_to,crm_lost_reason,crm_status,crm_id`).then((r) => r || []).catch(() => []),
+  ])
+  const cards = icp?.battle_cards || {}
+  let email = ''
+  if (isUuid(lead?.assigned_to)) {
+    const [u] = await deps.db(`user_access?user_id=eq.${lead.assigned_to}&select=email`).catch(() => []) || []
+    email = u?.email || ''
+  }
+  const pilot = inPilot(cards, email)
+  return {
+    pilot,
+    preview: !pilot && admin,
+    quote_days: turnaroundDays(cards.lead),
+    size_odds: sizeBands(cards.lead),
+    close: lead ? { stage: lead.stage || '', lost_reason: lead.lost_reason || '', lost_to: lead.lost_to || '', crm_lost_reason: lead.crm_lost_reason || '', in_odoo: lead.crm_status === 'sent' && Boolean(lead.crm_id) } : null,
+  }
+}
 const LEAD_COLUMNS = 'id,received_at,created_at,company,name,email,subject,message,summary,details,ask_next,category,verdict,human_verdict,sender_type,source_check,project_type,human_project_type,project_final,philips,approved_at,stage,source,channel,assigned_to'
 
 const effective = (l) => l.human_verdict || l.verdict
@@ -102,9 +131,21 @@ export async function saveCard(deps, { workspaceId, leadId, user, body = {} }) {
   if (track.error) return { status: 400, error: track.error }
   const existing = await readCard(deps, workspaceId, leadId)
   if (!existing) return { status: 404, error: 'This lead has no battle card yet. Open it first.' }
+  // Step 4, the quote's follow-ups: the pilot's leads only (2026-11-07).
+  let follow = {}
+  if (body.quote_sent_on !== undefined || body.follow_ups !== undefined) {
+    const { pilot } = await cardExtras(deps, workspaceId, leadId)
+    if (!pilot) return { status: 403, error: 'Follow-ups are switched on only for the pilot salespeople\'s leads.' }
+    const sentOn = body.quote_sent_on === undefined ? String(existing.quote_sent_on || '') : String(body.quote_sent_on || '').trim()
+    if (sentOn && !isDate(sentOn)) return { status: 400, error: 'The quote sent date is not a date.' }
+    follow = {
+      quote_sent_on: sentOn || null,
+      follow_ups: nextFollowUps(existing.follow_ups, { sentOn, sentBefore: String(existing.quote_sent_on || ''), sent: body.follow_ups, now: deps.now() }),
+    }
+  }
   const [row] = await deps.db(`lead_cards?lead_id=eq.${leadId}&workspace_id=eq.${workspaceId}&select=${CARD_COLUMNS}`, {
     method: 'PATCH', prefer: 'return=representation',
-    body: { card: normaliseLeadCard(body.card ?? existing.card), ...after.values, updated_by: user?.id || null, updated_at: deps.now().toISOString() },
+    body: { card: normaliseLeadCard(body.card ?? existing.card), ...after.values, ...follow, updated_by: user?.id || null, updated_at: deps.now().toISOString() },
   }) || []
   if (!row) return { status: 404, error: 'This lead has no battle card yet. Open it first.' }
   let lead = null
