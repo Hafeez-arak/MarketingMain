@@ -221,6 +221,22 @@ describe('approving sends the card with the lead', () => {
     expect(w.odoo.notes[0]).toMatchObject({ body_is_html: true, subtype_xmlid: 'mail.mt_note' })
     expect(w.tables.lead_cards[0].crm_sync_error).toBe('')
   })
+
+  it('with the playbook cards that fit the lead under the brief (2026-11-07), and none that do not', async () => {
+    const w = world()
+    w.tables.playbook_cards = [
+      { id: 'p1', workspace_id: WS, position: 1, title: 'Reply within a day', category: 'objection', signals: ['always'], response: 'Give them a date.', follow_up: 'Has the deadline moved?', next_step: 'Date in the CRM', avoid: ['No date'], status: 'draft' },
+      { id: 'p2', workspace_id: WS, position: 2, title: 'Your price is too high', category: 'objection', signals: ['price_pressure'], response: 'Against what?', avoid: [], status: 'approved' },
+    ]
+    await ensureTeamFields(w.deps, { ...w.tables.lead_crm[0], apiKey: 'key', ready: true })
+    await approveLead(w.deps, { workspaceId: WS, leadId: L1, user: ARIF })
+    const notes = w.odoo.leads[900].description
+    expect(notes).toContain('<p><b>3. PLAYBOOK CARDS FOR THIS LEAD</b></p>')
+    expect(notes).toContain('<b>Reply within a day</b> · Objection handling · draft')
+    expect(notes).toContain('Has the deadline moved?')
+    expect(notes).not.toContain('Your price is too high') // the lead asks for no discount
+    expect(notes.indexOf('PLAYBOOK')).toBeGreaterThan(notes.indexOf('2. WHAT TO DO'))
+  })
 })
 
 describe('a card saved here, on a lead already in Odoo', () => {

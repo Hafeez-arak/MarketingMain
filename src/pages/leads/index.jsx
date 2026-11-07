@@ -10,6 +10,7 @@ import Pipeline, { AddLeadDialog } from './Pipeline'
 import CrmCard from './CrmCard'
 import TeamCard from './TeamCard'
 import AutoReplyCard from './AutoReplyCard'
+import Playbook from './Playbook'
 import { RULE_LABELS } from '../../lib/leads/qualify'
 import {
   monthStats, sheetHealth, modelName, money,
@@ -30,6 +31,7 @@ import {
 const VIEWS = [
   { key: 'leads', label: 'Inbox' },
   { key: 'pipeline', label: 'Pipeline' },
+  { key: 'playbook', label: 'Playbook' },
   { key: 'settings', label: 'Agent settings' },
 ]
 
@@ -69,7 +71,7 @@ export default function LeadAgent() {
     : params.get('ms_error') ? { ok: false, code: params.get('ms_error') } : null
   // Leads is the page; the agent's own settings are one tab away (?view=settings).
   // Coming back from a mailbox sign-in lands on settings, where it happened.
-  const view = params.get('view') === 'settings' || msBack ? 'settings' : params.get('view') === 'pipeline' ? 'pipeline' : 'leads'
+  const view = params.get('view') === 'settings' || msBack ? 'settings' : ['pipeline', 'playbook'].includes(params.get('view')) ? params.get('view') : 'leads'
   const [adding, setAdding] = useState(false)
   // "Now" for the month and the Sheet's last call, taken when data loads
   // rather than during render.
@@ -155,6 +157,8 @@ export default function LeadAgent() {
         <LeadsBoard workspaceId={activeWorkspaceId} onReview={review} refreshKey={refreshKey} mailboxes={status?.mailboxes || []} canApprove canTest team={team} me={user?.id || ''} />
       ) : view === 'pipeline' ? (
         <Pipeline workspaceId={activeWorkspaceId} onReview={review} refreshKey={refreshKey} mailboxes={status?.mailboxes || []} canApprove team={team} me={user?.id || ''} focus={params.get('lead') || ''} />
+      ) : view === 'playbook' ? (
+        <Playbook key={activeWorkspaceId} workspaceId={activeWorkspaceId} />
       ) : (
         <>
           {status?.error && <Notice tone="red" title="Could not load the agent's settings">{status.error}</Notice>}

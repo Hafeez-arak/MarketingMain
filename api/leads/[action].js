@@ -7,7 +7,8 @@ import { intakeWebsite, tryIt, QUALIFIER_MODEL } from './_intake.js'
 import { checkMail, emailFile, currentOutlookLink, emailAttachments, attachmentFile } from './_mail.js'
 import { exportLeads, applySheetDecisions } from './_export.js'
 import { approveLead, crmStatus, saveCrm, sendWaiting, disconnectCrm } from './_crm.js'
-import { openCard, saveCard, watchlist, cardExtras } from './_card.js'
+import { openCard, saveCard, watchlist, cardExtras, leadPlaybook } from './_card.js'
+import { listPlaybook, savePlaybookCard, reviewPlaybookCard, deletePlaybookCard } from './_playbook.js'
 import { crmTeams, setCrmTeam, pullCards } from './_crmCard.js'
 import { assignLead, teamList, teamSave, teamCheckOdoo } from './_assign.js'
 import { addLead, trackLead, deleteLead } from './_pipeline.js'
@@ -111,7 +112,9 @@ async function isAdmin(token) {
 // A sales person (20261013_sales_seats) is not a member of the company at
 // all: their seat is asked for separately, again with their own token. A
 // seat opens these actions and nothing else.
-const SALES_ACTIONS = new Set(['review', 'email_file', 'approve', 'assign', 'forward', 'outlook_link', 'set_project', 'card', 'card_save', 'lead_add', 'stage', 'attachments', 'attachment_file', 'lead_delete'])
+const SALES_ACTIONS = new Set(['review', 'email_file', 'approve', 'assign', 'forward', 'outlook_link', 'set_project', 'card', 'card_save', 'lead_add', 'stage', 'attachments', 'attachment_file', 'lead_delete',
+  // The playbook (2026-11-07): every seat reads it; the edits ask canApprove (a sales admin).
+  'playbook', 'playbook_save', 'playbook_review', 'playbook_delete'])
 
 /**
  * May this sales person open this lead? Asked with their own token, so the
@@ -502,11 +505,42 @@ const actions = {
     const deps = leadDeps()
     const out = await openCard(deps, { workspaceId, leadId: body.lead_id })
     if (out.error) return fail(out.status, out.error)
-    const [list, extras] = await Promise.all([
+    const [list, extras, playbook] = await Promise.all([
       watchlist(deps, workspaceId),
       cardExtras(deps, workspaceId, body.lead_id, { admin: await isAdmin(token) }),
+      leadPlaybook(deps, workspaceId, body.lead_id).catch(() => []),
     ])
-    return { card: out.card, watchlist: list, extras }
+    return { card: out.card, watchlist: list, extras: { ...extras, playbook } }
+  },
+
+  /** The sales playbook: every card, for the Playbook page. */
+  async playbook({ workspaceId, token }) {
+    const [cards, canEdit] = await Promise.all([listPlaybook(leadDeps(), workspaceId), canApprove(workspaceId, token)])
+    return { cards, can_edit: canEdit }
+  },
+
+  /** Add or edit a playbook card: the access admin or a sales admin. */
+  async playbook_save({ workspaceId, body, user, token }) {
+    if (!(await canApprove(workspaceId, token))) return fail(403, 'Only a sales admin can edit the playbook.')
+    const out = await savePlaybookCard(leadDeps(), { workspaceId, user, body })
+    if (out.error) return fail(out.status, out.error)
+    return { card: out.card }
+  },
+
+  /** Mark a playbook card reviewed, or back to draft. */
+  async playbook_review({ workspaceId, body, user, token }) {
+    if (!(await canApprove(workspaceId, token))) return fail(403, 'Only a sales admin can review the playbook.')
+    const out = await reviewPlaybookCard(leadDeps(), { workspaceId, user, id: body.id, approved: body.approved !== false })
+    if (out.error) return fail(out.status, out.error)
+    return { card: out.card }
+  },
+
+  /** Remove a playbook card. */
+  async playbook_delete({ workspaceId, body, token }) {
+    if (!(await canApprove(workspaceId, token))) return fail(403, 'Only a sales admin can remove a playbook card.')
+    const out = await deletePlaybookCard(leadDeps(), { workspaceId, id: body.id })
+    if (out.error) return fail(out.status, out.error)
+    return out
   },
 
   /** The team's edits to a card, the things recorded after the call, and the next step. */

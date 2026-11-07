@@ -29,6 +29,7 @@ import AgentPage                  from './pages/agent/index'
 import LeadAgent                  from './pages/leads/index'
 import SalesApp                   from './pages/leads/SalesApp'
 import SalesResearch              from './pages/leads/SalesResearch'
+import SalesPlaybook              from './pages/leads/SalesPlaybook'
 import Targets                    from './pages/sales/Targets'
 import AgentBrief                 from './pages/admin/AgentBrief'
 import { SHOW_AGENT_BRIEF }       from './lib/hiddenPages'
@@ -103,6 +104,7 @@ function ProtectedApp() {
           <Routes>
             <Route path="/leads" element={<SalesApp key={activeWorkspaceId || 'none'} />} />
             <Route path="/research" element={<SalesResearch key={activeWorkspaceId || 'none'} />} />
+            <Route path="/playbook" element={<SalesPlaybook key={activeWorkspaceId || 'none'} />} />
             <Route path="*"      element={<Navigate to="/leads" replace />} />
           </Routes>
         </ErrorBoundary>
