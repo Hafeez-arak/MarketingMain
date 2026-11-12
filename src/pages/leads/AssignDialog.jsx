@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Button, Select, Spinner } from '../../components/ui/index'
-import { assignable, shortName, forwardWords } from '../../lib/leads/view'
+import { assignable, shortName, assignWords } from '../../lib/leads/view'
 import { STAGE_LABEL } from '../../lib/leads/pipeline'
 
 // ─── Assign, or reassign, one lead ─────────────────────────────────────────
@@ -43,8 +43,8 @@ export default function AssignDialog({ lead, team, busy, error, onCancel, onConf
         {to && (
           <div className="text-xs text-text-secondary leading-relaxed space-y-1">
             {same
-              ? <p>{shortName(person)} has it already: this sends the email to them again.</p>
-              : <p>{forwardWords(lead, person)}</p>}
+              ? <p>{shortName(person)} has it already.</p>
+              : <p>{assignWords(person)}</p>}
             {moving && lead.stage && <p>It stays at <span className="font-semibold text-text">{STAGE_LABEL[lead.stage]}</span> with its battle card, next step and notes.{current && !current.approver ? ` ${shortName(current)} no longer sees it.` : ''}</p>}
             {!lead.assigned_to && <p>It goes into the Pipeline with its battle card.</p>}
             {lead.crm_status === 'sent' && !same && <p>They become its salesperson in Odoo too.</p>}

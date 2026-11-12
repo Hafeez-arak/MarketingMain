@@ -2,8 +2,7 @@
 // The owner's decisions (2026-10-13):
 //   · a sales admin (or the access admin) assigns a lead, at any time, to
 //     one person on the company's sales team (a sales seat);
-//   · assigning forwards the customer's email to them at once (_mail.js
-//     forwardLead), so assigning and forwarding never disagree;
+//   · (2026-11-12) assigning sends them no email; the bell tells them.
 //   · Approve needs someone assigned (_crm.js), and the lead goes into Odoo
 //     with them as its salesperson; reassigning a lead already in Odoo moves
 //     it there too;
@@ -16,14 +15,10 @@
 //   deps: as in _crm.js (db, fetch, now, open) plus ms for the mailboxes.
 
 import { crmConnection, odooOwner, odooCfg } from './_crm.js'
-import { forwardLead } from './_mail.js'
 import { findUserId, setLeadOwner } from './_odoo.js'
 import { openCard } from './_card.js'
 
 const isUuid = (v) => /^[0-9a-f-]{36}$/i.test(String(v || ''))
-
-/** A forward that has not finished in this long is taken to have died, and may be retried. */
-export const FORWARD_STUCK_MS = 2 * 60_000
 
 const LEAD_SELECT = 'id,workspace_id,source,stage,company,name,email,summary,subject,mailbox,assigned_to,assigned_at,assigned_by,forward_status,forward_to,forward_error,forwarded_at,crm_status,crm_id,crm_error,approved_at,updated_at'
 
@@ -73,13 +68,11 @@ async function nameOfUser(deps, userId) {
 }
 
 /**
- * Assign (or reassign) a lead and forward its email to that person.
+ * Assign (or reassign) a lead to that person. No email is sent.
  * `to` null takes it off everyone, allowed only before it is approved.
- * Assigning it to the person who already has it sends the email again
- * (the "Try again" after a failed forward).
- * Returns { lead, forward: { ok, from? , error? }, odooError } or { status, error }.
+ * Returns { lead, forward: null, odooError } or { status, error }.
  */
-export async function assignLead(deps, { workspaceId, leadId, to, user, appUrl = '' }) {
+export async function assignLead(deps, { workspaceId, leadId, to, user }) {
   if (!isUuid(leadId)) return { status: 400, error: 'Which lead?' }
   const [lead] = await deps.db(`leads?id=eq.${leadId}&workspace_id=eq.${workspaceId}&select=${LEAD_SELECT}`) || []
   if (!lead) return { status: 404, error: 'That lead is not in this company.' }
@@ -102,18 +95,16 @@ export async function assignLead(deps, { workspaceId, leadId, to, user, appUrl =
   if (person.approver) return { status: 400, error: NOT_TO_ADMIN }
   const changed = lead.assigned_to !== person.id
 
-  // The claim: only one request forwards a lead at a time (a double click
-  // would otherwise send the email twice). A forward that died is retried.
-  const stuck = new Date(now.getTime() - FORWARD_STUCK_MS).toISOString()
-  const [claimed] = await deps.db(`leads?id=eq.${leadId}&workspace_id=eq.${workspaceId}&or=(forward_status.is.null,forward_status.neq.sending,updated_at.lt.${stuck})`, {
+  // (2026-11-12) Assigning sends no email: the owner does not want the
+  // customer's email forwarded to staff. They hear of it on their bell.
+  const [row] = await deps.db(`leads?id=eq.${leadId}&workspace_id=eq.${workspaceId}`, {
     method: 'PATCH', prefer: 'return=representation',
     body: {
       ...(changed ? { assigned_to: person.id, assigned_at: now.toISOString(), assigned_by: user.id } : {}),
       ...(lead.stage ? {} : { stage: 'new', stage_at: now.toISOString(), stage_by: user.id }),
-      forward_status: 'sending', forward_to: person.email, forward_error: '', updated_at: now.toISOString(),
+      updated_at: now.toISOString(),
     },
   }) || []
-  if (!claimed) return { status: 409, error: 'This lead is being forwarded right now. Wait a moment and refresh.' }
 
   // Already in Odoo: the salesperson there changes with it.
   let odooError = ''
@@ -132,16 +123,7 @@ export async function assignLead(deps, { workspaceId, leadId, to, user, appUrl =
   await openCard(deps, { workspaceId, leadId }).catch(() => null)
   if (changed) await notifyAssigned(deps, { workspaceId, lead, to: person.id, by: user })
 
-  const forward = await forwardLead(deps, {
-    workspaceId, leadId, to: { email: person.email, name: person.name }, by: await nameOfUser(deps, user.id), appUrl,
-  }).catch((err) => ({ ok: false, error: String(err.message || err) }))
-  const [row] = await deps.db(`leads?id=eq.${leadId}&workspace_id=eq.${workspaceId}`, {
-    method: 'PATCH', prefer: 'return=representation',
-    body: forward.ok
-      ? { forward_status: 'sent', forward_error: '', forwarded_at: deps.now().toISOString(), updated_at: deps.now().toISOString() }
-      : { forward_status: 'failed', forward_error: String(forward.error || 'The email was not forwarded.').slice(0, 400), updated_at: deps.now().toISOString() },
-  }) || []
-  return { lead: row || claimed, forward, odooError }
+  return { lead: row || lead, forward: null, odooError }
 }
 
 // ─── The sales team, on Agent settings (admin only) ────────────────────────

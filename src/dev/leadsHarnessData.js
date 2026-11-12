@@ -201,18 +201,12 @@ window.fetch = async (input, init = {}) => {
   }
   if (url.includes('/api/leads/team_odoo')) return json({ ok: false, error: 'Connect Odoo first.' }, 409)
   if (url.includes('/api/leads/team')) return json({ ok: true, team: TEAM })
-  // Assigning forwards the email: from a mailbox allowed to send it goes; from
-  // the read-only one (and the website, when none may send) it fails.
+  // Assigning sends no email (2026-11-12).
   const assignTo = (l, userId) => {
-    const m = TEAM.find((x) => x.user_id === userId)
-    const from = l.source === 'email' ? status.mailboxes.find((b) => b.email === l.mailbox) : status.mailboxes.find((b) => b.can_send)
-    const ok = Boolean(from?.can_send)
     Object.assign(l, {
       // Assigning puts it in the Pipeline with its card (2026-10-19).
       stage: l.stage || 'new', stage_at: l.stage_at || new Date().toISOString(),
-      assigned_to: userId, assigned_at: l.assigned_to === userId ? l.assigned_at : new Date().toISOString(), forward_to: m.email,
-      forward_status: ok ? 'sent' : 'failed', forwarded_at: ok ? new Date().toISOString() : l.forwarded_at,
-      forward_error: ok ? '' : `${from?.email || 'info@'} can only read. On Agent settings, choose "Allow forwarding" on it and sign in as it again.`,
+      assigned_to: userId, assigned_at: l.assigned_to === userId ? l.assigned_at : new Date().toISOString(),
     })
   }
   if (url.includes('/api/leads/assign')) {
@@ -220,17 +214,11 @@ window.fetch = async (input, init = {}) => {
     const l = leads.find((x) => x.id === lead_id)
     if (!user_id) {
       if (l.approved_at) return json({ ok: false, error: 'An approved lead always has someone on it. Assign it to someone else instead.' }, 409)
-      Object.assign(l, { assigned_to: null, assigned_at: null, forward_status: null, forward_to: '', forward_error: '' }, l.stage === 'new' && l.source !== 'manual' ? { stage: null } : {})
+      Object.assign(l, { assigned_to: null, assigned_at: null }, l.stage === 'new' && l.source !== 'manual' ? { stage: null } : {})
       return json({ ok: true, lead: l, forward: null, odooError: '' })
     }
     assignTo(l, user_id)
-    return json({ ok: true, lead: l, forward: { ok: l.forward_status === 'sent' }, odooError: '' })
-  }
-  if (url.includes('/api/leads/forward')) {
-    const { lead_id } = JSON.parse(init.body || '{}')
-    const l = leads.find((x) => x.id === lead_id)
-    assignTo(l, l.assigned_to)
-    return json({ ok: true, lead: l, forward: { ok: l.forward_status === 'sent' } })
+    return json({ ok: true, lead: l, forward: null, odooError: '' })
   }
   if (url.includes('/api/leads/set_enabled')) {
     const { enabled } = JSON.parse(init.body || '{}')

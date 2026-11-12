@@ -79,7 +79,7 @@ describe('a sales seat', () => {
 })
 
 describe('a salesperson sees only their own leads (2026-10-13)', () => {
-  it.each(['review', 'email_file', 'outlook_link', 'set_project', 'card', 'card_save', 'approve', 'assign', 'forward'])('%s on someone else\'s lead is refused, and nothing is written', async (action) => {
+  it.each(['review', 'email_file', 'outlook_link', 'set_project', 'card', 'card_save', 'approve', 'assign'])('%s on someone else\'s lead is refused, and nothing is written', async (action) => {
     who = { member: false, admin: false, sales: true, approver: true, hidden: true }
     const res = await call(handler, action, { lead_id: LEAD, verdict: 'qualified', project: 'jih' })
     expect(res.statusCode).toBe(404)
@@ -95,9 +95,9 @@ describe('a salesperson sees only their own leads (2026-10-13)', () => {
 })
 
 describe('assigning', () => {
-  it('a salesperson who is not a sales admin may not assign or forward', async () => {
+  it('a salesperson who is not a sales admin may not assign', async () => {
     who = { member: false, admin: false, sales: true, approver: false }
-    for (const action of ['assign', 'forward']) {
+    for (const action of ['assign']) {
       const res = await call(handler, action, { lead_id: LEAD, user_id: LEAD })
       expect(res.statusCode).toBe(403)
       expect(res.body.error).toMatch(/sales admin/)

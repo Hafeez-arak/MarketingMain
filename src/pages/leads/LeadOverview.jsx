@@ -125,7 +125,7 @@ export default function LeadOverview({ lead, workspaceId, team = [], me = '', on
                 {onReassign && <Button size="xs" variant="secondary" onClick={onReassign}>{lead.assigned_to ? 'Reassign' : 'Assign'}</Button>}
               </span>
             </Row>
-            {lead.assigned_at && <Row label="Assigned">{when(lead.assigned_at)}{lead.forward_status === 'failed' ? <span className="text-red-600"> · email not forwarded</span> : lead.forward_status === 'sent' ? ' · email forwarded' : ''}</Row>}
+            {lead.assigned_at && <Row label="Assigned">{when(lead.assigned_at)}</Row>}
             {lead.stage_at && <Row label="Stage since">{when(lead.stage_at)}</Row>}
             {lead.stage === 'lost' && <Row label="Lost">{LOST_REASON_LABEL[lead.lost_reason] || ''}{lead.lost_to ? `, to ${lead.lost_to}` : ''}</Row>}
             <Row label="Odoo">{lead.crm_status ? CRM_LABEL[lead.crm_status] : <span className="text-text-tertiary">Not sent yet</span>}</Row>
