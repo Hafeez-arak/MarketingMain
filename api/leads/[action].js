@@ -36,7 +36,7 @@ import { previewLenses } from '../agent/_investigate.js'
 //                       admin. Only then does the service key touch anything.
 //   a sales person      the same, but with a sales seat in that company
 //                       instead of membership, and only review, email_file,
-//                       approve, assign, forward, outlook_link, set_project
+//                       approve, assign, outlook_link, set_project
 //                       the battle card, adding a lead by hand and moving
 //                       its stage (SALES_ACTIONS), and only on a
 //                       lead they can see (their own, since 2026-10-13: the
@@ -112,7 +112,7 @@ async function isAdmin(token) {
 // A sales person (20261013_sales_seats) is not a member of the company at
 // all: their seat is asked for separately, again with their own token. A
 // seat opens these actions and nothing else.
-const SALES_ACTIONS = new Set(['review', 'email_file', 'approve', 'assign', 'forward', 'outlook_link', 'set_project', 'card', 'card_save', 'lead_add', 'stage', 'attachments', 'attachment_file', 'lead_delete',
+const SALES_ACTIONS = new Set(['review', 'email_file', 'approve', 'assign', 'outlook_link', 'set_project', 'card', 'card_save', 'lead_add', 'stage', 'attachments', 'attachment_file', 'lead_delete',
   // The playbook (2026-11-07): every seat reads it; the edits ask canApprove (a sales admin).
   'playbook', 'playbook_save', 'playbook_review', 'playbook_delete'])
 
@@ -440,12 +440,12 @@ const actions = {
       return { lead: out.lead, crm: out.crm, forward: null }
     }
     // Chosen in the confirmation when no one had it yet (or someone else):
-    // assigned first, which forwards the email, then approved.
+    // assigned first (no email is sent), then approved.
     let forward = null
     if (isUuid(body.assign_to)) {
       const [cur] = await db(`leads?id=eq.${body.lead_id}&workspace_id=eq.${workspaceId}&select=assigned_to`) || []
       if (cur && cur.assigned_to !== body.assign_to) {
-        const a = await assignLead(deps, { workspaceId, leadId: body.lead_id, to: body.assign_to, user, appUrl: baseUrlOf(this.req) })
+        const a = await assignLead(deps, { workspaceId, leadId: body.lead_id, to: body.assign_to, user })
         if (a.error) return fail(a.status, a.error)
         forward = a.forward
       }
@@ -460,26 +460,14 @@ const actions = {
 
   /**
    * Give a lead to a salesperson (or, before approval, to no one: user_id
-   * null). Their email gets the customer's email at once. A sales admin or
-   * the access admin only. See _assign.js.
+   * null). No email is sent; their bell tells them. A sales admin or the
+   * access admin only. See _assign.js.
    */
   async assign({ workspaceId, body, user, token }) {
     if (!(await canApprove(workspaceId, token))) return fail(403, 'Only a sales admin can assign leads.')
-    const out = await assignLead(leadDeps(), { workspaceId, leadId: body.lead_id, to: body.user_id || null, user, appUrl: baseUrlOf(this.req) })
+    const out = await assignLead(leadDeps(), { workspaceId, leadId: body.lead_id, to: body.user_id || null, user })
     if (out.error) return fail(out.status, out.error)
     return { lead: out.lead, forward: out.forward, odooError: out.odooError }
-  },
-
-  /** Send the email to the person it is assigned to again (after a failed forward). */
-  async forward({ workspaceId, body, user, token }) {
-    if (!(await canApprove(workspaceId, token))) return fail(403, 'Only a sales admin can forward leads.')
-    if (!isUuid(body.lead_id)) return fail(400, 'Which lead?')
-    const [cur] = await db(`leads?id=eq.${body.lead_id}&workspace_id=eq.${workspaceId}&select=assigned_to`) || []
-    if (!cur) return fail(404, 'That lead is not in this company.')
-    if (!cur.assigned_to) return fail(400, 'Assign it to someone first.')
-    const out = await assignLead(leadDeps(), { workspaceId, leadId: body.lead_id, to: cur.assigned_to, user, appUrl: baseUrlOf(this.req) })
-    if (out.error) return fail(out.status, out.error)
-    return { lead: out.lead, forward: out.forward }
   },
 
   /** The sales team on Agent settings: who sees the website's leads, who they are in Odoo. */

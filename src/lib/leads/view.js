@@ -312,18 +312,11 @@ export function ownerLabel(lead, team = [], me = '') {
  */
 export const assignable = (team = []) => team.filter((m) => !m.approver)
 
-/** What the person gets when a lead is assigned: the email forwarded, from where. */
-export function forwardWords(lead = {}, person = null) {
+/** What the person gets when a lead is assigned (2026-11-12): a notification, no email. */
+export function assignWords(person = null) {
   const name = person ? shortName(person) : 'They'
-  return lead.source === 'email'
-    ? `${name} gets the customer's email forwarded from ${lead.mailbox || 'the mailbox it came to'} now, attachments and all, and replies from there.`
-    : lead.source === 'manual'
-      ? `${name} gets a notification; there is no email to forward for a lead added by hand.`
-      : `${name} gets this website enquiry by email now, with the customer as the reply address.`
+  return `${name} gets a notification here in the app. No email is sent.`
 }
-
-/** Where the forward of the customer's email to the owner stands. */
-export const FORWARD_LABEL = { sending: 'Forwarding…', sent: 'Email forwarded', failed: 'Email not forwarded' }
 
 /**
  * Which tabs an opened lead has: Lead (contact, where it stands, files),

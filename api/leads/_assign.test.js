@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { assignLead, teamList, teamSave, teamCheckOdoo, FORWARD_STUCK_MS } from './_assign.js'
-import { scopesFor, SEND_SCOPES, forwardNote } from './_mail.js'
+import { assignLead, teamList, teamSave, teamCheckOdoo } from './_assign.js'
+import { scopesFor, SEND_SCOPES } from './_mail.js'
 import { READ_SCOPES } from '../email/_graph.js'
 
-// Assigning a lead (2026-10-13): the owner, the forward of the customer's
-// email from the mailbox it arrived in, and the salesperson in Odoo. Fake
+// Assigning a lead (2026-10-13): the owner and the salesperson in Odoo.
+// Since 2026-11-12 assigning sends no email to the person (the owner's
+// call); the fake Graph stays so a stray send would show in state.sent. Fake
 // PostgREST, fake Microsoft Graph and a fake Odoo. Made-up people only (this
 // repo is public).
 
@@ -14,7 +15,6 @@ const WEB = '33333333-3333-4333-8333-333333333333'
 const ARIF = { id: '44444444-4444-4444-8444-444444444444', email: 'arif@example.com', full_name: 'Arif' }
 const OMAR = { id: '55555555-5555-4555-8555-555555555555', email: 'omar@example.com', full_name: 'Omar Saleh' }
 const HUDA = { id: '66666666-6666-4666-8666-666666666666', email: 'huda@example.com', full_name: 'Huda' }
-const STRANGER = '77777777-7777-4777-8777-777777777777'
 const MB = { id: 'mb-1', workspace_id: WS, email: 'a.box@example.com', label: 'info@example.com', tenant: '', status: 'active', can_send: true, created_at: '2026-10-01' }
 
 function world({ canSend = true, graphRefuses = false, crm = null } = {}) {
@@ -45,10 +45,6 @@ function world({ canSend = true, graphRefuses = false, crm = null } = {}) {
       const row = leadOf(path)
       if (!row || !path.includes(`workspace_id=eq.${WS}`)) return []
       if (method === 'GET') return [{ ...row }]
-      if (path.includes('or=(forward_status.is.null')) {
-        const stuck = new Date(Date.parse(state.now) - FORWARD_STUCK_MS).toISOString()
-        if (row.forward_status === 'sending' && !(row.updated_at < stuck)) return []
-      }
       Object.assign(row, body)
       return [{ ...row }]
     }
@@ -94,87 +90,30 @@ function world({ canSend = true, graphRefuses = false, crm = null } = {}) {
 }
 
 const connected = { workspace_id: WS, url: 'https://erp.example.com', db: 'erp', login: 'agent@example.com', api_key: 'key', odoo_uid: 7 }
-const assign = (w, leadId, to, over = {}) => assignLead(w.deps, { workspaceId: WS, leadId, to, user: ARIF, appUrl: 'https://leads.example.com', ...over })
+const assign = (w, leadId, to, over = {}) => assignLead(w.deps, { workspaceId: WS, leadId, to, user: ARIF, ...over })
 
 describe('assigning an email lead', () => {
   let w
   beforeEach(() => { w = world() })
 
-  it('records the owner and FORWARDS the customer\'s email from the mailbox it came in, to them', async () => {
+  it('records the owner and sends NO email to them (2026-11-12)', async () => {
     const r = await assign(w, L1, OMAR.id)
-    expect(r.forward).toEqual({ ok: true, from: 'info@example.com' })
-    expect(r.lead).toMatchObject({ assigned_to: OMAR.id, assigned_by: ARIF.id, forward_status: 'sent', forward_to: OMAR.email, forward_error: '' })
-    expect(w.state.sent).toHaveLength(1)
-    const [sent] = w.state.sent
-    expect(sent.url).toBe('https://graph.microsoft.com/v1.0/me/messages/graph-id-1/forward')
-    expect(sent.body.toRecipients).toEqual([{ emailAddress: { address: OMAR.email, name: 'Omar Saleh' } }])
-    expect(sent.body.comment).toBe(forwardNote({ toName: 'Omar Saleh', byName: 'Arif', appUrl: 'https://leads.example.com' }))
-    expect(sent.body.comment).toMatch(/^Omar, this enquiry is assigned to you by Arif\./)
-  })
-
-  it('a mailbox that may only read: assigned all the same, the forward marked failed with what to do', async () => {
-    w = world({ canSend: false })
-    const r = await assign(w, L1, OMAR.id)
-    expect(r.forward.ok).toBe(false)
-    expect(r.lead).toMatchObject({ assigned_to: OMAR.id, forward_status: 'failed' })
-    expect(r.lead.forward_error).toMatch(/info@example\.com can only read.*Allow forwarding/)
+    expect(r.forward).toBeNull()
+    expect(r.lead).toMatchObject({ assigned_to: OMAR.id, assigned_by: ARIF.id, stage: 'new' })
     expect(w.state.sent).toEqual([])
   })
 
-  it('Microsoft refusing (permission taken away) says the same, not a raw code', async () => {
-    w = world({ graphRefuses: true })
-    const r = await assign(w, L1, OMAR.id)
-    expect(r.lead.forward_error).toMatch(/can only read/)
-  })
-
-  it('a double click forwards once: the second is refused while the first is sending; a stuck one may retry', async () => {
-    w.state.leads[0].forward_status = 'sending'
-    w.state.leads[0].updated_at = '2026-10-13T08:59:30Z'
-    const r = await assign(w, L1, OMAR.id)
-    expect(r.status).toBe(409)
-    expect(w.state.sent).toEqual([])
-    w.state.leads[0].updated_at = '2026-10-13T08:50:00Z'
-    expect((await assign(w, L1, OMAR.id)).forward.ok).toBe(true)
-    expect(w.state.sent).toHaveLength(1)
-  })
-
-  it('assigning the same person again sends the email again and keeps when it was assigned', async () => {
-    await assign(w, L1, OMAR.id)
-    const first = w.state.leads[0].assigned_at
-    w.state.now = '2026-10-13T10:00:00Z'
-    await assign(w, L1, OMAR.id)
-    expect(w.state.sent).toHaveLength(2)
-    expect(w.state.leads[0].assigned_at).toBe(first)
-  })
-
-  it('only someone on this company\'s sales team', async () => {
-    const r = await assign(w, L1, STRANGER)
-    expect(r).toMatchObject({ status: 400, error: expect.stringMatching(/sales team/) })
-    expect(w.state.leads[0].assigned_to).toBeNull()
-    expect(w.state.sent).toEqual([])
-  })
-
-  it('puts the lead in the Pipeline at New (2026-10-19), and taking it back before anyone worked it takes it out', async () => {
-    const w = world()
-    await assign(w, L1, OMAR.id)
-    expect(w.state.leads[0]).toMatchObject({ stage: 'new', stage_by: ARIF.id, assigned_to: OMAR.id })
-    await assign(w, L1, null)
-    expect(w.state.leads[0]).toMatchObject({ stage: null, assigned_to: null })
-    w.state.leads[0].stage = 'contacted'
-    await assign(w, L1, HUDA.id)
-    expect(w.state.leads[0].stage).toBe('contacted')
-  })
-
-  it('rings the new owner\'s bell and makes the lead unread for them; not again for the same person', async () => {
-    const w = world()
-    await assign(w, L1, OMAR.id)
-    expect(w.state.notes).toEqual([{
-      user_id: OMAR.id, workspace_id: WS, kind: 'lead', title: 'Arif gave you a lead: Example Dev',
-      body: 'Downlights for a villa', link: `/leads?view=pipeline&lead=${L1}`,
-    }])
-    expect(w.state.unread).toEqual([`lead_reads?lead_id=eq.${L1}&user_id=eq.${OMAR.id}`])
+  it('tells them on their bell instead', async () => {
     await assign(w, L1, OMAR.id)
     expect(w.state.notes).toHaveLength(1)
+    expect(w.state.notes[0]).toMatchObject({ user_id: OMAR.id, kind: 'lead' })
+  })
+
+  it('assigning again to the same person sends nothing either', async () => {
+    await assign(w, L1, OMAR.id)
+    const r = await assign(w, L1, OMAR.id)
+    expect(r.lead.assigned_to).toBe(OMAR.id)
+    expect(w.state.sent).toEqual([])
   })
 
   it('never to a sales admin: they hand leads out (the owner, 2026-10-19)', async () => {
@@ -191,25 +130,12 @@ describe('assigning an email lead', () => {
 })
 
 describe('assigning a website enquiry', () => {
-  it('has no email to forward: it is written out and sent from the first mailbox that may send, the customer as Reply-To', async () => {
+  it('sends no email either', async () => {
     const w = world()
     const r = await assign(w, WEB, OMAR.id)
-    expect(r.forward).toEqual({ ok: true, from: 'info@example.com' })
-    const [sent] = w.state.sent
-    expect(sent.url).toBe('https://graph.microsoft.com/v1.0/me/sendMail')
-    expect(sent.body.message.subject).toBe('Website enquiry: Garden lights')
-    expect(sent.body.message.replyTo).toEqual([{ emailAddress: { address: 'nora@client.example', name: 'Nora' } }])
-    expect(sent.body.message.body.content).toContain('+966 55 000 2222')
-    // Their words are text, never markup.
-    expect(sent.body.message.body.content).toContain('&lt;b&gt;12&lt;/b&gt;')
-    expect(sent.body.saveToSentItems).toBe(true)
-  })
-
-  it('no mailbox may send yet: assigned, forward failed, says how', async () => {
-    const w = world({ canSend: false })
-    const r = await assign(w, WEB, OMAR.id)
-    expect(r.lead).toMatchObject({ assigned_to: OMAR.id, forward_status: 'failed' })
-    expect(r.lead.forward_error).toMatch(/No connected mailbox may send yet/)
+    expect(r.forward).toBeNull()
+    expect(r.lead).toMatchObject({ assigned_to: OMAR.id })
+    expect(w.state.sent).toEqual([])
   })
 })
 
@@ -218,8 +144,8 @@ describe('taking a lead off everyone', () => {
     const w = world()
     await assign(w, L1, OMAR.id)
     const r = await assign(w, L1, null)
-    expect(r.lead).toMatchObject({ assigned_to: null, forward_status: null, forward_to: '' })
-    expect(w.state.sent).toHaveLength(1)
+    expect(r.lead).toMatchObject({ assigned_to: null })
+    expect(w.state.sent).toEqual([])
   })
 
   it('an approved lead always has someone: refused', async () => {
@@ -232,13 +158,13 @@ describe('taking a lead off everyone', () => {
 })
 
 describe('reassigning a lead already in Odoo', () => {
-  it('changes the salesperson in Odoo too, and forwards to the new person', async () => {
+  it('changes the salesperson in Odoo too, and emails no one', async () => {
     const w = world({ crm: connected })
     Object.assign(w.state.leads[0], { assigned_to: OMAR.id, approved_at: '2026-10-13T08:30:00Z', crm_status: 'sent', crm_id: '140' })
     const r = await assign(w, L1, HUDA.id)
     expect(r.odooError).toBe('')
     expect(w.state.odoo.writes).toEqual([[[140], { user_id: 23 }]])
-    expect(w.state.sent[0].body.toRecipients[0].emailAddress.address).toBe(HUDA.email)
+    expect(w.state.sent).toEqual([])
     expect(w.state.seats.find((s) => s.user_id === HUDA.id).odoo_user_id).toBe(23)
   })
 

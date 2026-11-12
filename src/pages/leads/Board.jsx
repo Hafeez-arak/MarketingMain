@@ -5,7 +5,7 @@ import { fetchLeadsPage, leadsApi } from '../../lib/leads/client'
 import {
   SHOW_OPTIONS, EMPTY_FILTERS, activeFilterCount, effectiveVerdict, PAGE_SIZE, pageLabel, pageCount, when,
   SENDER_LABEL, PROJECT_LABEL, REQUEST_LABEL, FOLDER_LABEL, PHILIPS_LABEL, CRM_LABEL, channelLabel, brandOf, phonesOf, projectOf,
-  ownerLabel, shortName, FORWARD_LABEL, leadTabs, forwardWords, assignable,
+  ownerLabel, shortName, leadTabs, assignWords, assignable,
 } from '../../lib/leads/view'
 import { VerdictTag, LeadDetail, LeadTabs, LeadName, MarkUnread } from './parts'
 import { useLeadReads } from './useLeadReads'
@@ -88,13 +88,9 @@ function CrmCell({ lead, canApprove, onAsk }) {
   return dash
 }
 
-/**
- * Who has the lead. A sales admin clicks it to assign or reassign; a forward
- * that failed shows here in red, since the person has not got the email.
- */
+/** Who has the lead. A sales admin clicks it to assign or reassign. */
 function OwnerCell({ lead, team, me, canApprove, onAssign }) {
   const label = ownerLabel(lead, team, me)
-  const failed = lead.forward_status === 'failed'
   const tone = !lead.assigned_to ? 'text-text-tertiary' : label === 'You' ? 'text-text font-semibold' : 'text-text'
   if (!canApprove) {
     return <span className={`text-xs ${tone}`}>{label}</span>
@@ -105,36 +101,18 @@ function OwnerCell({ lead, team, me, canApprove, onAssign }) {
         ? <button type="button" onClick={() => onAssign(lead)} title="Assign to someone else"
             className={`text-xs hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400 ${tone}`}>{label}</button>
         : <Button size="xs" variant="secondary" onClick={() => onAssign(lead)}>Assign</Button>}
-      {failed && <span className="block text-[10px] font-semibold text-red-600">{FORWARD_LABEL.failed}</span>}
     </span>
   )
 }
 
-/**
- * Under an opened row: who has it, since when, and whether the customer's
- * email reached them. A failed forward says why and offers to try again.
- */
-function OwnerLine({ lead, team, me, canApprove, onForward }) {
-  const [busy, setBusy] = useState(false)
+/** Under an opened row: who has it, and since when. */
+function OwnerLine({ lead, team, me }) {
   if (!lead.assigned_to) return null
   const person = team.find((m) => m.user_id === lead.assigned_to)
   const who = lead.assigned_to === me ? 'you' : person ? (person.full_name || person.email) : 'someone who has left the team'
-  async function again() {
-    setBusy(true)
-    await onForward(lead)
-    setBusy(false)
-  }
   return (
     <div className="px-4 pt-3 md:pl-[8.25rem] text-[11px] text-text-secondary flex flex-wrap items-center gap-x-2 gap-y-1">
       <span>Assigned to <span className="font-semibold text-text">{who}</span>{lead.assigned_at ? ` · ${when(lead.assigned_at)}` : ''}</span>
-      {lead.forward_status === 'sent' && <span className="text-sage-700">· {FORWARD_LABEL.sent}{lead.forwarded_at ? ` ${when(lead.forwarded_at)}` : ''}</span>}
-      {lead.forward_status === 'sending' && <span>· {FORWARD_LABEL.sending}</span>}
-      {lead.forward_status === 'failed' && (
-        <>
-          <span className="text-red-600 font-semibold">· {FORWARD_LABEL.failed}: {lead.forward_error}</span>
-          {canApprove && <Button size="xs" variant="secondary" onClick={again} disabled={busy}>{busy ? <Spinner size="sm" /> : null}Try again</Button>}
-        </>
-      )}
     </div>
   )
 }
@@ -185,7 +163,7 @@ function CardWaiting({ lead, canApprove, onAssign }) {
   )
 }
 
-function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailboxes, canApprove, onAsk, team, me, onAssign, onForward, onChange, onDeleted, unread, onMarkUnread }) {
+function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailboxes, canApprove, onAsk, team, me, onAssign, onChange, onDeleted, unread, onMarkUnread }) {
   const v = effectiveVerdict(lead)
   const v2 = (lead.criteria_version || 1) >= 2
   const junk = lead.folder === 'junk'
@@ -244,7 +222,7 @@ function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailbo
       </div>
       {open && (
         <div className="border-t border-border bg-white">
-          <OwnerLine lead={lead} team={team} me={me} canApprove={canApprove} onForward={onForward} />
+          <OwnerLine lead={lead} team={team} me={me} />
           <StageBar lead={lead} workspaceId={workspaceId} onChange={onChange} />
           {hasTabs ? (
             <>
@@ -335,7 +313,7 @@ function ApproveDialog({ lead, team, busy, error, onCancel, onConfirm, canTest =
               <option value="">Choose who works it…</option>
               <PersonOptions team={team} />
             </Select>
-            {changing && <p className="text-xs text-text-secondary leading-relaxed">{forwardWords(lead, person)}</p>}
+            {changing && <p className="text-xs text-text-secondary leading-relaxed">{assignWords(person)}</p>}
           </>
         )}
         <p className="text-xs text-text-secondary leading-relaxed">
@@ -427,8 +405,7 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
     setAsking(null)
   }
 
-  // Assign → confirm → the email is forwarded. A failed forward stays on the
-  // row (with Try again), as an Odoo refusal does.
+  // Assign → confirm. No email is sent (2026-11-12); the person's bell tells them.
   const [assigning, setAssigning] = useState(null)
   const [assignState, setAssignState] = useState({ busy: false, error: '' })
   async function assign(userId) {
@@ -439,12 +416,6 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
     setActionError(r.odooError ? `Assigned here, but the salesperson in Odoo was not changed: ${r.odooError}` : '')
     setAssignState({ busy: false, error: '' })
     setAssigning(null)
-  }
-  async function forwardAgain(lead) {
-    const r = await leadsApi('forward', workspaceId, { lead_id: lead.id })
-    if (r.error) return setActionError(r.error)
-    setActionError('')
-    replaceRow(lead.id, r.lead)
   }
 
   const set = (k) => (e) => { setFilters((f) => ({ ...f, [k]: e.target.value })); setPage(0); setOpen(null) }
@@ -530,7 +501,7 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
               onToggle={() => { if (open !== l.id) reads.mark(l, true); setOpen(open === l.id ? null : l.id) }}
               onMarkUnread={() => { reads.mark(l, false); setOpen(null) }}
               onSetProject={setProject} workspaceId={workspaceId} mailboxes={mailboxes} canApprove={canApprove} onAsk={(lead) => { setApproving({ busy: false, error: '' }); setAsking(lead) }}
-              team={team} me={me} onAssign={(lead) => { setAssignState({ busy: false, error: '' }); setAssigning(lead) }} onForward={forwardAgain}
+              team={team} me={me} onAssign={(lead) => { setAssignState({ busy: false, error: '' }); setAssigning(lead) }}
               onChange={(updated) => replaceRow(updated.id, updated)}
               onDeleted={(gone) => { setOpen(null); setList((st) => ({ ...st, rows: st.rows.filter((x) => x.id !== gone.id), total: Math.max(0, st.total - 1) })) }} />
           ))}
